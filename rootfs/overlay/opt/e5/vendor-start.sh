@@ -64,7 +64,13 @@ fi
 
 echo "stage=mounts"
 for m in proc sys tmp data/vendor mnt system/bin linkerconfig; do mkdir -p "$A/$m"; done
-ln -sfn /apex/com.android.runtime/bin/linker64 "$A/system/bin/linker64"
+elf_class=$(od -An -tu1 -j4 -N1 "$A/vendor/bin/modem_control" | tr -d ' \n')
+case "$elf_class" in
+  1) android_lib=lib; android_linker=linker ;;
+  2) android_lib=lib64; android_linker=linker64 ;;
+  *) echo "invalid modem_control ELF class" >&2; exit 4 ;;
+esac
+ln -sfn "/apex/com.android.runtime/bin/$android_linker" "$A/system/bin/$android_linker"
 : > "$A/linkerconfig/ld.config.txt"
 mountpoint -q "$A/proc" || mount -t proc proc "$A/proc"
 mountpoint -q "$A/sys" || mount -t sysfs sysfs "$A/sys"
@@ -96,5 +102,5 @@ if [ -x /opt/e5/e5-modem-coldboot ]; then
     echo "stage=cold-modem-start verified NR/CH-only loader; live PM retained"
 fi
 unset LD_PRELOAD
-export LD_LIBRARY_PATH=/apex/com.android.runtime/lib64/bionic:/system/lib64:/vendor/lib64
+export LD_LIBRARY_PATH=/apex/com.android.runtime/$android_lib/bionic:/system/$android_lib:/vendor/$android_lib
 exec chroot "$A" "$modem_exe"

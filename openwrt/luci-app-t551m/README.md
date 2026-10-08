@@ -1,0 +1,50 @@
+# T551M LuCI 看板
+
+移植自本地 `mu300-linux-clean-tf-7.2` 的 `openwrt/luci-app-mu300`，参考提交
+`0d936952f8b090a053cbfce9c61ab025befbd81e`，保留原 MIT 许可声明。
+内部 JS 路径、RPC 对象 `mu300dash`、翻译名仍保留 `mu300`，避免破坏引用。
+软件包名为 `luci-app-t551m`。
+
+## T551M 接入
+
+- 默认主页为看板，保留中英土三语、手机布局、深色模式、流量统计、AT 终端、网络锁定和短信页面。
+- 普通 AT 通过 `/opt/e5/e5-at` 使用 nr2；看板使用 nr6/nr7 双通道池。三个常驻进程分别排队、限速并明确指定当前 SIM，慢查询不会占住另一个通道。
+- AT 入口使用静态 arm64 C 客户端连接常驻服务，每通道最短发送间隔 100ms；完整响应后才返回，避免每次启动 Python 的开销。
+- ModemManager 继续处理拨号、通知和原有双卡短信事务。`AT+E5SMS` 是 MM 的虚拟命令，不能直接发给基带。
+- 流量设备使用 `sipa_eth0`，Wi-Fi 使用 `wlan0`，LAN 使用 `br-lan`。
+- T551M `W24.26.4_P9` 的 LTE 工程字段不同，eNB、小区号、TAC 已与 `CEREG` 交叉核对。
+- 射频重启由 ModemManager disable/enable 完成；双系统选择调用已有 `e5-next-boot`。
+- 短信由 `t551m-sms` 转接现有 E5 双卡收件箱，支持按卡筛选、显示来源卡、选择发送卡；默认删除只隐藏看板记录，明确的 SIM 删除才调用原来的身份核验逻辑。
+- 独立转发页保留原双卡转发配置；删除旧 E5 短信页和 MU300 的第二套转发程序。
+- 旧状态总览不再显示重复菜单，旧链接跳转新看板。保留信息屏、蓝牙和系统诊断等独立功能。
+- USB 页显示当前 NCM 模式；未适配的主机供电、USB 模式切换操作禁用。
+
+## 安装与主题
+
+`devices/t551m/configure-rootfs.py` 自动调用 `devices/t551m/ui.py`，将插件、
+AT 服务和固定哈希的 Aurora 安装包放入离线根目录。首次启动的
+`98-t551m-ui` 安装 Aurora 1.4.0、配置插件 1.2.5 和翻译，替换 Argon，启用服务。
+`ui-compat.py` 修复当前 LuCI 登录页与 Aurora 的 String.format 初始化兼容问题。
+构建 AT 客户端需要 `aarch64-linux-gnu-gcc` 和静态 libc，Windows 默认使用 WSL `Ubuntu-22.04`。
+
+已有设备热更新可用 `python devices/t551m/ui.py --archive OUTPUT.tar.gz` 生成文件包。
+部署时保留已有 `/etc/config/unisoc_modem` 设置，然后执行 `98-t551m-ui`。
+升级正在运行的 AT 服务应安排整机重启；不要为了热更新反复关闭、打开 SIPC 通道。
+单独编译这个 LuCI 包仍需要固件提供 `devices/t551m` 的平台服务及原有 E5 短信后端。
+
+## 已验证与边界
+
+看板与屏幕使用相同的国内运营商别名映射，例如 `CHN-UNICOM` 在中文界面显示“中国联通”，
+英文界面显示“China Unicom”；移动、电信、广电同样处理，其他运营商名称保持原样。
+
+实机检查包括全部菜单 HTTP/JS、390px 窄屏、深色模式、4G 小区/邻区、流量状态、
+短信列表、AT 只读命令及并发响应。短信发送、删除、网络锁定写入没有为了测试而实际执行。
+当前环境只有 LTE；5G 工程字段沿用参考实现，尚未在 T551M 的 5G 驻网下实测。
+
+Linux 离线回归：
+
+```sh
+python3 devices/t551m/test_at.py
+python3 devices/t551m/test_at_client.py
+python3 devices/t551m/test_ui.py
+```

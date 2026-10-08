@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Stage the T551M dashboard and checksum-pinned Aurora packages into a root."""
+import argparse
+import hashlib
+import os
+import runpy
+from pathlib import Path
+import shutil
+import tarfile
+import tempfile
+import urllib.request
+
+TOP = Path(__file__).resolve().parents[2]
+PACKAGES = {
+    'luci-theme-aurora-1.4.0-r20260920.apk':
+        ('luci-theme-aurora', '1.4.0', '05f9015e0a4e2859f6a153f69e472f2984481490d4ce6db19b8a41bba7264f1e'),
+    'luci-app-aurora-config-1.2.5-r20260920.apk':
+        ('luci-app-aurora-config', '1.2.5', 'e290ef9465615d92b5d8baaeacb68a0b5f59edcc647895fa691fc2a3c81b6669'),
+    'luci-i18n-aurora-config-zh-cn-26.262.58276.362887a.apk':
+        ('luci-app-aurora-config', '1.2.5', '65de0bfda210c1e13df54749627342aea555fa9a01b363f4263ddba7d257b46b'),
+    'luci-i18n-aurora-config-tr-26.262.58276.362887a.apk':
+        ('luci-app-aurora-config', '1.2.5', '2d11e934ec9d3efd4af4b6a8adc3ed10d2e9ea8c1b417cf55fe153ad1df66a3a'),
+}
+
+
+def stage(root):
+    # Also stage into archive-only roots; the defaults hook patches package
+    # files after installation when they are not present in the staging root.
+    for source, destination in [('network-startup.py', 'opt/e5/t551m-network-startup'),
+                                ('wifi-address-defaults', 'etc/uci-defaults/99-t551m-wifi-address'),
+                                ('network-startup-defaults', 'etc/uci-defaults/98-t551m-network-startup')]:
+        target = root / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(Path(__file__).with_name(source).read_bytes().replace(b'\r\n', b'\n'))
+        target.chmod(0o755)
+    runpy.run_path(str(Path(__file__).with_name('network-startup.py')))['patch_root'](root)
+    plugin = TOP / 'openwrt/luci-app-t551m'
+    for srcdir, dest in [('root', root), ('htdocs', root / 'www'),
+                         ('lmo', root / 'usr/lib/lua/luci/i18n')]:
+        for src in (plugin / srcdir).rglob('*'):
+            if not src.is_file() or '__pycache__' in src.parts:
+                continue
+            target = dest / src.relative_to(plugin / srcdir)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Preserve user settings and traffic history on subsequent builds.
+            if srcdir == 'root' and 'etc/config/' in target.as_posix() and target.exists():
+                continue
+            target.write_bytes(src.read_bytes().replace(b'\r\n', b'\n') if srcdir != 'lmo' else src.read_bytes())
+            executable = srcdir == 'root' and any(part in src.parts for part in ('init.d', 'hotplug.d', 'libexec'))
+            target.chmod(0o755 if executable else 0o644)
+    cache = TOP / 'work/t551m/aurora'
+    packages = root / 'opt/e5/ui-packages'
+    packages.mkdir(parents=True, exist_ok=True)
+    cache.mkdir(parents=True, exist_ok=True)
+    checksums = []
+    for name, (repo, version, digest) in PACKAGES.items():
+        path = cache / name
+        if not path.exists():
+            data = urllib.request.urlopen(f'https://github.com/eamonxg/{repo}/releases/download/v{version}/{name}', timeout=60).read()
+            if hashlib.sha256(data).hexdigest() != digest:
+                raise ValueError('Downloaded Aurora package hash mismatch: ' + name)
+            path.write_bytes(data)
+        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise ValueError('Cached Aurora package hash mismatch: ' + name)
+        shutil.copyfile(path, packages / name)
+        (packages / name).chmod(0o644)
+        checksums.append(digest + '  ' + name)
+    (packages / 'SHA256SUMS').write_bytes(('\n'.join(checksums) + '\n').encode())
+    target = root / 'etc/uci-defaults/98-t551m-ui'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(__file__).with_name('ui-defaults'), target)
+    target.chmod(0o755)
+    target = root / 'opt/e5/t551m-ui-compat'
+    shutil.copyfile(Path(__file__).with_name('ui-compat.py'), target)
+    target.chmod(0o755)
+    for source, destination in [
+        (Path(__file__).with_name('atd.py'), 'opt/e5/t551m-atd'),
+        (Path(__file__).with_name('at-service'), 'etc/init.d/t551m-at'),
+        (Path(__file__).with_name('ui-cleanup.py'), 'opt/e5/t551m-ui-cleanup'),
+        (TOP / 'rootfs/overlay/opt/e5/e5-at', 'opt/e5/e5-at'),
+        (TOP / 'openwrt/overlay/usr/libexec/e5-volume', 'usr/libexec/e5-volume'),
+        (TOP / 'openwrt/overlay/etc/init.d/e5-pulseaudio', 'etc/init.d/e5-pulseaudio'),
+    ]:
+        target = root / destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
+        target.chmod(0o755)
+    client = runpy.run_path(str(Path(__file__).with_name('build-at-client.py')))['build']()
+    shutil.copyfile(client, root / 'opt/e5/t551m-at')
+    (root / 'opt/e5/t551m-at').chmod(0o755)
+    runpy.run_path(str(Path(__file__).with_name('ui-cleanup.py')))['cleanup'](root)
+    runpy.run_path(str(Path(__file__).with_name('infoscreen') / 'stage.py'))['stage'](root)
+    # S10boot runs uci-defaults after rcS has expanded its startup file list.
+    # Pre-create these links in offline Linux roots for the very first boot.
+    if os.name != 'nt':
+        for name, priority in [('t551m-at', '81'), ('unisoc-modem-ui', '95'), ('unisoc-traffic', '96')]:
+            link = root / f'etc/rc.d/S{priority}{name}'
+            link.parent.mkdir(parents=True, exist_ok=True)
+            if not link.is_symlink():
+                link.symlink_to('../init.d/' + name)
+        for name, priority in [('t551m-at', '09'), ('unisoc-traffic', '01')]:
+            link = root / f'etc/rc.d/K{priority}{name}'
+            if not link.is_symlink():
+                link.symlink_to('../init.d/' + name)
+
+
+if __name__ == '__main__':
+    ap = argparse.ArgumentParser(description=__doc__)
+    group = ap.add_mutually_exclusive_group(required=True)
+    group.add_argument('--root', type=Path)
+    group.add_argument('--archive', type=Path)
+    args = ap.parse_args()
+    if args.root:
+        stage(args.root)
+    else:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage(root)
+            with tarfile.open(args.archive, 'w:gz') as archive:
+                for path in sorted(root.rglob('*')):
+                    if path.is_symlink():
+                        archive.add(path, arcname=str(path.relative_to(root)), recursive=False)
+                    elif path.is_file():
+                        info = archive.gettarinfo(str(path), str(path.relative_to(root)))
+                        info.mode = 0o755 if any(p in path.parts for p in ('init.d', 'hotplug.d', 'libexec', 'uci-defaults')) or path.name in ('t551m-at', 't551m-atd', 'e5-at', 't551m-ui-compat', 't551m-network-startup') else 0o644
+                        info.uid = info.gid = 0
+                        info.uname = info.gname = 'root'
+                        with path.open('rb') as stream:
+                            archive.addfile(info, stream)

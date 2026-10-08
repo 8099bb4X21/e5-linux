@@ -1,0 +1,8 @@
+#!/bin/sh
+# Let the platform owner sequence its power state instead of MU300's SFUN dance.
+set -eu
+iface=$(uci -q get unisoc_modem.main.data_interface) || iface=wan
+ifdown "$iface"
+mmcli -m any --timeout=30 --disable
+mmcli -m any --timeout=30 --enable
+ifup "$iface"

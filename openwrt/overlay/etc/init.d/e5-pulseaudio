@@ -22,3 +22,18 @@ start_service() {
 	procd_set_param stderr 1
 	procd_close_instance
 }
+
+service_started() {
+	# e5-audio applies hardware gain before this server exists. Restore the
+	# software level after its native socket and speaker sink become ready.
+	(
+		for attempt in $(seq 1 30); do
+			if PULSE_SERVER=unix:/var/run/pulse/native pactl list short sinks 2>/dev/null | grep -q '[[:space:]]speaker[[:space:]]'; then
+				/usr/libexec/e5-volume apply
+				exit $?
+			fi
+			sleep 1
+		done
+		logger -t e5-volume 'PulseAudio speaker unavailable; volume will be applied before playback'
+	) </dev/null >/dev/null 2>&1 &
+}

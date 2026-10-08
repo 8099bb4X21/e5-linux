@@ -246,18 +246,9 @@ early_card_firmware() {
     return 1
 }
 
-early_device_firmware() {
-    local n=0 dev= emmc=
-    [ -f /lib/firmware/wcnmodem.bin ] && return 0
-    while [ -z "$dev" ] && [ "$n" -lt 10 ]; do
-        for u in /sys/class/block/mmcblk*p*/uevent; do
-            grep -qx PARTNAME=userdata "$u" 2>/dev/null && dev=/dev/$(basename "$(dirname "$u")")
-        done
-        [ -n "$dev" ] || { n=$((n + 1)); mdev -s; sleep 1; }
-    done
-    emmc=${dev#/dev/}; emmc=${emmc%%p*}
-    early_card_firmware "$emmc" && return 0
-    [ -n "$dev" ] || { log "stage=device-firmware-early no userdata or SD firmware"; return 0; }
+early_userdata_firmware() {
+    local dev=$1 loaded=1
+    [ -n "$dev" ] || return 1
     [ -b "$dev" ] || mdev -s
     f2fs_last_cp "$dev"
     mkdir -p /data /tmp/devfiles
@@ -265,8 +256,10 @@ early_device_firmware() {
     # userdata -- in charger mode nothing else mounts it)
     if mount -t f2fs -o ro,norecovery "$dev" /data 2>/run/early-data.err; then
         if [ -f /data/e5linux/device-files.tar ] &&
-           tar -xf /data/e5linux/device-files.tar -C /tmp/devfiles 2>/dev/null; then
-            mkdir -p /lib/firmware && cp -a /tmp/devfiles/lib/firmware/. /lib/firmware/
+           tar -xf /data/e5linux/device-files.tar -C /tmp/devfiles 2>/dev/null &&
+           mkdir -p /lib/firmware && cp -a /tmp/devfiles/lib/firmware/. /lib/firmware/ &&
+           [ -s /lib/firmware/wcnmodem.bin ]; then
+            loaded=0
             log "stage=device-firmware-early firmware=$(ls /lib/firmware | wc -l)"
         else
             log "stage=device-firmware-early none on userdata"
@@ -276,6 +269,59 @@ early_device_firmware() {
         log "stage=device-firmware-early mount-fail $(cat /run/early-data.err)"
     fi
     rm -rf /tmp/devfiles
+    return "$loaded"
+}
+
+early_device_firmware() {
+    local n=0 dev= emmc= image=
+    [ -f /lib/firmware/wcnmodem.bin ] && return 0
+    while [ -z "$dev" ] && [ "$n" -lt 10 ]; do
+        for u in /sys/class/block/mmcblk*p*/uevent; do
+            grep -qx PARTNAME=userdata "$u" 2>/dev/null && dev=/dev/$(basename "$(dirname "$u")")
+        done
+        [ -n "$dev" ] || { n=$((n + 1)); mdev -s; sleep 1; }
+    done
+    emmc=${dev#/dev/}; emmc=${emmc%%p*}
+    # An explicit image already bypasses SD root selection below. Read its
+    # userdata firmware first instead of spending ten seconds searching a card.
+    # Ordinary/TF boots keep SD-first discovery, including the full card wait.
+    # A missing or damaged userdata bundle still falls back to card firmware.
+    image=$(echo " $(cat /proc/cmdline)" | sed -n 's/.* e5\.openwrt=\([A-Za-z0-9._-]*\).*/\1/p')
+    if [ -n "$image" ]; then
+        log "stage=device-firmware-source userdata-first image=$image"
+        early_userdata_firmware "$dev" && return 0
+        early_card_firmware "$emmc" && return 0
+    else
+        early_card_firmware "$emmc" && return 0
+        early_userdata_firmware "$dev" && return 0
+    fi
+    log "stage=device-firmware-early no usable userdata or SD firmware"
+    return 0
+}
+
+# WCN's module probe schedules its firmware download on a delayed workqueue.
+# switch_root deletes the old initramfs: a request in that interval sees ENOENT
+# even though both roots have the firmware. The driver then permanently selects
+# an unavailable Android partition fallback. A registered PHY means the initial
+# GNSS/BT/Wi-Fi downloads finished; do not destroy their source before that.
+early_wcn_ready() {
+    local n=0 phy
+    [ -d /sys/module/wcn_bsp ] && [ -d /sys/module/sprd_wlan_combo ] || return 0
+    log "stage=wcn-handoff-wait"
+    while :; do
+        for phy in /sys/class/ieee80211/*; do
+            if [ -d "$phy" ]; then
+                log "stage=wcn-handoff-ready waited=${n}s"
+                return 0
+            fi
+        done
+        # A genuinely failed radio must not prevent the management system boot.
+        [ "$n" -ge 15 ] && break
+        sleep 1
+        n=$((n + 1))
+    done
+    log "stage=wcn-handoff-timeout waited=${n}s"
+    return 0
 }
 
 loaded=0
@@ -823,6 +869,7 @@ if [ -n "$rootdir" ]; then
         [ -e "$bl" ] && chmod 0666 "$bl" 2>/dev/null && log "stage=backlight-perm $bl"
     done
     fi
+    early_wcn_ready
     log "stage=switch-root root=$rootdir init=$init os=$(sed -n 's/^PRETTY_NAME=//p' /newroot/etc/os-release)"
     persist
     # Stop the persist loop and the safety timer by pid before handing over: the

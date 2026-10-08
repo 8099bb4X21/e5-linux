@@ -2,6 +2,10 @@
 
 > 中文文档：[`README.zh-CN.md`](README.zh-CN.md)
 
+T551M OpenWrt bring-up has a separate [device profile](devices/t551m/README.md),
+including its charger, GPIO backlight, 32-bit vendor runtime and isolated NV storage.
+Use that profile's build and trial procedure for T551M.
+
 Debian 13/Phosh and OpenWrt 25.12.5 on the Rongyue E5 5G handset/hotspot
 (`ums9158_1h10`, Unisoc UMS9621, Android 13). Linux uses `boot_b`; Android
 stays on slot A. SD multiboot is the recommended installation layout. The
