@@ -98,6 +98,34 @@ class CalibrationValidation(unittest.TestCase):
             nv.reconcile_pair(primary, backup, (primary, backup))
         self.assertEqual(backup.read_bytes(), original[1])
 
+    def test_external_updates_keep_valid_isolated_contents(self):
+        for name in ('nr_fixnv1_a', 'nr_fixnv2_a', 'nr_runtimenv1', 'nr_runtimenv2'):
+            path = self.image(b'\x01\x00', 0xfffe, name)
+            before = path.read_bytes()
+            self.assertTrue(nv.keep_working_copy(name, path, changed=True, refresh=False))
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_external_change_cannot_hide_invalid_or_missing_working_copy(self):
+        path = self.image(b'\x01\x00', 0, 'nr_fixnv1_a')
+        before = path.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, 'checksum failed'):
+            nv.keep_working_copy(path.name, path, True, False)
+        self.assertEqual(path.read_bytes(), before)
+        path.unlink()
+        with self.assertRaisesRegex(RuntimeError, 'explicitly refresh'):
+            nv.keep_working_copy(path.name, path, True, False)
+        self.assertFalse(path.exists())
+
+    def test_calibration_without_checksum_still_requires_review(self):
+        path = self.image(b'\x01\x00', 0xfffe, 'calinv')
+        with self.assertRaisesRegex(RuntimeError, 'explicitly refresh'):
+            nv.keep_working_copy(path.name, path, True, False)
+
+    def test_explicit_refresh_still_imports_and_unchanged_source_keeps_old_flow(self):
+        path = self.image(b'\x01\x00', 0xfffe, 'nr_runtimenv1')
+        self.assertFalse(nv.keep_working_copy(path.name, path, True, True))
+        self.assertFalse(nv.keep_working_copy(path.name, path, False, False))
+
 
 if __name__ == '__main__':
     unittest.main()

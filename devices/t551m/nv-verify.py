@@ -7,7 +7,9 @@ import stat
 
 nv = runpy.run_path('/opt/e5/t551m-nv-prepare')
 store = nv['STORE']
-expected = json.loads((store / 'factory-sha256.json').read_text())
+if not nv['READY'].exists():
+    raise SystemExit('NV preparation did not complete')
+expected = json.loads(nv['BOOT_SOURCE'].read_text())
 checked = set()
 for entry in Path('/sys/class/block').glob('mmcblk0p*/uevent'):
     props = dict(line.split('=', 1) for line in entry.read_text().splitlines() if '=' in line)
@@ -27,7 +29,7 @@ for entry in Path('/sys/class/block').glob('mmcblk0p*/uevent'):
     if name.startswith(('nr_fixnv', 'nr_runtimenv')):
         nv['validate_nv'](store / name)
     checked.add(name)
-    print(name + ': original unchanged and read-only; working device verified')
+    print(name + ': original unchanged since preparation and read-only; working device verified')
 if checked != set(nv['NAMES']):
     raise SystemExit('Incomplete NV verification')
 print('PASS: all nine factory partitions and all working devices verified')

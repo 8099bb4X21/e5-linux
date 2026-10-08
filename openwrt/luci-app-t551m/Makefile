@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-t551m
 PKG_VERSION:=1.1.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=MU300 Linux contributors
 PKGARCH:=all
@@ -52,6 +52,7 @@ define Package/luci-app-t551m/postinst
 	rm -f /tmp/luci-indexcache /tmp/luci-modulecache/* 2>/dev/null
 	uci -q get luci.languages.tr >/dev/null || uci set luci.languages.tr='Türkçe'
 	uci commit luci
+	[ ! -f /opt/e5/t551m-network-startup ] || python3 /opt/e5/t551m-network-startup --root /
 	/etc/init.d/rpcd restart 2>/dev/null || true
 	/etc/init.d/unisoc-modem-ui enable 2>/dev/null || true
 	/etc/init.d/unisoc-modem-ui start 2>/dev/null || true

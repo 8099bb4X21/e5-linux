@@ -206,20 +206,14 @@ m_at_history() {
 }
 
 m_lock_set() {
-    local kind val q=0
+    local kind val
     kind=$(inp '@.kind')
     val=$(inp '@.val')
     case "$kind" in
         mode|endc|lte|nr|cell|auto_apply) ;;
         *) printf '{"ok":0,"error":"unknown lock kind"}\n'; return ;;
     esac
-    # applying restarts the protocol stack (SFUN 5 -> 4): half a minute without
-    # cellular - exactly the thing that must never run inside a request
-    # queued=1 tells the page another apply is still running (SFUN restart);
-    # the new one waits for the modem and the page can say so
-    [ -d /run/unisoc-modem-lock-apply ] && q=1
-    setsid "$DASH/lock" apply "$kind" "$val" >/dev/null 2>&1 &
-    printf '{"ok":1,"started":1,"queued":%d,"op":"lock %s=%s"}\n' "$q" "$kind" "$val"
+    "$DASH/lock" start "$kind" "$val"
 }
 
 # --------------------------------------------------------------------- SMS
@@ -255,6 +249,7 @@ do_list() {
 	"at_history": { },
 	"lock_get": { "fresh": "String" },
 	"lock_set": { "kind": "String", "val": "String" },
+	"lock_status": { "id": "String" },
 	"sms_list": { "page": "String" },
 	"sms_show": { "id": "String" },
 	"sms_send": { "num": "String", "text": "String", "card": "String" },
@@ -310,6 +305,7 @@ call)
             fi
             ;;
         lock_set)   run_m lock_set   'm_lock_set' ;;
+        lock_status) "$DASH/lock" status "$(inp '@.id')" ;;
         sms_list)   run_m sms_list   'm_sms_list' ;;
         sms_show)   run_m sms_show   'm_sms_show' ;;
         sms_send)   run_m sms_send   'm_sms_send' ;;

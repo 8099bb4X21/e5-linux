@@ -69,6 +69,34 @@ class TransportTest(unittest.TestCase):
         thread.join()
         self.assertLess(time.monotonic() - start, 0.5)
 
+    def test_recovery_requires_two_named_replies_and_never_retries_write(self):
+        self.channel.synchronized = False
+        self.channel.failed_at = time.monotonic() - 3
+        sent = []
+        def responder():
+            sent.append(os.read(self.master, 1024))
+            os.write(self.master, b'OK\r\n+OLD: late\r\n+CFUN: 1\r\nOK\r\n')
+            sent.append(os.read(self.master, 1024))
+            os.write(self.master, b'OK\r\n+CSQ: 20,99\r\nOK\r\n')
+        thread = threading.Thread(target=responder);thread.start()
+        self.channel.recover();thread.join()
+        self.assertTrue(self.channel.synchronized)
+        self.assertEqual(sent, [b'AT+CFUN?\r', b'AT+CSQ\r'])
+
+    def test_recovery_does_not_probe_a_recent_pending_command(self):
+        self.channel.synchronized = False
+        self.channel.failed_at = time.monotonic()
+        with self.assertRaises(TimeoutError): self.channel.recover()
+        self.assertFalse(select.select([self.master], [], [], 0)[0])
+
+    def test_recovery_bare_ok_does_not_unlock_channel(self):
+        self.channel.synchronized = False
+        self.channel.failed_at = time.monotonic() - 3
+        thread = self.modem([b'OK\r\n'])
+        with self.assertRaises(TimeoutError): self.channel.recover()
+        thread.join()
+        self.assertFalse(self.channel.synchronized)
+
     def test_control_characters_and_expired_writes_rejected(self):
         for command, deadline in [('AT\rAT+CFUN=0', time.monotonic() + 5),
                                   ('AT+CFUN=0', time.monotonic() - 1)]:

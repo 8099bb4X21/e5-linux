@@ -299,18 +299,17 @@ return view.extend({
 			var btn = ev.target;
 			if (!btn.getAttribute || !btn.getAttribute('data-lock')) return;
 			var key = btn.getAttribute('data-lock');
-			M.confirmBox('锁定小区 ' + key.replace(':', ' ') + '?', '协议栈会重启（SFUN），蜂窝断开约半分钟。', { danger: true })
+			M.confirmBox('锁定小区 ' + key.replace(':', ' ') + '?', '蜂窝连接会重新建立，蜂窝断开约半分钟。', { danger: true })
 				.then(function(go) {
 				if (!go) return;
 				M.busy(btn, true);
-			M.toast('正在后台锁定 ' + key + '，约半分钟', { type: 'busy' });
-			L.resolveDefault(M.callLockSet('cell', key)).then(function(r) {
-				r = r || {};
-				M.busy(btn, false);
-					M.toast(r.ok ? '已后台锁定 ' + key + '，稍后自动刷新状态' : '锁定失败：' + (r.error || '未知错误'),
-						{ type: r.ok ? 'success' : 'error' });
-					setTimeout(function() { self.refreshLock(); }, 35000);
-				});
+			var progress = M.toast('正在后台锁定 ' + key + '，约半分钟', { type: 'busy' });
+			M.callLockSet('cell', key).then(M.waitLockJob).then(function() {
+				M.toast('已锁定并核对小区 ' + key, { type: 'success' });
+				self.refreshLock();
+			}).catch(function(error) {
+				M.toast('锁定失败：' + (error.message || error), { type: 'error' });
+			}).then(function() { progress.close(); M.busy(btn, false); });
 			});
 		});
 		this.refreshLock();

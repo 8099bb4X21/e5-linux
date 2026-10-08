@@ -10,6 +10,7 @@ import logging
 import os
 from pathlib import Path
 import queue
+import select
 import signal
 import struct
 import subprocess
@@ -28,20 +29,68 @@ def mm_json(*args):
     return json.loads(result.stdout)
 
 
-def calls():
+def calls(terminated=None):
     reply = mm_json('-m', 'any', '--voice-list-calls')
     paths = reply.get('modem.voice.call', reply.get('modem.voice.calls',
                   reply.get('modem', {}).get('voice', {}).get('calls', [])))
     result = []
+    if terminated is not None:
+        terminated.intersection_update(paths)
     for path in paths:
         if not isinstance(path, str) or not path.startswith(CALL_PATH) or not path[len(CALL_PATH):].isdigit():
             continue
+        if terminated is not None and path in terminated:
+            continue
         call = mm_json('-o', path).get('call', {}).get('properties', {})
+        if call.get('state') == 'terminated' and terminated is not None:
+            terminated.add(path)
+            continue
         result.append({'id': path[len(CALL_PATH):], 'state': call.get('state'),
                        'reason': call.get('state-reason'), 'number': call.get('number'), 'direction': call.get('direction'),
                        'card': int(call['sim-slot'])-1 if str(call.get('sim-slot')) in ('1','2') else None,
                        'sim': 'SIM'+str(call['sim-slot']) if str(call.get('sim-slot')) in ('1','2') else None})
     return result
+
+
+def watch_call_changes(stop, changed, reset):
+    """Wake the observer on MM's authoritative D-Bus transitions, not a timer.
+
+    This never owns an AT channel or infers hangup from an ambiguous CP URC.
+    The periodic read remains a fallback if the monitor disconnects.
+    """
+    matches = ["type='signal',sender='org.freedesktop.ModemManager1',path_namespace='/org/freedesktop/ModemManager1/Call'",
+               "type='signal',sender='org.freedesktop.ModemManager1',interface='org.freedesktop.ModemManager1.Modem.Voice'",
+               "type='signal',interface='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.freedesktop.ModemManager1'"]
+    while not stop.is_set():
+        process = None
+        try:
+            process = subprocess.Popen(['dbus-monitor', '--system', '--profile', *matches],
+                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            reset.set()
+            changed.set()
+            pending = b''
+            while not stop.is_set() and process.poll() is None:
+                if not select.select([process.stdout], [], [], .5)[0]:
+                    continue
+                chunk = os.read(process.stdout.fileno(), 4096)
+                if not chunk:
+                    break
+                lines = (pending + chunk).split(b'\n')
+                pending = lines.pop()
+                for line in lines:
+                    if line.startswith(b'sig'):
+                        if b'NameOwnerChanged' in line:
+                            reset.set()
+                        changed.set()
+        except OSError as error:
+            logging.warning('call signal monitor: %s', error)
+        finally:
+            if process is not None:
+                process.terminate()
+                try: process.wait(timeout=2)
+                except subprocess.TimeoutExpired: process.kill(); process.wait()
+                process.stdout.close()
+        stop.wait(1)
 
 
 def write_json(path, value):
@@ -187,6 +236,8 @@ def main():
     controller = Controller(module.VoiceHardware(), suspend_media)
     ringer = RingAlert()
     stop = threading.Event()
+    changed, reset = threading.Event(), threading.Event()
+    terminated = set()
     messages = queue.Queue()
     pipe_fd = None
 
@@ -206,15 +257,19 @@ def main():
 
     def shutdown(*args):
         stop.set()
+        changed.set()
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
     threading.Thread(target=notification_reader, daemon=True).start()
+    call_monitor = threading.Thread(target=watch_call_changes, args=(stop, changed, reset), daemon=True)
+    call_monitor.start()
     last_settings = {'speaker': False, 'muted': False}
     write_json(RUN / 'settings.json', last_settings)
     logging.info('ready; audio only, no modem call-control commands')
     try:
         while not stop.is_set():
+            changed.clear()
             try:
                 while not messages.empty():
                     command, channel, p0, p1, p2, p3 = messages.get_nowait()
@@ -222,7 +277,10 @@ def main():
                     if command == 0 and channel == 2:
                         controller.hardware.network(p0, p1)
                 settings = json.loads((RUN / 'settings.json').read_text())
-                observed = calls()
+                if reset.is_set():
+                    terminated.clear()
+                    reset.clear()
+                observed = calls(terminated)
                 ringer.update(observed, alert_settings(), controller.active or any(c['state'] in LIVE for c in observed))
                 was_active = controller.active
                 state = controller.update(observed, settings)
@@ -234,8 +292,10 @@ def main():
                 # audio route, and there is never a timer that hangs up calls.
                 logging.error('state read: %s', error)
                 write_json(RUN / 'status.json', {**controller.status(), 'error': str(error), 'updated': time.time()})
-            stop.wait(.5)
+            changed.wait(.5)
     finally:
+        stop.set()
+        call_monitor.join(timeout=3)
         ringer.stop()
         controller.stop()
         write_json(RUN / 'status.json', {**controller.status(), 'available': False, 'updated': time.time()})

@@ -20,6 +20,29 @@ var callAtHist = rpc.declare({ object: 'mu300dash', method: 'at_history', expect
 var callLockGet = rpc.declare({ object: 'mu300dash', method: 'lock_get', expect: { '': {} } });
 var callLockFresh = rpc.declare({ object: 'mu300dash', method: 'lock_get', params: [ 'fresh' ], expect: { '': {} } });
 var callLockSet = rpc.declare({ object: 'mu300dash', method: 'lock_set', params: [ 'kind', 'val' ], expect: { '': {} } });
+var callLockStatus = rpc.declare({ object: 'mu300dash', method: 'lock_status', params: [ 'id' ], expect: { '': {} } });
+function waitLockJob(started) {
+	return new Promise(function(resolve, reject) {
+		if (!started || !started.ok || !started.id) { reject(new Error(started && started.error || '网络设置提交失败')); return; }
+		var done = false, next;
+		var finish = function(error, result) {
+			if (done) return;
+			done = true; clearTimeout(limit); clearTimeout(next);
+			if (error) reject(error); else resolve(result);
+		};
+		var limit = setTimeout(function() { finish(new Error('应用超时，请刷新确认模组状态')); }, 240000);
+		var check = function() {
+			callLockStatus(started.id).then(function(r) {
+				if (done) return;
+				if (r && r.state === 'done' && r.ok) finish(null, r);
+				else if (!r || r.state === 'error') finish(new Error(r && r.error || '网络设置执行失败'));
+				else if (r.state === 'queued' || r.state === 'running') next = setTimeout(check, 1000);
+				else finish(new Error('无效的操作状态'));
+			}, function(error) { finish(error); });
+		};
+		check();
+	});
+}
 var callSmsList = rpc.declare({ object: 'mu300dash', method: 'sms_list', params: [ 'page' ], expect: { '': {} } });
 var callSmsShow = rpc.declare({ object: 'mu300dash', method: 'sms_show', params: [ 'id' ], expect: { '': {} } });
 var callSmsSend = rpc.declare({ object: 'mu300dash', method: 'sms_send', params: [ 'num', 'text', 'card' ], expect: { '': {} } });
@@ -40,6 +63,18 @@ var callUsbNetAdd = rpc.declare({ object: 'mu300dash', method: 'usb_net_add', pa
  * standalone package works in any OpenWrt buildroot without po2lmo or extra
  * language packages. Chinese remains the source/fallback language. */
 var DASH_I18N = {
+	'会话': ['Conversations', 'Görüşmeler'],
+	'收件人': ['Recipient', 'Alıcı'],
+	'发送卡': ['Send with', 'Gönderen SIM'],
+	'全部 SIM': ['All SIMs', 'Tüm SIM kartlar'],
+	'当前数据卡': ['Current data SIM', 'Geçerli veri SIM kartı'],
+	'暂无短信': ['No messages yet', 'Henüz mesaj yok'],
+	'暂无会话': ['No conversations yet', 'Henüz görüşme yok'],
+	'短信内容': ['Message', 'Mesaj'],
+	'号码，如 10086 或 +86…': ['Number, e.g. 10086 or +86…', 'Numara, ör. 10086 veya +86…'],
+	'选择会话查看短信，或填写收件人开始新短信。': ['Select a conversation, or enter a recipient to start a new message.', 'Bir görüşme seçin veya yeni mesaj için alıcı girin.'],
+	'收到的短信会显示在这里，可尝试从 SIM 同步。': ['Received messages appear here. You can also sync from the SIM.', 'Gelen mesajlar burada görünür. SIM karttan da eşitleyebilirsiniz.'],
+	'选择发送卡不会切换移动数据卡。删除单条：点击气泡上的删除按钮。': ['Choosing a sending SIM does not switch mobile data. Use the delete button on a message to remove it.', 'Gönderen SIM seçimi mobil veriyi değiştirmez. Mesajı silmek için üzerindeki sil düğmesini kullanın.'],
 	'本机号码': ['Phone number', 'Telefon numarası'],
 	'流量池': ['Data plan', 'Veri paketi'],
 	'今日流量': ['Today’s data', 'Bugünkü veri'],
@@ -982,10 +1017,9 @@ function busy(btn, on) {
 		var s = document.createElement('i');
 		s.className = 'mud-spin';
 		btn.insertBefore(s, btn.firstChild);
-	} else if (!on && btn.classList.contains('busy')) {
+	} else if (!on) {
 		btn.classList.remove('busy');
-		var sp = btn.querySelector('.mud-spin');
-		if (sp) sp.remove();
+		btn.querySelectorAll('.mud-spin').forEach(function(sp) { sp.remove(); });
 	}
 }
 
@@ -1144,7 +1178,7 @@ function choiceBox(title, message, choices, opts) {
 /* LuCI 的 require 把模块当类工厂：必须返回 baseclass 派生的类，加载后拿到的是它的实例 */
 return baseclass.extend({
 	callStatus: callStatus, callSignal: callSignal, callSysinfo: callSysinfo, callAct: callAct, callAt: callAt, callAtHist: callAtHist,
-	callLockGet: callLockGet, callLockFresh: callLockFresh, callLockSet: callLockSet,
+	callLockGet: callLockGet, callLockFresh: callLockFresh, callLockSet: callLockSet, callLockStatus: callLockStatus, waitLockJob: waitLockJob,
 	callSmsList: callSmsList, callSmsShow: callSmsShow, callSmsSend: callSmsSend,
 	callSmsDel: callSmsDel, callSmsSync: callSmsSync,
 	callForwardGet: callForwardGet, callForwardStatus: callForwardStatus,

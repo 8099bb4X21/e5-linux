@@ -64,3 +64,46 @@ assert control.update([{'id':'a','state':'active','card':0}],{})['sim']=='SIM1'
 assert control.update([{'id':'b','state':'active','card':1}],{})['sim']=='SIM2'
 assert hw.events==['start','stop','start'] and changes==[True,False,True]
 print('Voice source-card transition checks passed')
+
+# Terminated D-Bus objects can accumulate. Read their final state once, keep
+# active/held calls fresh, and forget tombstones when an object disappears.
+dead=voice.CALL_PATH+'7';active=voice.CALL_PATH+'8';queries=[]
+paths=[dead,active]
+def mm(*args):
+    queries.append(args)
+    if args[0]=='-m':return {'modem.voice.calls':paths.copy()}
+    return {'call':{'properties':{'state':'terminated' if args[1]==dead else 'active',
+                                 'sim-slot':'2','number':'test'}}}
+cache=set()
+with patch.object(voice,'mm_json',side_effect=mm):
+    assert voice.calls(cache)[0]['card']==1
+    queries.clear();assert voice.calls(cache)[0]['state']=='active'
+    assert ('-o',dead) not in queries and ('-o',active) in queries
+    paths[:]=[active];voice.calls(cache);assert not cache
+    paths[:]=[dead,active];queries.clear();voice.calls(cache)
+    assert ('-o',dead) in queries
+print('Call cache and source SIM checks passed')
+
+# Feed the monitor pipe as dbus-monitor would: a split profile line must wake
+# the observer, owner changes clear tombstones, shutdown reaps the monitor.
+import os,threading
+read_fd,write_fd=os.pipe()
+class Monitor:
+    stdout=os.fdopen(read_fd,'rb',buffering=0)
+    ended=False
+    def poll(self):return 0 if self.ended else None
+    def terminate(self):self.ended=True
+    def wait(self,timeout=None):return 0
+monitor=Monitor();stop=threading.Event();changed=threading.Event();reset=threading.Event()
+with patch.object(voice.subprocess,'Popen',return_value=monitor):
+    worker=threading.Thread(target=voice.watch_call_changes,args=(stop,changed,reset))
+    worker.start();assert changed.wait(1)
+    changed.clear();reset.clear()
+    os.write(write_fd,b'sig\t123\torg.freedesktop.DBus\tNameOwner')
+    assert not changed.wait(.05)
+    os.write(write_fd,b'Changed\n')
+    assert changed.wait(1) and reset.is_set()
+    stop.set();worker.join(2)
+assert not worker.is_alive() and monitor.ended and monitor.stdout.closed
+os.close(write_fd)
+print('D-Bus event wake, split lines and monitor cleanup checks passed')

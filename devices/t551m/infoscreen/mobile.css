@@ -76,6 +76,8 @@ body.no-motion #power-menu .power-sheet { animation:none; }
 #mobile-nav button.active { color:var(--accent); background:#ffffff08; }
 #mobile-nav button.active::after { content:""; width:12px; height:2px; background:var(--accent); border-radius:2px; position:absolute; bottom:3px; }
 #app-frame,#ime-frame { top:calc(var(--status-h) + var(--toolbar-h)); bottom:var(--nav-h); height:calc(100% - var(--status-h) - var(--toolbar-h) - var(--nav-h)); }
+body.phone-overlay #app-frame { top:var(--status-h); bottom:0; height:calc(100% - var(--status-h)); z-index:80; }
+body.phone-overlay #mobile-toolbar,body.phone-overlay #mobile-nav { visibility:hidden; }
 #mobile-menu { position:absolute; inset:calc(var(--status-h) + var(--toolbar-h)) 0 var(--nav-h); background:var(--bg); z-index:15; padding:12px; opacity:0; transform:translate3d(0,-12px,0); transition:opacity .24s ease,transform .24s cubic-bezier(.2,.8,.2,1); pointer-events:none; }
 #mobile-menu.open { opacity:1; transform:translate3d(0,0,0); pointer-events:auto; }
 .mobile-sheet-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
@@ -265,6 +267,12 @@ body[data-theme=light] #lock-swipe i { background:#50647a80; }
 #st-view .with-icon.opt::before { display:none; }
 #st-view .with-icon.opt.on { border-color:var(--accent); }
 #st-view .with-icon.armed .st-icon { color:inherit; }
+
+/* Confirmation is a separate full-width row, never text in the 20px tick slot. */
+#st-view [data-st].armed { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; row-gap:6px; }
+#st-view .with-icon.armed>.st-label { max-width:none; }
+#st-view .st-confirm-hint { grid-column:1 / -1; min-width:0; max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:left; font-size:calc(12px * var(--ui-scale)); line-height:1.5; color:var(--poor); }
+#st-view .with-icon>.st-confirm-hint { padding-left:calc(22px * min(var(--ui-scale),1.15) + 10px); }
 
 /* Nested pages do not inherit the outer page's flex gap. Keep each block and
    action separated, including AT replies, SMS details and application lists. */

@@ -186,6 +186,33 @@ def main():
         assert sizes[-1]['height']>sizes[1]['height']*1.3,sizes
         fixtures['/api/status']['screen']['ui_size']='standard'
         page.evaluate("last.screen.ui_size='standard';T551M.status(last)")
+        # Confirmation text has its own row, including the tiny SIM tick slot.
+        for language in ['zh','en']:
+            for size in ['standard','extra']:
+                page.evaluate('''([language,size])=>{
+                    lang=language;last.screen.ui_size=size;T551M.status(last);showPage(P.settings);
+                    const parent={view:'cat',cat:{id:'network',label:'Network'},items:[]};
+                    const item={id:'sim_card',type:'choice',label:'SIM',confirm:true,value:'0',
+                        options:[{value:'0',label:'SIM 1'},{value:'1',label:'SIM 2'},{value:'2',label:'Long option label for another setting'}]};
+                    st=[{view:'menu'},parent,{view:'edit',cat:parent.cat,item,parent}];stRender();
+                }''',[language,size])
+                before=len(posts)
+                page.locator('[data-st="opt:1"]').tap()
+                row=page.locator('[data-st="opt:1"]')
+                assert row.locator('.st-label').inner_text()=='SIM 2'
+                assert row.locator('.st-confirm-hint').count()==1
+                bounds=row.evaluate('''e=>{const r=e.getBoundingClientRect(),h=e.querySelector('.st-confirm-hint').getBoundingClientRect();
+                    return {fits:h.left>=r.left&&h.right<=r.right&&h.bottom<=r.bottom,overflow:e.scrollWidth>e.clientWidth};}''')
+                assert bounds['fits'] and not bounds['overflow'],(language,size,bounds)
+                if language=='zh' and size=='extra':
+                    page.screenshot(path=str(args.screenshots/'screen-sim-confirm-extra.png'))
+                assert len(posts)==before,'First confirmation press must not apply the setting'
+                page.locator('[data-st="opt:2"]').tap()
+                assert row.locator('.st-confirm-hint').count()==0
+                assert page.locator('#st-view .armed').count()==1
+                page.evaluate('stDisarm()')
+                assert page.locator('#st-view .st-confirm-hint').count()==0
+        page.evaluate("lang='zh';last.screen.ui_size='standard';T551M.status(last);st=[{view:'menu'}];stRender()")
         # Appearance changes every surface without fading content or QR codes.
         for theme, rgb, foreground in [('dark','24, 33, 46','rgb(241, 245, 250)'),('light','255, 255, 255','rgb(23, 40, 59)')]:
             for opacity in [0,35,70,100]:
@@ -294,7 +321,7 @@ def main():
         page.wait_for_function("appOpen?.id === 'phone' && document.querySelector('#app-frame').contentDocument?.__e5InputObserver")
         page.route('**/plugins/other/**', lambda route: route.fulfill(content_type='text/html',body='<body id="other-app">Other app</body>'))
         page.evaluate("openApp({id:'other',name:'Other'})")
-        page.wait_for_function("document.querySelector('#app-frame').contentDocument?.body.id === 'other-app' && document.querySelector('#app-frame').contentDocument.__e5InputObserver")
+        page.wait_for_function("document.querySelector('#app-frame').contentDocument?.body?.id === 'other-app' && document.querySelector('#app-frame').contentDocument.__e5InputObserver")
         call_key()
         page.wait_for_function("appOpen?.id === 'phone'")
         page.evaluate("closeApp();showPage(P.settings)")

@@ -72,7 +72,7 @@ window.T551M = (() => {
     }
 
     function navigate(index) {
-        if (lockedNow()) return;
+        if (lockedNow() || window.T551MCalls?.active()) return;
         if (index === page) {
             if (index === P.settings) { stDisarm(); st = [{view:'menu'}]; }
             if (index === P.sms && smsOpen != null) closeSms();
@@ -262,7 +262,7 @@ window.T551M = (() => {
         screenLocked = true;
         wakeAt = performance.now();
         keyArmed = 0;
-        if (appOpen) closeApp();
+        if (appOpen && !window.T551MCalls?.active()) closeApp();
         if (imeOpen) closeInputMethod();
         menu(false, true);
         el('mobile-lockscreen').hidden = false;
@@ -384,7 +384,7 @@ window.T551M = (() => {
         // A frame keeps its WindowProxy across navigation, but loses listeners.
         dialTargets.add(doc);
         target.addEventListener('keydown', async event => {
-            if (!mounted || keyKind(event) !== 'call' || T551MPower.isOpen()) return;
+            if (!mounted || keyKind(event) !== 'call' || T551MPower.isOpen() || window.T551MCalls?.active()) return;
             event.preventDefault(); event.stopImmediatePropagation();
             if (event.repeat || openingPhone) return;
             if (blank) { setBlank(false); return; }

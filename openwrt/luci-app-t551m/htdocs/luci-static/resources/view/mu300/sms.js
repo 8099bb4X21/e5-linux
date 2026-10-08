@@ -13,45 +13,73 @@
 var MAX_PAGES = 5;   /* 一次聚合的池子页数（每页 10 条），纯文件读，很便宜 */
 
 return view.extend({
+	handleSaveApply: null,
+	handleSave: null,
+	handleReset: null,
 	load: function() { return Promise.resolve(); },
 
 	render: function() {
 		M.injectCss();
 		M.watchSms();
 		var root = document.createElement('div');
-		root.className = 'mud';
+		root.className = 'mud mud-sms';
 		root.innerHTML = `
-<div class="mud-sec" style="margin-top:0">
-  <h3>短信 <span id="mud-sms-stat" style="font-weight:400"></span></h3>
-  <div class="mud-note" id="mud-sms-capacity" style="display:none;margin-bottom:10px"></div>
-  <input id="mud-sms-num" placeholder="收件人：号码，如 10086 或 +86..." spellcheck="false"
-    style="width:100%;margin-bottom:8px;padding:7px 11px;border:1px solid var(--hairline,var(--border,#ccc));border-radius:var(--radius-base,.5rem);background:var(--surface,var(--background,#fff));color:var(--text,#222)"/>
-  <div class="mud-ctl" style="max-width:460px;margin-bottom:8px">
-    <label>查看 <select id="mud-sms-filter"><option value="">全部 SIM</option><option value="0">SIM1</option><option value="1">SIM2</option></select></label>
-    <button class="mud-btn" id="mud-sms-refresh">刷新</button>
-    <button class="mud-btn" id="mud-sms-sync">从 SIM 同步</button>
-    <button class="mud-btn warn" id="mud-sms-clear">清空本地池</button>
+<div class="mud-sms-heading">
+  <h2>短信</h2><span id="mud-sms-stat" class="mud-note" aria-live="polite"></span>
+</div>
+<div class="mud-note" id="mud-sms-capacity" style="display:none"></div>
+<div class="mud-sms-toolbar">
+  <label class="mud-sms-filter" for="mud-sms-filter"><span>查看</span>
+    <select id="mud-sms-filter"><option value="">全部 SIM</option><option value="0">SIM1</option><option value="1">SIM2</option></select>
+  </label>
+  <div class="mud-sms-actions">
+    <button type="button" class="mud-btn" id="mud-sms-refresh">刷新</button>
+    <button type="button" class="mud-btn" id="mud-sms-sync">从 SIM 同步</button>
   </div>
-  <div class="mud-chat">
+  <button type="button" class="mud-btn warn" id="mud-sms-clear">清空本地池</button>
+</div>
+<div class="mud-chat">
+  <aside class="mud-sms-sidebar">
+    <div class="mud-sms-pane-title">会话</div>
     <div class="mud-convs" id="mud-sms-convs"><div class="mud-note">加载中…</div></div>
-    <div class="mud-thread">
-      <div class="mud-msgs" id="mud-sms-msgs"><div class="mud-note" style="margin:8px 2px">选择左侧会话，或直接在下方输入号码发送。</div></div>
-      <label style="display:flex;gap:8px;align-items:center;margin:8px 12px">发送卡 <select id="mud-sms-card" style="max-width:180px"><option value="">当前数据卡</option><option value="0">SIM1</option><option value="1">SIM2</option></select></label>
+  </aside>
+  <section class="mud-thread">
+    <div class="mud-sms-pane-title" id="mud-sms-peer">新短信</div>
+    <div class="mud-msgs" id="mud-sms-msgs" aria-live="polite"></div>
+    <div class="mud-sms-compose">
+      <div class="mud-sms-address">
+        <label for="mud-sms-num"><span>收件人</span>
+          <input id="mud-sms-num" type="tel" autocomplete="tel" placeholder="号码，如 10086 或 +86…" spellcheck="false"/>
+        </label>
+        <label for="mud-sms-card"><span>发送卡</span>
+          <select id="mud-sms-card"><option value="">当前数据卡</option><option value="0">SIM1</option><option value="1">SIM2</option></select>
+        </label>
+      </div>
       <div class="mud-comp">
-        <textarea id="mud-sms-text" placeholder="短信内容（Enter 发送，Shift+Enter 换行）" rows="1"></textarea>
-        <button class="mud-btn" id="mud-sms-send" style="align-self:flex-end;padding:8px 18px;margin-right:48px;white-space:nowrap;flex-shrink:0">发送</button>
+        <textarea id="mud-sms-text" aria-label="短信内容" placeholder="短信内容（Enter 发送，Shift+Enter 换行）" rows="3"></textarea>
+        <button type="button" class="mud-btn on" id="mud-sms-send">发送</button>
       </div>
     </div>
-  </div>
-  <div class="mud-note" id="mud-sms-note">选择发送卡不会切换移动数据卡。删除单条：在气泡上右键（手机长按）。</div>
-</div>`;
+  </section>
+</div>
+<div class="mud-note" id="mud-sms-note">选择发送卡不会切换移动数据卡。删除单条：点击气泡上的删除按钮。</div>`;
+		root.prepend(E('link', { rel: 'stylesheet', href: L.resource('view/mu300/sms.css') }));
 		M.localize(root);
 		this.Q = function(id) { return root.querySelector('#mud-' + id); };
 		this.sel = null;          /* 当前会话的 peer */
 		this.convs = {};          /* peer -> {msgs:[], unread:n} */
+		this.emptyThread();
 		this.wire(root);
 		this.reload();
 		return root;
+	},
+
+	emptyThread: function() {
+		this.Q('sms-peer').textContent = M.translate('新短信');
+		this.Q('sms-msgs').innerHTML = '<div class="mud-sms-empty">' +
+			'<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/></svg>' +
+			'<strong>' + M.esc(M.translate('暂无短信')) + '</strong>' +
+			'<span>' + M.esc(M.translate('选择会话查看短信，或填写收件人开始新短信。')) + '</span></div>';
 	},
 
 	wire: function(root) {
@@ -190,8 +218,8 @@ return view.extend({
 		var box = this.Q('sms-convs');
 		if (!peers.length) {
 			this.sel = null;
-			this.Q('sms-msgs').textContent = '暂无短信';
-			box.innerHTML = '<div class="mud-note" style="margin:6px">' + M.esc(M.translate('池子是空的：收到/发出的短信会出现在这里，或点「从 SIM 同步」。')) + '</div>';
+			this.emptyThread();
+			box.innerHTML = '<div class="mud-sms-list-empty"><strong>' + M.esc(M.translate('暂无会话')) + '</strong><span>' + M.esc(M.translate('收到的短信会显示在这里，可尝试从 SIM 同步。')) + '</span></div>';
 			return;
 		}
 		box.innerHTML = peers.map(function(p) {
@@ -207,6 +235,7 @@ return view.extend({
 			el.onclick = function() { self.open(el.getAttribute('data-peer')); };
 		});
 		if (this.sel && this.convs[this.sel]) this.open(this.sel);
+		else { this.sel = null; this.emptyThread(); }
 	},
 
 	/* 打开会话：渲染气泡，全文按 id 缓存（首取后不再重拉，重绘不再闪预览） */
@@ -214,6 +243,7 @@ return view.extend({
 		var self = this;
 		var keepScroll = this.Q('sms-msgs') ? this.Q('sms-msgs').scrollTop : 0;
 		this.sel = peer;
+		this.Q('sms-peer').textContent = peer;
 		this.cache = this.cache || {};
 		this.Q('sms-num').value = peer.replace(/[^+0-9]/g, '');
 		this.Q('sms-convs').querySelectorAll('.mud-conv').forEach(function(el) {

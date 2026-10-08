@@ -21,8 +21,37 @@ def replace(text, old, new):
     return text.replace(old, new, 1)
 
 
+def confirmation_rows(app):
+    app = replace(app, '''function stDisarm() {
+\tif (stArmed) clearTimeout(stArmed.timer);
+\tstArmed = null;
+}''', '''function stDisarm() {
+\tif (stArmed) {
+\t\tclearTimeout(stArmed.timer);
+\t\tstArmed.el?.classList.remove('armed');
+\t\tstArmed.el?.querySelector('.st-confirm-hint')?.remove();
+\t}
+\tstArmed = null;
+}''')
+    app = replace(app, "stArmed = { key, timer: setTimeout(() => { stDisarm(); stRender(); }, 3000) };",
+                  "stArmed = { key, el, timer: setTimeout(() => { stDisarm(); stRender(); }, 3000) };")
+    return replace(app, "\t\tconst sv = el.querySelector('.sv');\n\t\tif (sv) sv.textContent = t('press_again');", '''
+\t\tconst hint = document.createElement('span');
+\t\thint.className = 'st-confirm-hint';
+\t\thint.setAttribute('aria-live', 'polite');
+\t\thint.textContent = t('press_again');
+\t\tel.appendChild(hint);''')
+
+
 def sources():
     app = (HERE / 'base/app.js').read_text(encoding='utf-8')
+    app = confirmation_rows(app)
+    app = replace(app, "f.src = `/plugins/${encodeURIComponent(m.id)}/${m.entry ?? 'index.html'}?lang=${lang}`;",
+                  "f.src = `/plugins/${encodeURIComponent(m.id)}/${m.entry ?? 'index.html'}?lang=${lang}${m.callOverlay ? '&callonly=1' : ''}`;")
+    app = replace(app, "\tconst send = (msg) => fromIme ? toIme(msg) : toApp(msg);", """
+	if (fromApp && T551MCalls.active() && (m.e5 === 'exit' || m.e5 === 'input' || (m.e5 === 'key' && m.kind === 'menu'))) return;
+	const send = (msg) => fromIme ? toIme(msg) : toApp(msg);""")
+    app = replace(app, ' notificationList = list;', " list = list.filter(n => n.plugin !== 'phone' || !String(n.id).startsWith('call-'));\n notificationList = list;")
     app = replace(app, "\tsetHTML('st-view', html);", "\tsetHTML('st-view', html);\n\tT551M.settings($('st-view'), v, stCats);")
     for direction in ['rx', 'tx']:
         app = replace(app, f'fmtRate(st.traffic.{direction}_rate)', f'T551M.speed(st.traffic.{direction}_rate)')
@@ -40,8 +69,8 @@ def sources():
                   'f.onload = () => { if (appOpen !== m || f.hidden) return; T551M.app(f, m); observeAppInputs(f); f.focus({preventScroll:true}); };')
     app = replace(app, "\tconst f = $('app-frame');\n\tf.hidden = true;", "\tconst f = $('app-frame');\n\tf.onload = null;\n\tf.hidden = true;")
     app = replace(app, "\tconst b = document.querySelector('[data-app]');\n\tif (b) b.focus();", "\tT551M.appClosed(appReturnFocus);\n\tappReturnFocus = null;")
-    app = replace(app, '\tdoc.__e5InputObserver = true;', '\tdoc.__e5InputObserver = true;\n\tT551MPower.attach(frame.contentWindow);\n\tT551M.attachKeys(frame.contentWindow);')
-    app = replace(app, '\tif (!blank && idle > 0 && !(appOpen && appKeepAwake))', '\tif (!blank && idle > 0 && !T551MPower.isOpen() && !(appOpen && appKeepAwake))')
+    app = replace(app, '\tdoc.__e5InputObserver = true;', '\tdoc.__e5InputObserver = true;\n\tT551MPower.attach(frame.contentWindow);\n\tT551M.attachKeys(frame.contentWindow);\n\tT551MCalls.attach(frame);')
+    app = replace(app, '\tif (!blank && idle > 0 && !(appOpen && appKeepAwake))', '\tif (!blank && idle > 0 && !T551MPower.isOpen() && !T551MCalls.active() && !(appOpen && appKeepAwake))')
     app = replace(app, 'function setBlank(on) {', 'let powerQueue = Promise.resolve(), powerChangedAt = -Infinity;\nfunction setBlank(on) {')
     app = replace(app, "\tblank = on;\n\tdocument.body.classList.toggle('blank', on);\n\tpost('backlight', { level: on ? 0 : brightness });", """
 	blank = on;
@@ -54,7 +83,7 @@ def sources():
 		if (!r?.ok) throw new Error('screen power transition failed');
 	}).catch(e => { console.log(e); toast(lang == 'zh' ? '屏幕状态同步失败，请按电源键重试' : 'Press power to retry'); });""")
     app = replace(app, 'function touchOff() { return locked || last?.screen?.touch === false; }',
-                  'function touchOff() { return blank || locked || last?.screen?.touch === false; }')
+                  'function touchOff() { return blank || (locked && !T551MCalls.active()) || last?.screen?.touch === false; }')
     app = replace(app, '\t\t\tlast = st;\n\t\t\tapplyTouch();', '''
 			last = st;
 			// Reconcile changes made outside the browser, without accepting a
@@ -70,7 +99,7 @@ def sources():
     app = replace(app, "\tpage = (n + pages.length) % pages.length;", "\tpage = (n + pages.length) % pages.length;\n\tT551M.page(page);")
     app = replace(app, '\t\tif (!st.screen.donate_seen) donateOnce();', '\t\tif (!st.screen.donate_seen) post(\'donate-seen\');')
     app = replace(app, "\tif (r?.ok && v.cat.id == 'screen') stScreenApplied", "\tif (r?.ok && ['ui', 'navigation'].includes(v.cat.id)) {\n\t\tlast.screen[body.id] = r.item?.value ?? body.value;\n\t\tT551M.status(last);\n\t}\n\tif (r?.ok && v.cat.id == 'screen') stScreenApplied")
-    app = replace(app, '\tshowPage(0);\n\tpoll();', '\tT551M.boot();\n\tshowPage(0);\n\tpoll();')
+    app = replace(app, '\tshowPage(0);\n\tpoll();', '\tT551M.boot();\n\tT551MCalls.boot();\n\tshowPage(0);\n\tpoll();')
     # A wake notification may light the lock, but cannot expose the inbox.
     app = replace(app, "if (page != P.sms) showPage(P.sms);", "if (!T551M.isLocked() && page != P.sms) showPage(P.sms);")
     app = replace(app, "setText('bar-op', m.operator ??", "setText('bar-op', T551M.operator(m.operator) ??")
@@ -157,11 +186,13 @@ async function loadAdvanced() {
     settings = replace(settings, 'screen, usb_cat, system_cat, about ];', 'screen, mobile_ui, mobile_navigation, usb_cat, system_cat, about ];')
     index = (HERE / 'base/index.html').read_text(encoding='utf-8')
     index = replace(index, '<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="style.css">\n<link rel="stylesheet" href="mobile.css">')
-    index = replace(index, '<script src="app.js"></script>', '<script src="power-menu.js"></script>\n<script src="mobile.js"></script>\n<script src="app.js"></script>')
+    index = replace(index, '<script src="app.js"></script>', '<script src="power-menu.js"></script>\n<script src="mobile.js"></script>\n<script src="calls.js"></script>\n<script src="app.js"></script>')
     index = replace(index, '<section class="page" data-title="adv_info">', '<section class="page" data-title="adv_info"><div id="ad-freshness" hidden></div>')
     return {'www/app.js': app, 'api.uc': api, 'settings.uc': settings, 'www/index.html': index,
             'www/style.css': scalable_css((HERE / 'base/style.css').read_text(encoding='utf-8')),
             'www/mobile.js': (HERE / 'mobile.js').read_text(encoding='utf-8'),
+            'www/calls.js': (HERE / 'calls.js').read_text(encoding='utf-8'),
+            'www/sdk/e5.js': (HERE / 'base/sdk.js').read_text(encoding='utf-8'),
             'www/power-menu.js': (HERE / 'power-menu.js').read_text(encoding='utf-8'),
             'www/mobile-phone.css': (HERE / 'mobile-phone.css').read_text(encoding='utf-8'),
             'www/mobile.css': scalable_css((HERE / 'mobile.css').read_text(encoding='utf-8'))}
@@ -183,6 +214,21 @@ def stage(root):
         dest.write_bytes((HERE / source).read_bytes().replace(b'\r\n', b'\n'))
         dest.chmod(0o755)
     (root / 'usr/share/e5-infoscreen/LICENSE.t551m').write_bytes((HERE / 'LICENSE').read_bytes())
+    voice = root / 'usr/libexec/e5-voice-audio'
+    voice.write_bytes((HERE.parents[2] / 'openwrt/overlay/usr/libexec/e5-voice-audio').read_bytes().replace(b'\r\n', b'\n'))
+    voice.chmod(0o755)
+    for source in (HERE / 'phone').iterdir():
+        if not source.is_file():
+            continue
+        target = root / 'etc/e5-infoscreen/plugins/phone' / source.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
+        target.chmod(0o644)
+        # Archive/browser fixture roots have no upstream plugin symlink yet.
+        web = root / 'usr/share/e5-infoscreen/www/plugins/phone'
+        if not web.is_symlink():
+            web.mkdir(parents=True, exist_ok=True)
+            (web / source.name).write_bytes(target.read_bytes())
     luci = (HERE / 'base/luci-settings.js').read_text(encoding='utf-8')
     luci = replace(luci, "\t\to = s.option(form.Value, 'update_url',", """
 		for (var field of [

@@ -97,6 +97,24 @@ uci() {
                                    capture_output=True, text=True, check=True).stdout
             self.assertEqual(again, '')
 
+    def test_default_dial_does_not_overwrite_pre_dial_mode(self):
+        text = (self.root / 'lib/netifd/proto/modemmanager.sh').read_text()
+        start = text.index('\tif [ -z "${allowedmode}" ]')
+        end = text.index('\tif [ -z "${plmn}" ]', start)
+        harness = '''
+modemmanager_set_allowed_mode() { echo SET:$3; }
+modemmanager_set_preferred_mode() { echo PREFERRED:$3:$4; }
+run_modes() {
+''' + text[start:end] + '\n: # real setup continues to PLMN and simple-connect\n}\nrun_modes\n'
+        for mode in ('', '4g', 'any'):
+            out = subprocess.run(['busybox', 'sh', '-c', harness],
+                                 env=dict(os.environ, allowedmode=mode), capture_output=True, text=True, check=True).stdout
+            if not mode:
+                self.assertNotIn('SET:', out)
+                self.assertIn('Keeping current network mode', out)
+            else:
+                self.assertEqual(out.strip(), 'SET:'+mode)
+
     def test_unknown_package_layout_refused(self):
         path = self.root / 'lib/netifd/proto/modemmanager.sh'
         path.write_text('# changed upstream interface\n')

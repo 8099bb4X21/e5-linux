@@ -6,6 +6,33 @@ import re
 
 
 def patch_root(root):
+    config = root / 'etc/config/unisoc_modem'
+    if config.exists():
+        text = config.read_text()
+        if 'option lte_supported_bands ' not in text:
+            anchor = "config core 'main'\n"
+            if text.count(anchor) != 1:
+                raise ValueError('Unexpected modem dashboard configuration')
+            # This firmware drops B38 from SPLBAND readback; the imported
+            # dashboard's larger fallback list is not a capability query.
+            config.write_text(text.replace(anchor, anchor + "\toption lte_supported_bands '1,3,5,8,34,39,40,41'\n"))
+
+    wrapper = root / 'usr/sbin/ModemManager-wrapper'
+    if wrapper.exists():
+        text = wrapper.read_text()
+        if '# unisoc-pre-dial-replay' not in text:
+            anchor = '\t/usr/sbin/ModemManager "$@" 1>/dev/null 2>/dev/null &'
+            if text.count(anchor) != 1:
+                raise ValueError('Unexpected ModemManager startup wrapper')
+            text = text.replace(anchor, '''\t# unisoc-pre-dial-replay: finish saved AT settings before MM can enable/dial.
+\tif [ -x /usr/libexec/unisoc-modem/boot-replay ]; then
+\t\t/usr/libexec/unisoc-modem/boot-replay early ||
+\t\t\tlogger -t unisoc-modem "pre-dial replay failed; continuing without a late radio cycle"
+\tfi
+
+''' + anchor)
+            wrapper.write_text(text)
+
     loader = root / 'etc/init.d/e5-sipc-wwan'
     if loader.exists():
         text = loader.read_text()
@@ -20,6 +47,15 @@ def patch_root(root):
     proto = root / 'lib/netifd/proto/modemmanager.sh'
     if proto.exists():
         text = proto.read_text()
+        if 'preserve AT-selected network mode' not in text:
+            old = '\tif [ -z "${allowedmode}" ]; then\n\t\tmodemmanager_set_allowed_mode "$device" "$interface" "any"'
+            if text.count(old) != 1:
+                raise ValueError('Unexpected ModemManager default mode configuration')
+            text = text.replace(old, '''\tif [ -z "${allowedmode}" ]; then
+\t\t# preserve AT-selected network mode; Unisoc's MM mode setter is unsupported.
+\t\t# Boot replay already applied the user's preference before radio activation.
+\t\techo "Keeping current network mode (no WAN override configured)"''')
+            proto.write_text(text)
         if 'T551M: preserve initial EPS' not in text:
             old = '\t\tcase "$init_epsbearer" in\n'
             if text.count(old) != 1:

@@ -15,6 +15,25 @@ body { height:auto; min-height:100%; overflow:visible; padding:8px 14px; gap:6px
 .contacts-panel { flex:0 0 auto; min-height:64px; margin-top:8px; padding-top:8px; }
 .contacts { flex:none; overflow:visible; }
 .call-card { flex:1 0 auto; min-height:280px; }
+.dtmf-toggle { min-height:32px; padding:5px 18px; border-radius:18px; }
+#dtmf-panel { width:100%; }
+#dtmf-digits { display:block; height:24px; line-height:24px; text-align:center; overflow:hidden; white-space:nowrap; font-size:18px; letter-spacing:3px; }
+.dtmf-keypad { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px 12px; }
+.dtmf-keypad button { min-height:42px; padding:4px; border-radius:16px; font-size:23px; line-height:30px; touch-action:manipulation; }
+.call-card.dtmf-open { gap:5px; min-height:0; padding:4px 0; }
+.call-card.dtmf-open { position:relative; }
+.dtmf-open .call-avatar,.dtmf-open #call-number,.dtmf-open #call-sim,.dtmf-open #audio-actions,.dtmf-open #call-state { display:none; }
+.dtmf-open #call-name { font-size:19px; line-height:24px; }
+.dtmf-open #call-duration { position:absolute; top:8px; right:0; font-size:13px; }
+.dtmf-open .dtmf-toggle { min-height:26px; padding:3px 14px; }
+.dtmf-open .dtmf-keypad button { min-height:40px; height:40px; }
+.dtmf-open .call-actions button { min-height:38px; height:38px; }
+.dtmf-open .call-actions { position:sticky; bottom:0; width:100%; }
+.call-only #dialer,.call-only #contacts-panel,.call-only #editor,.call-only #delete-sheet { display:none!important; }
+.call-only { min-height:100vh; padding:16px 20px; }
+.call-only .call-card { min-height:calc(100vh - 70px); justify-content:center; }
+.call-only .dtmf-open { justify-content:space-between; }
+.call-only .dtmf-keypad button { min-height:44px; height:44px; }
 
 /* Match the shell wallpaper through scrolling without exposing the app list
    beneath the iframe. Only background colors gain alpha; content stays opaque. */

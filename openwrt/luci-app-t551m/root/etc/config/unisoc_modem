@@ -11,6 +11,7 @@ config core 'main'
 	option wifi_device 'wlan0'
 	option usb_device 'usb0'
 	option replay_timeout '90'
+	option lte_supported_bands '1,3,5,8,34,39,40,41'
 	option home_refresh_interval '3'
 	option state_dir '/etc/unisoc-modem/lock-state.d'
 

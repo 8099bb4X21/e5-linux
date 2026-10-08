@@ -3,8 +3,9 @@
 
 Keep nr2 (interactive) and nr6/nr7 (collector pool) open once, independently.
 nr0/nr1/nr3 remain owned by sipc_wwan/ModemManager for network/SMS/URCs.
-Use a root-only socket instead of polling reply files. Never retry a command,
-reopen on a timeout, or send another command before the previous final result.
+Use a root-only socket instead of polling reply files. Never retry a write or
+reopen on a timeout. Missing finals require late completion or named read-only
+recovery probes before another user command can run.
 """
 import argparse
 import fcntl
@@ -29,6 +30,7 @@ class Channel:
         self.pending = b''
         self.synchronized = True
         self.last_write = 0.0
+        self.failed_at = None
 
     def lines(self, wait):
         if not select.select([self.fd], [], [], max(0, wait))[0]:
@@ -49,8 +51,8 @@ class Channel:
                 self.synchronized = True
 
     def command(self, command, timeout):
-        # If a reply timed out, only its real terminal response restores sync.
-        # A quiet second alone does not prove a slow command has finished.
+        # A late terminal can restore sync here; otherwise serve() must finish
+        # recover() first. Silence alone never proves a command has finished.
         self.idle()
         if not self.synchronized:
             raise TimeoutError('Previous AT command has not finished; channel quarantined')
@@ -70,8 +72,46 @@ class Channel:
                     raise OSError('AT response exceeds limit')
                 if FINAL.fullmatch(line):
                     self.synchronized = True
+                    self.failed_at = None
                     return '\n'.join(lines) + '\n'
+        self.failed_at = time.monotonic()
         raise TimeoutError('Modem returned no final response; awaiting late reply')
+
+    def recover(self):
+        """Re-establish framing with two named read replies; never retry a write.
+
+        Some firmware setters omit their terminal response. Silence alone is
+        not a boundary: ignore old terminals until each probe's payload arrives.
+        Keep the same descriptor, including when recovery fails.
+        """
+        self.idle()
+        if self.synchronized:
+            return
+        if self.failed_at is not None and time.monotonic() - self.failed_at < 2:
+            raise TimeoutError('Previous AT command is still pending')
+        for command, pattern in [
+                (b'AT+CFUN?\r', re.compile(rb'^\+CFUN:\s*[0-9]+\s*$')),
+                (b'AT+CSQ\r', re.compile(rb'^\+CSQ:\s*[0-9]+\s*,\s*[0-9]+\s*$'))]:
+            self.idle()
+            self.synchronized = False
+            time.sleep(max(0, self.last_write + self.gap - time.monotonic()))
+            self.last_write = time.monotonic()
+            if os.write(self.fd, command) != len(command):
+                raise OSError('Short recovery probe write')
+            deadline, payload, complete = time.monotonic() + 3, False, False
+            while time.monotonic() < deadline and not complete:
+                for line in self.lines(deadline - time.monotonic()):
+                    if pattern.fullmatch(line):
+                        payload = True
+                    elif payload and line == b'OK':
+                        complete = True
+                    elif payload and FINAL.fullmatch(line):
+                        raise TimeoutError('Read-only AT recovery probe rejected')
+            if not complete:
+                self.failed_at = time.monotonic()
+                raise TimeoutError('AT recovery did not receive a complete named reply')
+        self.synchronized = True
+        self.failed_at = None
 
 
 def validate(request):
@@ -164,6 +204,10 @@ def serve(number):
                 # A client killed while waiting must not leave a queued write.
                 if select.select([client], [], [], 0)[0] and not client.recv(1, socket.MSG_PEEK):
                     continue
+                if not channel.synchronized:
+                    channel.recover()
+                    # Recovery may have consumed the queued request's budget.
+                    command, timeout = validate(request_data)
                 card = int((params / 'card').read_text())
                 if card not in (0, 1):
                     raise ValueError('Unknown active SIM card')

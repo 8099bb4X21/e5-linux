@@ -134,6 +134,18 @@ service_stopped() {
                         "uci set system.@system[0].timezone='SGT-8'\nuci commit system\n")
     defaults.chmod(0o755)
     (root / 'etc/e5/device-profile').write_text('t551m\n')
+    for source, target in [('charge-mode.py', 'usr/libexec/e5-charge-mode'),
+                           ('charge-screen.py', 'usr/libexec/e5-charge-screen'),
+                           ('charge-art.zip', 'usr/share/e5-charge/art.zip'),
+                           ('charge-mode-service', 'etc/init.d/e5-charge-mode')]:
+        destination = root / target
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        data = Path(__file__).with_name(source).read_bytes()
+        destination.write_bytes(data if source.endswith('.zip') else data.replace(b'\r\n', b'\n'))
+        destination.chmod(0o644 if source.endswith('.zip') else 0o755)
+    link = root / 'etc/rc.d/S14e5-charge-mode'
+    if not link.is_symlink():
+        link.symlink_to('../init.d/e5-charge-mode')
     runpy.run_path(str(Path(__file__).with_name('ui.py')))['stage'](root)
     service = root / 'etc/init.d/t551m-trial'
     shutil.copy2(Path(__file__).with_name('trial-service'), service)

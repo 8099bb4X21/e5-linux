@@ -15,6 +15,7 @@ NAMES = ('nr_fixnv1_a', 'nr_fixnv2_a', 'nr_fixnv1_b', 'nr_fixnv2_b',
          'nr_runtimenv1', 'nr_runtimenv2', 'nr_deltanv_a', 'nr_deltanv_b', 'calinv')
 STORE = Path('/opt/e5/nv')
 READY = Path('/run/t551m-nv-ready')
+BOOT_SOURCE = Path('/run/t551m-nv-source-sha256.json')
 PAIRS = (('nr_fixnv1_a', 'nr_fixnv2_a'), ('nr_fixnv1_b', 'nr_fixnv2_b'),
          ('nr_runtimenv1', 'nr_runtimenv2'))
 
@@ -130,6 +131,22 @@ def loop_for(target):
     return dev
 
 
+def keep_working_copy(name, target, changed, refresh):
+    """External OS updates do not invalidate an already isolated, valid store.
+
+    Keep the recorded origin fingerprint: do not pretend to import new source
+    data. Unchecksummed calibration/delta changes still require review, and
+    missing or corrupt working copies never silently fall back to the source.
+    """
+    if not changed or refresh:
+        return False
+    if not name.startswith(('nr_fixnv', 'nr_runtimenv')) or not target.is_file():
+        raise RuntimeError('Factory NV changed; explicitly refresh the working copy: ' + name)
+    validate_nv(target)
+    print('Source changed; retaining validated isolated working copy: ' + name)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--refresh', action='store_true', help='Refresh working copies changed by Android; requires stopped vendor daemons and no NV loops')
@@ -140,6 +157,7 @@ def main():
         if attached_loops():
             raise RuntimeError('Detach NV working loops before refreshing')
     READY.unlink(missing_ok=True)
+    BOOT_SOURCE.unlink(missing_ok=True)
     devices = {}
     for entry in Path('/sys/class/block').glob('mmcblk0p*/uevent'):
         props = dict(line.split('=', 1) for line in entry.read_text().splitlines() if '=' in line)
@@ -158,15 +176,16 @@ def main():
     STORE.mkdir(mode=0o700, exist_ok=True)
     manifest = STORE / 'factory-sha256.json'
     original = json.loads(manifest.read_text()) if manifest.exists() else {}
+    boot_source = {}
     for name, dev in devices.items():
         current = digest(dev)
+        boot_source[name] = current
         changed = name in original and original[name] != current
-        if changed and not args.refresh:
-            raise RuntimeError('Factory NV changed; explicitly refresh the working copy: ' + name)
         target = STORE / name
+        retained = keep_working_copy(name, target, changed, args.refresh)
         if target.exists() and name not in original and digest(target) != current:
             raise RuntimeError('Untracked NV working copy differs: ' + name)
-        if not target.exists() or changed:
+        if not target.exists() or changed and not retained:
             temporary = STORE / (name + '.tmp')
             with dev.open('rb') as src, temporary.open('wb') as dst:
                 shutil.copyfileobj(src, dst, 1024 * 1024)
@@ -179,7 +198,8 @@ def main():
             temporary.replace(target)
         target.chmod(0o660)
         os.chown(target, 1000, 1000)
-        original[name] = current
+        if not retained:
+            original[name] = current
     attached = attached_loops()
     for primary, backup in PAIRS:
         reconcile_pair(STORE / primary, STORE / backup, attached)
@@ -192,6 +212,10 @@ def main():
         link = Path('/dev/block/by-name') / name
         link.unlink(missing_ok=True)
         link.symlink_to(loop_for(STORE / name))
+    # Verify physical partitions against this boot's read-only baseline, while
+    # the persistent manifest continues to identify the working copies' origin.
+    BOOT_SOURCE.write_text(json.dumps(boot_source, indent=2) + '\n')
+    BOOT_SOURCE.chmod(0o600)
     READY.touch()
     print('T551M: factory NV read-only; validated writable working copies ready')
 
