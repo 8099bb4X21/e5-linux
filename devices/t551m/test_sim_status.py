@@ -11,7 +11,7 @@ class SimsTest(unittest.TestCase):
     def read(self,card,cmd):
         self.sent.append((card,cmd))
         return self.override.get(cmd, {'+CPIN?':'+CPIN: READY\nOK\n','+CFUN?':'+CFUN: 1\nOK\n',
-            '+COPS?':'+COPS: 0,0,"CHN-UNICOM",7\nOK' if card==0 else '+COPS: 0,2,"46011",11\nOK',
+            '+CSCS?;+COPS?':'+CSCS: "GSM"\n+COPS: 0,0,"CHN-UNICOM",7\nOK' if card==0 else '+CSCS: "UCS2"\n+COPS: 0,2,"46011",11\nOK',
             '+CEREG?':'OK\n','+C5GREG?':'OK\n',
             '+CESQ':'+CESQ: 99,99,255,255,14,50,255,255,255\nOK' if card==0 else '+CESQ: 99,99,255,255,255,255,74,53,67\nOK',
             '+SPENGMD=0,0,6':'255-255-400-0,1-0,0-4-0-3-600\nOK'}[cmd])
@@ -50,6 +50,13 @@ class SimsTest(unittest.TestCase):
         self.assertEqual(sims.collect(0,self.read)['registration'],'roaming')
         self.override['+C5GREG?']='+C5GREG: 2,1,"1234","5678",11\nOK'
         self.assertEqual(sims.collect(1,self.read)['registration'],'home')
+    def test_ucs2_operator_keeps_registration_and_signal(self):
+        self.override['+CSCS?;+COPS?']='+CSCS: "UCS2"\n+COPS: 0,0,"4E2D56FD8054901A",7\nOK'
+        row=sims.collect(0,self.read)
+        self.assertEqual(row['operator'],'中国联通')
+        self.assertEqual((row['tech'],row['signal']['rsrp']),('lte',-91))
+        self.assertEqual([cmd for _,cmd in self.sent if 'COPS' in cmd],['+CSCS?;+COPS?'])
+        self.assertFalse(any('CSCS=' in cmd for _,cmd in self.sent))
     def test_absent_locked_off(self):
         for reply,state in [('+CME ERROR: 10','absent'),('+CPIN: SIM PIN\nOK','locked')]:
             self.override['+CPIN?']=reply;self.sent=[]

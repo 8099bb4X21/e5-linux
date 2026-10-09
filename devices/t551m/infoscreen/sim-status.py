@@ -49,6 +49,23 @@ def registration(reply, prefix):
     return int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else None
 
 
+def operator_name(reply):
+    parts = field(reply, '+COPS')
+    if len(parts) < 3 or not parts[2]: return None
+    name = parts[2]
+    # Read the charset and name in one AT transaction. Do not change CSCS:
+    # other users of the modem (including SMS) may require UCS2.
+    charset = field(reply, '+CSCS')
+    if parts[1] in ('0', '1') and charset and charset[0].upper() == 'UCS2' and re.fullmatch(r'(?:[0-9a-fA-F]{4})+', name):
+        try:
+            decoded = bytes.fromhex(name).decode('utf-16-be')
+            if not any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in decoded):
+                return decoded
+        except UnicodeDecodeError:
+            pass  # Preserve malformed input; never lose the rest of this SIM snapshot.
+    return name
+
+
 def radio(act, lte, nr):
     # Serving NR measurements distinguish NSA from an LTE-only connection.
     if nr.get('rsrp') is not None:
@@ -94,8 +111,9 @@ def collect(card, read=query):
         power = field(read(card, '+CFUN?'), '+CFUN')
         if power and power[0] != '1':
             row['registration'] = 'disabled';return row
-        cops = field(read(card, '+COPS?'), '+COPS')
-        row['operator'] = cops[2] if len(cops) >= 3 and cops[2] else None
+        operator_reply = read(card, '+CSCS?;+COPS?')
+        cops = field(operator_reply, '+COPS')
+        row['operator'] = operator_name(operator_reply)
         act = int(cops[3]) if len(cops) >= 4 and cops[3].isdigit() else None
         row['act'] = act
         reg = registration(read(card, '+CEREG?'), '+CEREG')

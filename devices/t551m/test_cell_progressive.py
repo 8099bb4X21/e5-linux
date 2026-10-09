@@ -30,7 +30,7 @@ answers = {
     'AT+CEREG?': '+CEREG: 2,1,"0010","00123456",7',
     'AT+C5GREG?': '+C5GREG: 2,0',
     'AT+CESQ': '+CESQ: 99,99,255,255,20,50',
-    'AT+COPS?': '+COPS: 0,0,"TEST",7',
+    'AT+CSCS?;+COPS?': '+CSCS: "UCS2"\\n+COPS: 0,0,"4E2D56FD8054901A",7',
     'AT+SPENGMD=0,6,0': '8-3500-22-+9300-+1100-0-0-5-0-0-10-2',
     'AT+SPENGMD=0,6,6': '3500,23,+9600,+1200,0-0,0,0,0',
     'AT+CGMI': 'TEST', 'AT+CGMM': 'TEST', 'AT+CGMR': 'TEST',
@@ -83,6 +83,7 @@ class ProgressiveCollector(unittest.TestCase):
                     self.assertEqual(cell['ident']['model'], 'TEST')
                     self.assertEqual(cell['neigh'][0]['pci'], 23)
                     self.assertEqual(cell['card'], int(slot))
+                    self.assertEqual(cell['operator'],{'name':'中国联通','plmn':None,'act':7})
                     self.assertFalse((root / 'cache/collect.lck').exists())
                     commands = (root / 'commands').read_text()
                     self.assertNotIn('AT+SFUN', commands)
