@@ -60,11 +60,12 @@ def sources():
     app = replace(app, '<div class="card"><div class="sub">${esc(v.cmd)}</div>',
                   '<div class="card st-at-result"><div class="st-at-command">${esc(v.cmd)}</div>')
     app = replace(app, '<div class="smstext" style="margin-top:6px;font-size:13px">${esc(v.reply ?? t(\'at_running\'))}</div>',
-                  '${v.reply == null ? `<div class="screen-inline-loading" role="status"><i aria-hidden="true"></i>${esc(t(\'at_running\'))}</div>` : `<pre class="st-at-output">${esc(v.reply)}</pre>`}')
+                  '${v.reply == null ? \'\' : `<pre class="st-at-output">${esc(v.reply)}</pre>`}')
     app = replace(app, '<div class="card stnum">', '<div class="stnumber-editor"><div class="card stnum">')
     app = replace(app, '<div style="height:8px"></div><button class="strow" data-st="num:save"><span>${esc(t(\'save\'))}</span><span class="sv"></span></button>',
                   '<button class="strow" data-st="num:save"><span>${esc(t(\'save\'))}</span><span class="sv"></span></button></div>')
     app = replace(app, 'function openApp(m) {', 'let appReturnFocus = null;\nfunction openApp(m) {\n\tif (!appOpen) appReturnFocus = document.activeElement;')
+    app = replace(app, '\tappOpen = m;', '\tappOpen = m;\n\tT551M.page(page);')
     app = replace(app, 'f.onload = () => { observeAppInputs(f); f.focus(); };',
                   'f.onload = () => { if (appOpen !== m || f.hidden) return; T551M.app(f, m); observeAppInputs(f); f.focus({preventScroll:true}); };')
     app = replace(app, "\tconst f = $('app-frame');\n\tf.hidden = true;", "\tconst f = $('app-frame');\n\tf.onload = null;\n\tf.hidden = true;")
@@ -134,8 +135,8 @@ async function loadAdvanced() {
     app = replace(app, "setText('ad-cell', b ?", "setText('ad-cell', b && b.lte_cell_lock != null && b.nr_cell_lock != null ?")
     app = replace(app, "\tconst d = a.device ?? {}, b = a.baseband, s = a.sim;", '''
 	const d = a.device ?? {}, b = a.baseband, s = a.sim;
-	setText('ad-freshness', a.radio_pending ? (lang == 'zh' ? '正在更新无线信息…' : 'Updating radio details…') : a.radio_error ? (lang == 'zh' ? '部分无线信息暂不可用' : 'Some radio details unavailable') : '');
-	$('ad-freshness').hidden = !a.radio_pending && !a.radio_error;''')
+	setText('ad-freshness', a.radio_error ? (lang == 'zh' ? '部分无线信息暂不可用' : 'Some radio details unavailable') : '');
+	$('ad-freshness').hidden = !a.radio_error;''')
     api = (HERE / 'base/api.uc').read_text(encoding='utf-8')
     api = replace(api, 'function status() {', (HERE / 'sims.uc').read_text(encoding='utf-8') + '\nfunction status() {')
     api = replace(api, '\tlet m = modem_status();\n\treturn {', '\tlet sims = sim_status();\n\tlet m = card_modem(modem_status(), sims);\n\treturn {\n\t\tsims,')

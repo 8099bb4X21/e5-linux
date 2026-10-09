@@ -450,20 +450,25 @@ function loadState(index) {
 function paintPageLoad(index) {
 	const state = loadState(index), root = pages[index];
 	if (!root) return;
-	let node = root.querySelector(':scope > .screen-loading');
-	if (!node) {
-		node = document.createElement('div'); node.className = 'screen-loading'; node.hidden = true;
-		node.setAttribute('role', 'status'); node.innerHTML = '<i aria-hidden="true"></i><span></span>';
-		// Loading belongs to the content, below any navigation breadcrumb.
+	let node = root.querySelector(':scope > .screen-load-error');
+	if (!node && state.error) {
+		node = document.createElement('div'); node.className = 'screen-load-error'; node.hidden = true;
+		node.setAttribute('role', 'status');
 		const path = root.querySelector(':scope > .stpath');
 		root.insertBefore(node, path ? path.nextSibling : root.firstChild);
 	}
 	const waiting = state.count > 0 || state.pending;
-	node.hidden = !state.error && (!waiting || !state.shown);
-	node.classList.toggle('load-error', state.error);
 	root.setAttribute('aria-busy', String(waiting && !state.error));
-	node.querySelector('span').textContent = state.error
-		? (lang == 'zh' ? '加载失败，请重新进入页面重试' : 'Could not load. Reopen this page to retry.') : t('loading');
+	if (node) {
+		node.hidden = !state.error;
+		node.textContent = lang == 'zh' ? '加载失败，请重新进入页面重试' : 'Could not load. Reopen this page to retry.';
+	}
+	// A late reply from another page must not change the current title bar.
+	const indicator = $('mobile-loading');
+	if (index === page && indicator) {
+		indicator.hidden = !!appOpen || state.error || !waiting || !state.shown;
+		indicator.setAttribute('aria-label', t('loading'));
+	}
 }
 function beginPageLoad(index) {
 	const state = loadState(index);
@@ -1430,9 +1435,10 @@ async function stClick(key, el) {
 		if (k == 'atp') st.push(nv);
 		nv.reply = null;
 		stRender();
+		const done = beginPageLoad(P.settings);
 		const r = await fetch('/api/at', {
 			method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd })
-		}).then((r) => r.json()).catch(() => null);
+		}).then((r) => r.json()).catch(() => null).finally(() => done());
 		nv.reply = r?.ok ? (r.reply || 'OK') : `${t('failed')}: ${r?.error ?? ''}`;
 		nv.warn = r?.warning ? t('at_risky') : null;
 		if (stTop() === nv) stRender();

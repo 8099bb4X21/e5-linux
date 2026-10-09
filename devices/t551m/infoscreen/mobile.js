@@ -95,6 +95,13 @@ window.T551M = (() => {
     function pageChanged(index) {
         if (!mounted) return;
         el('mobile-title').textContent = appOpen ? lbl(appOpen.name) || appOpen.id : label(index);
+        const button = el('mobile-back'), icon = index === P.overview && !appOpen ? 'home' : 'back';
+        if (button.dataset.icon !== icon) {
+            button.innerHTML = svg(icon);
+            button.dataset.icon = icon;
+        }
+        button.setAttribute('aria-label', icon === 'home' ? words('主页', 'Home') : words('返回', 'Back'));
+        paintPageLoad(index);
         document.querySelectorAll('#mobile-nav button').forEach(button => {
             const active = +button.dataset.page == index;
             button.classList.toggle('active', active);
@@ -145,7 +152,7 @@ window.T551M = (() => {
     }
     function boot() {
         document.body.insertAdjacentHTML('beforeend', `
-<div id="mobile-toolbar"><button id="mobile-back" aria-label="返回">${svg('back')}</button><h1 id="mobile-title">概览</h1><button id="mobile-lock" aria-label="锁屏">${svg('lock')}</button><button id="mobile-more" aria-label="全部页面">${svg('menu')}</button></div>
+<div id="mobile-toolbar"><button id="mobile-back" aria-label="主页">${svg('home')}</button><h1 id="mobile-title">概览</h1><div id="mobile-loading" class="screen-loading" role="status" aria-label="读取中…" hidden><i aria-hidden="true"></i></div><button id="mobile-lock" aria-label="锁屏">${svg('lock')}</button><button id="mobile-more" aria-label="全部页面">${svg('menu')}</button></div>
 <nav id="mobile-nav" aria-label="主导航"></nav>
 <aside id="mobile-menu" hidden><div class="mobile-sheet-head"><h2 id="mobile-menu-title">全部页面</h2><button id="mobile-menu-close" aria-label="关闭">${svg('close')}</button></div><div class="mobile-grid">${titles.map((_, i) => `<button data-page="${i}">${svg(pageIcons[i])}<span data-page-label="${i}">${label(i)}</span></button>`).join('')}</div></aside>
 <section id="mobile-lockscreen" role="region" aria-label="锁屏"><div class="lock-top"><span id="lock-symbol">${svg('lock')}</span><div id="lock-date">—</div><div id="lock-time">--:--</div><div class="lock-online"><i></i><span id="lock-network">随身网络</span></div></div>
