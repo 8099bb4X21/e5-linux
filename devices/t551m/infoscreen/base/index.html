@@ -81,7 +81,11 @@
 
 	<!-- Shared per-SIM usage history; choosing a view does not switch data SIM. -->
 	<section class="page" data-title="traffic">
-		<div class="card traffic-scope"><label for="tf-slot" data-t="traffic_view"></label><select id="tf-slot"><option value="" data-t="traffic_data_sim"></option><option value="0">SIM 1</option><option value="1">SIM 2</option></select><div id="tf-state" class="sub" role="status"></div></div>
+		<div class="card traffic-scope">
+			<label for="tf-slot" data-t="traffic_view"></label>
+			<div class="traffic-select"><select id="tf-slot"><option value="" data-t="traffic_data_sim"></option><option value="0">SIM 1</option><option value="1">SIM 2</option></select></div>
+			<div id="tf-state" class="sub" role="status"></div>
+		</div>
 		<div class="card">
 			<div class="lh"><span data-t="today"></span></div>
 			<div class="tr"><span class="lbl2" data-t="wan"></span><span class="arrow">↓</span><span id="tf-day-rx" class="mid">--</span><span class="arrow up">↑</span><span id="tf-day-tx" class="mid">--</span></div>
