@@ -382,38 +382,44 @@ window.T551M = (() => {
     }
     function start(x, y, count) {
         if (count != 1) { resetGesture(); return; }
-        if (animation != null || performance.now() - wakeAt < 400 ||
-            y < innerHeight * .55 || dark || config.touch === false) return;
+        // Follow a deliberate swipe immediately after wake. Guard its release,
+        // not touch-down: dropping the start used to discard the whole swipe.
+        if (animation != null || y < innerHeight * .25 || dark || config.touch === false) return;
         const now = performance.now();
-        gesture = {x,y,lastX:x,lastY:y,time:now,samples:[{y,t:now}]};
+        gesture = {x,y,lastX:x,lastY:y,peakY:y,time:now,samples:[{y,t:now}]};
         el('mobile-lockscreen').classList.add('dragging');
         resetIdle();
     }
     function move(x, y, count) {
         if (!gesture) return;
-        if (count != 1 || Math.abs(x - gesture.x) > 64 || y > gesture.y + 20) { resetGesture(); return; }
+        const distance = Math.max(0, gesture.y - y);
+        // A thumb naturally travels in an arc. Reject mostly sideways motion,
+        // without imposing a fixed lateral limit on a long upward swipe.
+        if (count != 1 || Math.abs(x - gesture.x) > Math.max(72, distance * .8) || y > gesture.y + 20) { resetGesture(); return; }
         gesture.lastX = x; gesture.lastY = y;
+        gesture.peakY = Math.min(gesture.peakY, y);
         const now = performance.now();
         gesture.samples.push({y,t:now});
-        while (gesture.samples.length > 2 && now - gesture.samples[0].t > 100) gesture.samples.shift();
-        const distance = Math.max(0, gesture.y - y);
+        while (gesture.samples.length > 2 && now - gesture.samples[1].t > 120) gesture.samples.shift();
         el('mobile-lockscreen').style.transform = `translate3d(0,${-distance}px,0)`;
         el('mobile-lockscreen').style.opacity = String(Math.max(.25, 1 - distance / innerHeight * .85));
+        resetIdle();
     }
     function end(x, y) {
         if (!gesture) return;
         const dy = gesture.y-y, dx = Math.abs(gesture.x-x), elapsed = performance.now()-gesture.time;
-        const threshold = Math.max(100, innerHeight * (config.unlock_distance == 'long' ? .34 : .24));
+        const long = config.unlock_distance == 'long';
+        const threshold = Math.max(long ? 132 : 88, innerHeight * (long ? .30 : .20));
         const now = performance.now(), samples = gesture.samples;
-        const recent = samples.filter(p => now-p.t <= 120);
+        const recent = samples.filter(p => now-p.t <= 140);
         const first = recent[0], lastPoint = samples[samples.length-1];
-        // Recent speed, not the average since touch-down: holding or reversing
-        // at release cancels momentum. Project friction-limited stopping travel.
-        const velocity = first && now-lastPoint.t < 90 ? Math.max(0, (first.y-y) / Math.max(16, now-first.t)) : 0;
-        const reversed = samples.some(p => p.t >= now-70 && y-p.y > 8);
-        const projected = dy + Math.min(160, velocity*velocity / (2*.006));
-        const flick = dy >= (config.unlock_distance == 'long' ? 85 : 55) && velocity >= .65 && projected >= threshold;
-        if (!reversed && (dy >= threshold || flick) && dy > dx*1.8 && elapsed >= 70 && elapsed <= 2500) unlock(velocity);
+        // Recent speed loses momentum when held; a small release wobble is
+        // tolerated, while a deliberate pull back from the peak cancels.
+        const velocity = first && now-lastPoint.t < 100 ? Math.max(0, (first.y-y) / Math.max(16, now-first.t)) : 0;
+        const reversed = y-gesture.peakY > Math.max(16, innerHeight*.035);
+        const projected = dy + Math.min(160, velocity*velocity / (2*.0045));
+        const flick = dy >= (long ? 72 : 48) && velocity >= .5 && projected >= threshold;
+        if (!reversed && (dy >= threshold || flick) && dy > dx*1.35 && elapsed >= 24 && now-wakeAt >= 180) unlock(velocity);
         else resetGesture();
     }
     // Register on window before the legacy document handlers. Lock gestures
@@ -432,6 +438,7 @@ window.T551M = (() => {
             if (name.startsWith('touch')) {
                 const point = event.touches[0] || event.changedTouches[0];
                 if (name == 'touchcancel') resetGesture();
+                else if (!point || (name == 'touchend' && event.touches.length)) resetGesture();
                 else if (name == 'touchstart') start(point.clientX,point.clientY,event.touches.length);
                 else if (name == 'touchmove') move(point.clientX,point.clientY,event.touches.length);
                 else if (name == 'touchend') end(point.clientX,point.clientY);

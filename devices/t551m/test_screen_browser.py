@@ -180,7 +180,7 @@ def main():
         page.touchscreen.tap(35,450)
         swipe(end_y=380)
         swipe(end_x=270,end_y=350)
-        swipe(y=190,end_y=20)
+        swipe(y=80,end_y=0)
         assert page.evaluate('T551M.isLocked() && page === 0')
         # A second finger cancels the entire gesture.
         touch('touchStart',[(150,425)]); touch('touchMove',[(150,375)])
@@ -299,12 +299,19 @@ def main():
         fixtures['/api/status']['screen'].update(appearance)
         page.evaluate('(s)=>{Object.assign(last.screen,s);T551M.status(last)}',appearance)
         assert page.locator('.card:not(.rates)').first.evaluate('(e)=>getComputedStyle(e).backgroundColor')=='rgb(24, 33, 46)'
-        # Wake remains locked, rejects touches while dark and first 400ms.
+        # Wake remains locked; dark touches and immediate wake noise are blocked.
         page.evaluate('setBlank(true)')
         swipe()
         assert page.evaluate('blank && T551M.isLocked()')
         page.evaluate('setBlank(false)')
-        swipe(delay=2)
+        # Dispatch in one task to avoid CDP frame pacing stretching a burst into
+        # a deliberate swipe. The timing matrix covers an early sustained swipe.
+        page.evaluate('''() => {
+            const target=document.querySelector('#mobile-lockscreen');
+            for(const [type,y] of [['pointerdown',425],['pointermove',350],['pointerup',270]])
+                target.dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,pointerType:'mouse',buttons:type==='pointerup'?0:1,clientX:160,clientY:y}));
+        }''')
+        page.wait_for_timeout(320)
         assert page.evaluate('!blank && T551M.isLocked()')
         page.wait_for_timeout(500)
         swipe()
