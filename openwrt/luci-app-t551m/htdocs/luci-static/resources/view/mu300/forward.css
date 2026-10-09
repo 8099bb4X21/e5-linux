@@ -1,4 +1,13 @@
 /* Keep these rules local to the SMS view, including under the Argon theme. */
+.e5-sms-page #e5-sms-log {
+	max-height: 24rem;
+	max-height: min(24rem, 55vh);
+	overflow: auto;
+	overscroll-behavior: contain;
+	scrollbar-gutter: stable;
+	border-radius: 8px;
+}
+.e5-sms-page #e5-sms-log > .table { margin-bottom: 0; }
 .e5-sms-page .e5-sms-panel {
 	padding: 20px !important;
 	margin-bottom: 16px;

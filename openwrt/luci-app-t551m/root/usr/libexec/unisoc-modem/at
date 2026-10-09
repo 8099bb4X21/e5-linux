@@ -7,6 +7,14 @@ available=0
 timeout=8
 [ "${1:-}" = -t ] && { timeout=${2:-8}; shift 2; }
 cmd=${1:-}
+if [ -n "${MU300_SIM_SLOT:-}" ]; then
+	case "$MU300_SIM_SLOT" in 0|1) ;; *) echo 'Invalid SIM slot' >&2; exit 2 ;; esac
+	upper=$(printf '%s' "$cmd" | tr '[:lower:]' '[:upper:]')
+	case "$upper" in
+		*+SPACTCARD*|*+SPSWDATA*) echo 'The selected SIM scope cannot be overridden' >&2; exit 2 ;;
+		AT?*) cmd="AT+SPACTCARD=$MU300_SIM_SLOT;$(printf '%s' "$cmd" | cut -c 3-)" ;;
+	esac
+fi
 [ "$available" = 1 ] || [ -n "$cmd" ] || { echo "unisoc-at: command required" >&2; exit 2; }
 
 cfg() { uci -q get "unisoc_modem.main.$1" 2>/dev/null || true; }

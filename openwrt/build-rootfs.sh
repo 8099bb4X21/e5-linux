@@ -62,7 +62,9 @@
 # for the mainline kernel) next to the 5.15 ones; the image then runs on either kernel.
 # E5_ROOT_MODULES_ONLY=1 uses only that archive, without a local 5.15 build.
 #
-# E5_IMAGE_MB sets the image's size (default 1024).  Needs Docker with arm64
+# E5_DOCKER=1 installs Docker for a mainline KVM/container kernel. The service
+# starts on demand; the image defaults to 2048 MiB to leave room for containers.
+# E5_IMAGE_MB sets the image's size (default 1024, or 2048 with Docker). Needs Docker with arm64
 # (native on Apple silicon).
 set -euo pipefail
 VER=${E5_WRT_VER:-25.12.5}
@@ -82,7 +84,10 @@ SCREEN_PLUGINS=${E5_INFOSCREEN_PLUGINS-$TOP/../infoscreen-plugins}
 NAME=e5-openwrt-$VER-rootfs.tar.gz
 STANDALONE=${E5_STANDALONE:-}
 DEVICE_FILES=${E5_DEVICE_FILES:-1}
-IMAGE_MB=${E5_IMAGE_MB:-1024}
+CONTAINERS=${E5_DOCKER:-0}
+DEFAULT_IMAGE_MB=1024
+[ "$CONTAINERS" != 1 ] || DEFAULT_IMAGE_MB=2048
+IMAGE_MB=${E5_IMAGE_MB:-$DEFAULT_IMAGE_MB}
 FIRMWARE=${E5_FIRMWARE:-$TOP/rootfs/overlay/lib/firmware}
 ANDROID=${E5_ANDROID_SUBSET:-$TOP/work/android-subset}
 KBUILD=${E5_KBUILD:-$TOP/out_linux}
@@ -137,6 +142,10 @@ rm -rf "$RM" && mkdir -p "$RM"
 if [ -n "${E5_ROOT_MODULES:-}" ]; then
     tar -xf "$E5_ROOT_MODULES" -C "$RM"
     echo "root modules: $(ls "$RM/lib/modules" 2>/dev/null | tr '\n' ' ')($(find "$RM" -name '*.ko' | wc -l | tr -d ' ') modules)"
+fi
+if [ "$CONTAINERS" = 1 ]; then
+    find "$RM/lib/modules" -name container-support.json -print -quit 2>/dev/null | grep -q . || {
+        echo "E5_DOCKER=1 requires a verified mainline E5_ROOT_MODULES archive" >&2; exit 1; }
 fi
 # the vendor audio modules (e5-audio-dsp loads them), in every form: GPL, of
 # this kernel build, nothing of a device's
@@ -252,7 +261,7 @@ docker run --rm --platform linux/arm64 \
     -v "$WORK/e5-sim-probe":/in/e5-sim-probe:ro \
     -v "$SA":/in/sa:ro -e STANDALONE="$STANDALONE" -v "$RM":/in/root-modules:ro \
     -v "$WORK/extra":/in/extra:ro -e EXTRA_LIST="$EXTRA_LIST" -v "$TP":/in/transplant:ro \
-    -v "$TAROUT":/out -e NAME="$NAME" -e VERSION="$VERSION" -e E5_BUILD_EPOCH="${E5_BUILD_EPOCH:-}" \
+    -v "$TAROUT":/out -e NAME="$NAME" -e VERSION="$VERSION" -e E5_BUILD_EPOCH="${E5_BUILD_EPOCH:-}" -e CONTAINERS="$CONTAINERS" \
     e5-openwrt-base:$VER /bin/sh -euc '
 mkdir -p /var/lock /var/run /tmp
 apk update >/dev/null
@@ -265,13 +274,17 @@ apk add --allow-untrusted /in/apk/bluez-libs-*.apk /in/apk/bluez-daemon-*.apk /i
 # (alsa-utils: aplay and amixer for the speaker, e5-audio-dsp and e5-volume)
 # (curl: the webhook of the SMS forward, /usr/libexec/e5-sms)
 apk add wpad-basic-mbedtls wifi-scripts iwinfo iw ip-full bash mount-utils luci-proto-modemmanager \
-    dbus-utils alsa-utils curl >/dev/null
+    dbus-utils alsa-utils curl r8152-firmware >/dev/null
 # Bluetooth audio: PulseAudio built with BlueZ (the -avahi variant carries
 # the bluetooth modules), run by /etc/init.d/e5-pulseaudio, not by its own
 # init script (which forbids loading the modules a connecting device needs)
 apk add pulseaudio-daemon-avahi pulseaudio-tools >/dev/null
 # Reuse the tested Debian hostless FE_ST_VOICE backend for cellular audio.
 apk add python3 >/dev/null
+if [ "$CONTAINERS" = 1 ]; then
+    # Do not run dockerd post-install scripts inside the build container.
+    apk add --no-scripts docker dockerd iptables-nft ip6tables-nft resize2fs >/dev/null
+fi
 # attended sysupgrade flashes whole-disk images: that would overwrite the eMMC
 # (removed before the translations below, whose package for it would hold it)
 apk del luci-app-attendedsysupgrade attendedsysupgrade-common owut >/dev/null 2>&1 || true
@@ -328,6 +341,9 @@ printf "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02:
 printf "E5\n" > $R/etc/hostname
 
 cp -a /in/overlay/. $R/
+if [ "$CONTAINERS" = 1 ]; then
+    python3 $R/usr/libexec/e5-container-setup --root $R
+fi
 screen=
 if [ -d /in/infoscreen/root ]; then
     cp -a /in/infoscreen/root/. $R/
@@ -386,7 +402,7 @@ rm -f $R/etc/rc.d/*pulseaudio
 # (the cage package'"'"'s own kiosk service: cog on http://localhost/, which is LuCI,
 # shown at every boot before the info screen'"'"'s session takes the panel)
 rm -f $R/etc/rc.d/*cage
-for s in e5-hw e5-vendor e5-sipc-wwan e5-telnetd e5-boot-ok e5-sms-notify e5-charge e5-apn-auto e5-luci e5-audio e5-voice-audio e5-bt bluetoothd dbus modemmanager e5-usb-watch $screen; do
+for s in e5-hw e5-vendor e5-sipc-wwan e5-telnetd e5-boot-ok e5-sms-notify e5-charge e5-apn-auto e5-luci e5-audio e5-voice-audio e5-hfp e5-bt bluetoothd dbus modemmanager e5-usb-watch $screen; do
     n=$(sed -n "s/^START=//p" $R/etc/init.d/$s)
     ln -sf ../init.d/$s $R/etc/rc.d/S$n$s
 done

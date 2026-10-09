@@ -9,6 +9,7 @@
 #
 #   e5-volume                 the level, as JSON: {"level":N,"max":15,"card":true|false,"output":"speaker"|"bluetooth"}
 #   e5-volume set N | up | down
+#   During calls these keys/status control call volume; 'call' selects it explicitly.
 #   e5-volume apply           the saved level to the card (after e5-audio-dsp start)
 #   e5-volume play FILE|beep   play a sound (not while one is playing)
 #
@@ -49,7 +50,7 @@ apply() {
 status() {
 	local out=speaker
 	case "$(pa pactl get-default-sink 2>/dev/null)" in bluez_sink*) out=bluetooth ;; esac
-	printf '{"level":%d,"max":%d,"card":%s,"output":"%s"}\n' "$(level)" $MAX \
+	printf '{"level":%d,"max":%d,"kind":"media","card":%s,"output":"%s"}\n' "$(level)" $MAX \
 		"$([ -n "$(card)" ] && echo true || echo false)" "$out"
 }
 save() {
@@ -70,6 +71,17 @@ play() {
 	pidof aplay >/dev/null && return 0
 	aplay -q -D "hw:$c,3" "$f" >/dev/null 2>&1 &
 }
+
+case "${1:-}" in
+	''|set|up|down)
+		# Route physical keys to CP voice while a fresh call is active. Media
+		# apply/play remain explicit media operations, including startup/ringing.
+		if [ -x /usr/libexec/e5-call-volume ]; then
+			/usr/libexec/e5-call-volume auto "$@"
+			r=$?; [ "$r" = 3 ] || exit "$r"
+		fi ;;
+	call) shift; exec /usr/libexec/e5-call-volume "$@" ;;
+esac
 
 case "${1:-}" in
 	'') status ;;

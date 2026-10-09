@@ -159,7 +159,7 @@ return view.extend({
                 E('p', {}, '两张卡可以共用配置或分别转发，按短信来源卡选择目标。'),
                 mapEl,
                 E('h3', {}, '最近的转发'),
-                E('div', { 'id': 'e5-sms-log' }, this.renderLog(data[0]))
+                E('div', { 'id': 'e5-sms-log', 'role': 'region', 'aria-label': '最近的转发', 'tabindex': '0' }, this.renderLog(data[0]))
             ]);
         }, this));
     }

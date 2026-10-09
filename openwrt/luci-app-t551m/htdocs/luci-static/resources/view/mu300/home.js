@@ -8,17 +8,18 @@
  * 布局：顶部驻网卡片是唯一的卡片；其余都是全宽分区（链路与流量 / 邻区 / 无线·局域网·
  * 设备·SIM / 快捷控制）。锁频、短信、AT 终端在「蜂窝」子菜单。
  *
- * 数据只有一个来源：ubus mu300dash status（info 快照 + sig 快档蜂窝缓存 + cell 慢档缓存）。
- * 页面默认 1.5 s 一轮：信号/速率/CPU 每轮都刷；邻区/QoS/身份只在慢档时间戳变化时重绘。
+ * 状态使用 mu300dash status，网速单独用 rates 读取同卡接口计数器。
+ * 状态默认每 2 s、网速独立每 1 s 刷新；邻区/QoS/身份只在慢档时间戳变化时重绘。
  * 邻区行内「锁定」走 lock_set cell（SFUN 重启协议栈，约半分钟断网）；锁定状态来自
  * lock_get（页面加载时取一次，锁定操作后刷新）。 */
 
-var DEFAULT_POLL_S = 1.5;
+var DEFAULT_POLL_S = 2;
+var RATE_POLL_MS = 1000;
 var RATE_WIN = 40;
 
 function pollSeconds(value) {
 	var seconds = Number(value);
-	return Number.isFinite(seconds) && seconds >= 0.5 && seconds <= 60 ? seconds : DEFAULT_POLL_S;
+	return Number.isFinite(seconds) && seconds >= 2 && seconds <= 60 ? seconds : DEFAULT_POLL_S;
 }
 
 /* 工程口只提供 MCS/BLER；调制方式按 3GPP 常用 MCS table 1 就地换算，
@@ -67,31 +68,51 @@ return view.extend({
 		M.localize(root);
 		this.wire(root);
 		var self = this;
+		this._pollStopped = false;
 		var intervalMs = DEFAULT_POLL_S * 1000;
 		var config = L.resolveDefault(uci.load('unisoc_modem')).then(function() {
 			intervalMs = pollSeconds(uci.get('unisoc_modem', 'main', 'home_refresh_interval')) * 1000;
 		});
-		/* 立即取一次完整状态；不要同时重复执行 sysinfo 与 status 两轮本地采集。 */
+		function active() { return !self._pollStopped && document.documentElement.contains(root); }
+		function schedule(fn, started, ms, key) {
+			if (active()) self[key] = setTimeout(fn, Math.max(50, ms - (performance.now() - started)));
+		}
+		/* Schedule from request start: collection time does not extend the cadence.
+		 * Separate, non-overlapping rate requests never wait for slow sysinfo/AT. */
+		var firstStarted = performance.now();
 		var first = L.resolveDefault(M.callStatus()).then(function(st) {
-			self.update(st || {});
+			if (active() && st && st.info) self.update(st);
 		});
-		/* LuCI poll.add() truncates intervals to whole seconds. Use a one-shot
-		 * timer so 1.5 s remains 1.5 s and slow requests never overlap. */
 		function refresh() {
-			if (!document.documentElement.contains(root)) return;
-			L.resolveDefault(M.callStatus()).then(function(st) { self.update(st || {}); }).finally(function() {
-				if (document.documentElement.contains(root))
-					self._refreshTimer = setTimeout(refresh, intervalMs);
+			if (!active()) return;
+			var started = performance.now();
+			var request = document.hidden ? Promise.resolve() : L.resolveDefault(M.callStatus()).then(function(st) {
+				if (active() && st && st.info) self.update(st);
+			});
+			request.finally(function() {
+				schedule(refresh, started, intervalMs, '_refreshTimer');
 			});
 		}
+		function rates() {
+			if (!active()) return;
+			var started = performance.now();
+			var request = document.hidden ? Promise.resolve() : L.resolveDefault(M.callRates()).then(function(st) {
+				if (active() && st && !st.error) self.updateRates(st);
+			});
+			request.finally(function() { schedule(rates, started, RATE_POLL_MS, '_rateTimer'); });
+		}
+		this._rateTimer = setTimeout(rates, 0);
 		Promise.all([first, config]).then(function() {
-			self._refreshTimer = setTimeout(refresh, intervalMs);
+			schedule(refresh, firstStarted, intervalMs, '_refreshTimer');
 		});
+		M.simSelector(root);
 		return root;
 	},
 
 	unload: function() {
+		this._pollStopped = true;
 		clearTimeout(this._refreshTimer);
+		clearTimeout(this._rateTimer);
 	},
 
 	html: function() {
@@ -342,6 +363,38 @@ return view.extend({
 		if (el && this.lastCell) el.innerHTML = M.neighborRows(this.lastCell, this.lockedCell);
 	},
 
+	updateRates: function(st) {
+		var net = st.net, stamp = Number(st.ts);
+		if (!net || net.rx == null || net.tx == null || st.ts == null || !Number.isFinite(stamp)) {
+			this.lastNet = null;
+			this.dlHist = []; this.ulHist = [];
+			M.spark(M.v('spark-dl'), [], 0, 1, RATE_WIN);
+			M.spark(M.v('spark-ul'), [], 0, 1, RATE_WIN);
+			M.set('dl', '--'); M.set('ul', '--'); M.set('rx', '--'); M.set('tx', '--');
+			return;
+		}
+		var key = [st.card, st.device, st.ifindex].join(':');
+		var previous = this.lastNet;
+		if (previous && previous.key === key && stamp === previous.ts) return;
+		if (previous && previous.key === key && stamp > previous.ts && net.rx >= previous.rx && net.tx >= previous.tx) {
+			var dt = stamp - previous.ts;
+			var dl = (net.rx - previous.rx) / dt, ul = (net.tx - previous.tx) / dt;
+			M.set('dl', M.fmtRate(dl)); M.set('ul', M.fmtRate(ul));
+			this.dlHist.push(dl); this.ulHist.push(ul);
+			if (this.dlHist.length > RATE_WIN) { this.dlHist.shift(); this.ulHist.shift(); }
+			var peak = Math.max(1, Math.max.apply(null, this.dlHist.concat(this.ulHist)));
+			M.spark(M.v('spark-dl'), this.dlHist, 0, peak, RATE_WIN);
+			M.spark(M.v('spark-ul'), this.ulHist, 0, peak, RATE_WIN);
+		} else {
+			M.set('dl', '--'); M.set('ul', '--');
+			this.dlHist = []; this.ulHist = [];
+			M.spark(M.v('spark-dl'), [], 0, 1, RATE_WIN);
+			M.spark(M.v('spark-ul'), [], 0, 1, RATE_WIN);
+		}
+		M.set('rx', M.fmtBytes(net.rx)); M.set('tx', M.fmtBytes(net.tx));
+		this.lastNet = { key: key, ts: stamp, rx: net.rx, tx: net.tx };
+	},
+
 	update: function(st) {
 		var i = st.info || {};
 		this.lastInfo = i;
@@ -351,6 +404,11 @@ return view.extend({
 		}
 		/* 快档覆盖：sig（服务小区/注册，1.5 s 级）盖在慢档缓存 c 的对应字段上 */
 		var c = st.cell || null;
+		/* A staged refresh must not erase the last completed slow readings. */
+		if (c && c.partial && this.lastCell && c.card === this.lastCell.card) {
+			c = Object.assign({}, c, { ident: this.lastCell.ident, qos: this.lastCell.qos });
+			if (c.neigh_pending) c.neigh = this.lastCell.neigh;
+		}
 		var s = st.sig || null;
 		if (s && !s.error && (!c || !c.ts || (s.ts || 0) >= c.ts)) {
 			if (c && s.partial) {
@@ -365,7 +423,7 @@ return view.extend({
 		}
 		this.lastCell = c;
 		/* 慢档数据（邻区/运营商/身份）只在整份缓存的时间戳变化时重绘 */
-		var fullTs = (st.cell && st.cell.ts) || 0;
+		var fullTs = st.cell ? [st.cell.ts, st.cell.partial || 0, st.cell.neigh_pending || 0].join(':') : '';
 		var slowChanged = fullTs !== this.lastFullTs;
 		this.lastFullTs = fullTs;
 
@@ -436,23 +494,6 @@ return view.extend({
 		M.set('qci', qos && qos.qci != null ? qos.qci : '--');
 		M.set('ambr', qos && qos.dl != null ? qos.dl + ' / ' + qos.ul + ' Mbps' : '--');
 
-		var net = (i.net && (i.net.mobile || i.net.sipa_eth0)) || null;
-		if (net && this.lastNet && i.ts && this.lastNet.ts) {
-			var dt = i.ts - this.lastNet.ts;
-			if (dt > 0) {
-				var dl = (net.rx - this.lastNet.rx) / dt, ul = (net.tx - this.lastNet.tx) / dt;
-				M.set('dl', M.fmtRate(dl)); M.set('ul', M.fmtRate(ul));
-				this.dlHist.push(dl); this.ulHist.push(ul);
-				if (this.dlHist.length > RATE_WIN) { this.dlHist.shift(); this.ulHist.shift(); }
-				var peak = Math.max(1, Math.max.apply(null, this.dlHist.concat(this.ulHist)));
-				M.spark(M.v('spark-dl'), this.dlHist, 0, peak, RATE_WIN);
-				M.spark(M.v('spark-ul'), this.ulHist, 0, peak, RATE_WIN);
-			}
-		}
-		if (net) {
-			M.set('rx', M.fmtBytes(net.rx)); M.set('tx', M.fmtBytes(net.tx));
-			this.lastNet = { ts: i.ts, rx: net.rx, tx: net.tx };
-		}
 		var w = i.wan || {};
 		var traffic = i.traffic && i.traffic.clock_ok && i.ts - i.traffic.updated_at < 30 ? i.traffic : null;
 		M.set('tr-day', traffic ? M.fmtTrafficBytes(traffic.today_used) : '--');
@@ -568,6 +609,8 @@ return view.extend({
 
 		var b;
 		b = M.v('btn-data'); b.className = 'mud-btn' + (w.up ? ' on' : ''); b.textContent = '数据连接';
+		b.disabled = i.modem && i.modem.viewing_data_sim === 0;
+		b.title = b.disabled ? '该卡不是上网卡；切换查看不会切换上网卡' : '';
 		b = M.v('btn-radio'); b.className = 'mud-btn' + (c && c.cfun === 1 ? ' on' : ''); b.textContent = '蜂窝射频';
 		b = M.v('btn-wifi'); b.className = 'mud-btn' + (wf.up ? ' on' : ''); b.textContent = 'Wi-Fi 热点';
 		M.localize(this._root);

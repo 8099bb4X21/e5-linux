@@ -9,6 +9,7 @@ const BASE = getenv('MU300_TRAFFIC_DIR') || '/etc/unisoc-modem/traffic';
 const RUN = getenv('MU300_TRAFFIC_RUN') || '/run/unisoc-modem-traffic';
 const NET = getenv('MU300_TRAFFIC_SYS') || '/sys/class/net';
 const BUS = getenv('MU300_TRAFFIC_BUS') || 'unisoc.traffic';
+const CARD = getenv('MU300_TRAFFIC_CARD') || '/sys/module/sipc_wwan/parameters/card';
 const boot = trim(fs.readfile('/proc/sys/kernel/random/boot_id') || '');
 fs.mkdir('/etc/unisoc-modem', 448);
 fs.mkdir(BASE, 448); fs.mkdir(RUN, 448);
@@ -23,29 +24,30 @@ function atomic(path, value) {
     fs.chmod(tmp, 384);
     return fs.rename(tmp, path);
 }
-let db = read_json(RUN + '/state.json') ?? read_json(BASE + '/state.json') ?? core.fresh(time());
-if (db.version != 1 || type(db.days) != 'object' || type(db.months) != 'object')
-    die('Unsupported traffic database\n');
-db.config = core.config(db.config);
-let saved_at = 0, storage_error = false, resolved = '', resolve_at = 0;
+function active_slot() { return trim(fs.readfile(CARD) || '') == '1' ? 1 : 0; }
+let ledger = read_json(RUN + '/state.json') ?? read_json(BASE + '/state.json');
+if (ledger?.version == 1) {
+    // Preserve the original ledger once; never clone totals into both cards.
+    if (fs.stat(BASE + '/state-v1.json') == null && !atomic(BASE + '/state-v1.json', ledger))
+        die('Cannot preserve legacy traffic database\n');
+    let owner = ledger.last?.device == 'sipa_eth8' ? 1 : ledger.last?.device == 'sipa_eth0' ? 0 : active_slot();
+    let slots = [core.fresh(time()), core.fresh(time())];slots[owner] = ledger;
+    ledger = {version:2, legacy_owner:owner, slots};
+}
+ledger ??= {version:2, slots:[core.fresh(time()),core.fresh(time())]};
+if (ledger.version != 2 || length(ledger.slots ?? []) != 2) die('Unsupported traffic database\n');
+for (let db in ledger.slots) {
+    if (db.version != 1 || type(db.days) != 'object' || type(db.months) != 'object') die('Unsupported SIM traffic database\n');
+    db.config = core.config(db.config);
+}
+let saved_at = 0, storage_error = false;
 uloop.init();
 const bus = ubus.connect(null, 2);
 if (!bus) die('Traffic ubus connection failed\n');
 
-function resolve_device(now) {
-    if (db.config.device) return db.config.device;
-    if (now >= resolve_at && now < resolve_at + 30 && resolved) return resolved;
-    resolve_at = now;
-    let cfg = uci.cursor();
-    let explicit = cfg.get('unisoc_modem', 'main', 'data_device');
-    let iface = cfg.get('unisoc_modem', 'main', 'data_interface') || 'wan';
-    let net = explicit ? null : bus.call('network.interface.' + iface, 'status', {});
-    let name = explicit || net?.l3_device || net?.device;
-    if (name && match(name, /^[a-zA-Z0-9_.:-]{1,15}$/)) resolved = name;
-    return resolved;
-}
-function snapshot(now) {
-    let name = resolve_device(now);
+function snapshot(slot) {
+    // The SIPA net IDs belong to SIMs, even when only one carries data.
+    let name = slot == 1 ? 'sipa_eth8' : 'sipa_eth0';
     if (!name) return null;
     let rx = trim(fs.readfile(NET + '/' + name + '/statistics/rx_bytes') || '');
     let tx = trim(fs.readfile(NET + '/' + name + '/statistics/tx_bytes') || '');
@@ -53,26 +55,29 @@ function snapshot(now) {
     if (!match(rx, /^[0-9]+$/) || !match(tx, /^[0-9]+$/) || !match(idx, /^[0-9]+$/)) return null;
     return { device: name, boot: boot, ifindex: int(idx), rx: int(rx), tx: int(tx) };
 }
-function view(now) {
-    let s = core.status(db, now);
+function view(now, slot) {
+    let s = core.status(ledger.slots[slot], now);
     s.storage_error = storage_error;
+    s.slot = slot;
     return s;
 }
 function checkpoint(force) {
     let now = time();
-    if (!atomic(RUN + '/state.json', db)) storage_error = true;
+    if (!atomic(RUN + '/state.json', ledger)) storage_error = true;
     if (force || now - saved_at >= 60 || now < saved_at) {
-        if (atomic(BASE + '/state.json', db)) { saved_at = now; storage_error = false; }
+        if (atomic(BASE + '/state.json', ledger)) { saved_at = now; storage_error = false; }
         else storage_error = true;
     }
-    atomic(RUN + '/view.json', view(now));
+    atomic(RUN + '/view.json', view(now, active_slot()));
+    for (let slot in [0,1]) atomic(RUN + '/view-sim' + slot + '.json', view(now, slot));
 }
 function sample(force) {
     let now = time();
-    core.advance(db, snapshot(now), now);
+    for (let slot in [0,1]) core.advance(ledger.slots[slot], snapshot(slot), now);
     checkpoint(force);
 }
-function get_data() {
+function get_data(slot) {
+    let db = ledger.slots[slot];
     let days = [], months = [];
     for (let date in reverse(sort(keys(db.days)))) {
         if (length(days) >= 31) break;
@@ -82,16 +87,26 @@ function get_data() {
         if (length(months) >= 12) break;
         push(months, { date: date, rx: db.months[date].rx, tx: db.months[date].tx });
     }
-    return { config: db.config, status: view(time()), days: days, months: months };
+    return { slot, config: db.config, status: view(time(), slot), days: days, months: months };
+}
+function selected(req) {
+    let slot = req.args?.slot;
+    if (slot == null || slot == '') return active_slot();
+    if (slot != '0' && slot != '1') return null;
+    return int(slot);
 }
 const obj = bus.publish(BUS, {
-    get: { call: function(req) { return get_data(); } },
-    set: { args: { payload: '' }, call: function(req) {
+    get: { args:{slot:''}, call: function(req) { let slot=selected(req);return slot == null ? {error:'invalid_slot'} : get_data(slot); } },
+    set: { args: { payload: '', slot:'' }, call: function(req) {
+        let slot = selected(req);
+        if (slot == null) return {ok:0,error:'invalid_slot'};
+        let db = ledger.slots[slot];
         let input;
         try {
             if (length(req.args.payload || '') > 4096) die('invalid_config');
             input = json(req.args.payload);
             core.config(input);
+            if (input.device && input.device != (slot == 1 ? 'sipa_eth8' : 'sipa_eth0')) die('invalid_config');
             if (input.used_gb != null && time() < 1704067200) return { ok: 0, error: 'clock_unsynced' };
         } catch (e) { return { ok: 0, error: 'invalid_config' }; }
         sample(false);
@@ -99,12 +114,11 @@ const obj = bus.publish(BUS, {
         try { core.update_config(db, input, time()); }
         catch (e) { return { ok: 0, error: 'invalid_config' }; }
         // Persist the full transaction before acknowledging changed settings.
-        if (!atomic(BASE + '/state.json', db)) {
+        if (!atomic(BASE + '/state.json', ledger)) {
             db.config = previous; db.adjustment = adjustment; db.last = last;
             storage_error = true;
             return { ok: 0, error: 'storage_failed' };
         }
-        resolved = ''; resolve_at = 0;
         sample(true);
         return { ok: 1 };
     } },

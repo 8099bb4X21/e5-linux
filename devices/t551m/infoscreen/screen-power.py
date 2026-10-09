@@ -13,6 +13,27 @@ import time
 
 SYS = Path('/sys')
 LOCK = Path('/run/t551m-screen-power.lock')
+CONFIG = (Path('/etc/config/e5-infoscreen'), Path('/tmp/.uci/e5-infoscreen'))
+
+
+class TouchSetting:
+    """Keep libuci semantics, including unsaved deltas, without forking per tick."""
+    def __init__(self):
+        self.signature = None
+        self.allowed = True
+
+    def get(self):
+        signature = []
+        for path in CONFIG:
+            try:
+                st = path.stat()
+                signature.append((st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size))
+            except FileNotFoundError:
+                signature.append(None)
+        if signature != self.signature:
+            self.allowed = touch_allowed()
+            self.signature = signature
+        return self.allowed
 
 
 def touch_allowed():
@@ -35,14 +56,14 @@ def inhibit(touches, disabled):
     for path in touches:
         if path.read_text().strip() != value:
             path.write_text(value + '\n')
-        if path.read_text().strip() != value:
-            raise RuntimeError('Touch inhibition did not take effect')
+            if path.read_text().strip() != value:
+                raise RuntimeError('Touch inhibition did not take effect')
 
 
-def reconcile(level=None, allowed=None):
+def reconcile(level=None, allowed=None, paths=None):
     with LOCK.open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        backlights, touches = devices()
+        backlights, touches = paths if paths is not None else devices()
         if allowed is None:
             allowed = touch_allowed()
         if level is not None:
@@ -57,17 +78,15 @@ def reconcile(level=None, allowed=None):
 
 
 def watch():
-    allowed, refresh, last_error, previous_config = True, 0, None, None
+    setting, paths, last_error = TouchSetting(), None, None
     while True:
         try:
-            current_config = Path('/etc/config/e5-infoscreen').stat().st_mtime_ns
-            if time.monotonic() >= refresh or current_config != previous_config:
-                allowed = touch_allowed()
-                refresh = time.monotonic() + 1
-                previous_config = current_config
-            reconcile(allowed=allowed)
+            if paths is None:
+                paths = devices()
+            reconcile(allowed=setting.get(), paths=paths)
             last_error = None
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            paths = None  # rediscover if a driver/input device has disappeared
             if str(error) != last_error:
                 print('t551m-screen-power: ' + str(error), flush=True)
                 last_error = str(error)

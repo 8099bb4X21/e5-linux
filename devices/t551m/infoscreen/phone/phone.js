@@ -10,6 +10,9 @@ const words = {
  contactNumber:['电话号码','Phone number'], save:['保存','Save'], cancel:['取消','Cancel'],
  answer:['接听','Answer'], hangup:['挂断','End call'], delete:['删除','Delete'], deleteContact:['删除联系人？','Delete contact?'],
  speaker:['扬声器','Speaker'], mute:['静音','Mute mic'], audioWait:['通话音频尚未启动','Call audio has not started'],
+ audioOutput:['通话音频','Call audio'], receiver:['手机','Phone'], bluetooth:['蓝牙耳机','Bluetooth'],
+ btDisconnected:['未连接通话耳机','No call headset connected'], done:['完成','Done'],
+ connectingAudio:['连接蓝牙…','Connecting…'],
  noContacts:['暂无联系人 · 输入号码后按 ＋ 保存','No contacts · enter a number and press +'],
  idle:['待机','Ready'], offline:['服务不可用','Unavailable'], dialing:['正在拨出…','Calling…'],
  'ringing-out':['等待对方接听','Ringing…'], 'ringing-in':['来电','Incoming call'], waiting:['来电等待','Call waiting'],
@@ -128,6 +131,15 @@ function render() {
  const differentAudio=audio.active && audio.sim && c?.sim && audio.sim!==c.sim;
  $('speaker').disabled=!!pending||!audio.available||differentAudio; $('mute').disabled=!!pending||!audio.available||differentAudio;
  $('speaker').setAttribute('aria-pressed',String(!!audio.speaker));
+ const route=audio.route || (audio.speaker?'speaker':'receiver');
+ $('speaker').textContent=t(audio.route_pending?'connectingAudio':route);
+ $('speaker').setAttribute('aria-label',t('audioOutput')+' · '+t(route));
+ $('bluetooth-name').textContent=audio.bluetooth?.connected?(audio.bluetooth.device||t('bluetooth')):t('btDisconnected');
+ document.querySelectorAll('[data-route]').forEach(button=>{
+  button.setAttribute('aria-pressed',String(button.dataset.route===route));
+  button.disabled=!!pending||!audio.available||differentAudio||(button.dataset.route==='bluetooth'&&!audio.bluetooth?.connected);
+ });
+ if(!c)closeAudio();
  $('mute').setAttribute('aria-pressed',String(!!audio.muted));
  $('editor-save').disabled=!!pending; $('delete-confirm').disabled=!!pending;
  e5.keepAwake(!!c||!!pending);
@@ -209,7 +221,7 @@ $('delete-confirm').addEventListener('click',async()=>{
  if(await saveContacts(contacts.filter(c=>c.number!==deleteNumber))){$('delete-sheet').hidden=true;deleteNumber=null;}
 });
 function moveFocus(direction){
- const root=!$('editor').hidden?$('editor'):!$('delete-sheet').hidden?$('delete-sheet'):document.body;
+ const root=!$('audio-sheet').hidden?$('audio-sheet'):!$('editor').hidden?$('editor'):!$('delete-sheet').hidden?$('delete-sheet'):document.body;
  const items=[...root.querySelectorAll('button,input')].filter(el=>el.offsetParent!==null&&!el.disabled);
  if(!items.length)return;
  const current=document.activeElement;
@@ -236,6 +248,12 @@ function eraseInput(el){const a=el.selectionStart??el.value.length,b=el.selectio
 function insertInput(el,key){const a=el.selectionStart??el.value.length,b=el.selectionEnd??a;el.value=el.value.slice(0,a)+key+el.value.slice(b);el.setSelectionRange(a+key.length,a+key.length);}
 function key(k){
  if(k.repeat&&k.kind!=='digit')return true;
+ if(!$('audio-sheet').hidden){
+  if(k.kind==='back'){closeAudio();return true;}
+  if(k.kind==='ok'){if(document.activeElement?.tagName==='BUTTON')e5.press(document.activeElement);return true;}
+  if(['up','down','left','right'].includes(k.kind)){moveFocus(k.kind);return true;}
+  if(k.key!=='HangupPhone'&&k.kind!=='power')return true;
+ }
  if(!$('editor').hidden&&document.activeElement?.tagName==='INPUT'){
   if(k.kind==='digit'){insertInput(document.activeElement,k.key);return true;}
   if(k.kind==='back'){if(document.activeElement.value)eraseInput(document.activeElement);else closeEditor();return true;}
@@ -272,7 +290,20 @@ document.querySelectorAll('[data-sim]').forEach(button=>button.addEventListener(
 $('dial').addEventListener('click',dial);
 $('accept').addEventListener('click',()=>{const c=current();if(incoming(c))perform('answer',{id:c.id});});
 $('hangup').addEventListener('click',()=>{const c=current();if(c)perform('hangup',{id:c.id});});
-$('speaker').addEventListener('click',()=>{if(current())perform('audio',{speaker:!audio.speaker});});
+function closeAudio(){
+ if($('audio-sheet').hidden)return;
+ $('audio-sheet').hidden=true;$('speaker').setAttribute('aria-expanded','false');$('speaker').focus();
+}
+$('speaker').addEventListener('click',()=>{
+ if(!current())return;
+ $('audio-sheet').hidden=false;$('speaker').setAttribute('aria-expanded','true');
+ $('audio-sheet').querySelector('[data-route][aria-pressed="true"]')?.focus();
+});
+$('audio-close').addEventListener('click',closeAudio);
+$('audio-sheet').addEventListener('click',e=>{if(e.target===$('audio-sheet'))closeAudio();});
+document.querySelectorAll('[data-route]').forEach(button=>button.addEventListener('click',()=>{
+ const route=button.dataset.route;closeAudio();if(current())perform('audio',{route});
+}));
 $('mute').addEventListener('click',()=>{if(current())perform('audio',{muted:!audio.muted});});
 $('dtmf-toggle').addEventListener('click',()=>toggleKeypad(!dtmfOpen));
 document.querySelectorAll('[data-tone]').forEach(button=>button.addEventListener('click',()=>sendTone(button.dataset.tone)));
@@ -280,6 +311,6 @@ $('save-number').addEventListener('click',openEditor);
 $('backspace').addEventListener('click',()=>{if(!pending)setNumber(number.slice(0,-1));});
 $('editor-close').addEventListener('click',closeEditor);
 e5.onKey(key);
-e5.onBack(()=>{if(number){setNumber(number.slice(0,-1));return true;}return false;});
+e5.onBack(()=>{if(!$('audio-sheet').hidden){closeAudio();return true;}if(number){setNumber(number.slice(0,-1));return true;}return false;});
 e5.onLang(translate);
 translate();read();setInterval(read,350);setInterval(()=>{if(activeSince)$('call-duration').textContent=duration(Date.now()-activeSince);},1000);

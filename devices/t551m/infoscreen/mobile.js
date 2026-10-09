@@ -31,6 +31,7 @@ window.T551M = (() => {
     const lockedNow = () => screenLocked || dark;
     const navDefaults = [0,1,2,3,7];
     let navKey = '';
+    let appliedKey = '';
     function navigation() {
         const items = navDefaults.map((fallback, i) => {
             const value = config['nav_slot' + (i+1)];
@@ -62,10 +63,10 @@ window.T551M = (() => {
         if (!name) return name;
         const key = String(name).toUpperCase().replace(/[\s_\-]/g, '');
         const aliases = [
-            [['中国移动','中国移动通信','CHINAMOBILE','CHNMOBILE','CMCC'], ['中国移动','China Mobile']],
-            [['中国联通','CHINAUNICOM','CHNUNICOM','UNICOM','CUCC'], ['中国联通','China Unicom']],
-            [['中国电信','CHINATELECOM','CHNCT','CHNCTLTE','CTCC'], ['中国电信','China Telecom']],
-            [['中国广电','CHINABROADNET','CHNBG','CBN','CHINABROADCASTINGNETWORK'], ['中国广电','China Broadnet']]
+            [['中国移动','中国移动通信','CHINAMOBILE','CHNMOBILE','CMCC','46000','46002','46004','46007','46008'], ['中国移动','China Mobile']],
+            [['中国联通','CHINAUNICOM','CHNUNICOM','UNICOM','CUCC','46001','46006','46009'], ['中国联通','China Unicom']],
+            [['中国电信','CHINATELECOM','CHNCT','CHNCTLTE','CTCC','46003','46005','46011','46012'], ['中国电信','China Telecom']],
+            [['中国广电','CHINABROADNET','CHNBG','CBN','CHINABROADCASTINGNETWORK','46015'], ['中国广电','China Broadnet']]
         ];
         for (const [names, translated] of aliases) if (names.includes(key)) return words(...translated);
         return name;
@@ -101,6 +102,9 @@ window.T551M = (() => {
         });
     }
     function apply() {
+        const key = JSON.stringify([config, document.documentElement.lang, screenLocked]);
+        if (key === appliedKey) return;
+        appliedKey = key;
         const body = document.body;
         body.dataset.theme = config.ui_theme === 'light' ? 'light' : 'dark';
         const opacity = Number(config.ui_opacity ?? 70);
@@ -151,6 +155,7 @@ window.T551M = (() => {
         mounted = true;
         T551MPower.boot();
         el('bar-bat').insertAdjacentHTML('beforeend', '<svg class="battery-bolt" viewBox="0 0 12 16" aria-hidden="true"><path d="M7 1 2 9h4l-1 6 7-9H7z"/></svg>');
+        el('bar-bars').insertAdjacentHTML('afterend', '<span id="bar-dual" role="img" hidden>'+[0,1].map(slot=>`<span class="dual-row" id="bar-signal-${slot}"><i></i><i></i><i></i><i></i></span>`).join('')+'</span>');
         el('mobile-back').onclick = back;
         el('mobile-more').onclick = () => { menu(!menuOpen); resetIdle(); };
         el('mobile-menu-close').onclick = () => { menu(false); };
@@ -160,7 +165,9 @@ window.T551M = (() => {
             if (node) navigate(+node.dataset.page);
         };
         const rates = document.querySelector('[data-title="overview"] .rates');
-        rates.insertAdjacentHTML('afterbegin', '<div class="hero-label">LIVE CONNECTION<span>●</span></div>');
+        rates.insertAdjacentHTML('afterbegin', '<div class="hero-label"><span id="hero-uptime-label">本次运行时长</span><span id="hero-uptime">—</span></div>');
+        rates.insertAdjacentHTML('afterend', `<div id="home-usb" class="card home-usb" role="status" hidden><span class="home-usb-icon">${svg('usb')}</span><div><strong id="home-usb-title"></strong><small id="home-usb-detail"></small></div></div>`);
+        document.querySelector('[data-title="signal"] .cellhead').insertAdjacentHTML('afterend', `<div class="card sim-cards">${[0,1].map(slot => `<div class="sim-line" id="sim-line-${slot}"><div class="sim-heading"><b class="sim-slot">SIM ${slot+1}</b><strong id="sim-operator-${slot}">—</strong><span class="sim-role" id="sim-role-${slot}"></span></div><div class="sim-reading"><span id="sim-state-${slot}">—</span><strong id="sim-radio-${slot}">—</strong><span id="sim-signal-${slot}">—</span></div><small id="sim-note-${slot}"></small></div>`).join('')}</div>`);
         document.querySelector('[data-title="hotspot"] .qr').insertAdjacentHTML('afterbegin', '<div class="hotspot-qr-title" id="hotspot-scan-title">扫码即连</div><div id="hotspot-scan-note">用手机相机扫描，无需输入密码</div>');
         for (const span of ['day','mon']) {
             el('tf-'+span+'-rx').parentElement.insertAdjacentHTML('beforebegin', `<div class="traffic-used" id="tf-${span}-used">—</div>`);
@@ -173,9 +180,9 @@ window.T551M = (() => {
     function clock() {
         if (!mounted) return;
         const d = localParts(), pad = value => String(value).padStart(2, '0');
-        el('lock-time').textContent = `${pad(d.h)}:${pad(d.mi)}`;
+        setText('lock-time', `${pad(d.h)}:${pad(d.mi)}`);
         // localParts derives the device timezone, independent of the viewer.
-        el('lock-date').textContent = words(`${d.mo}月${d.d}日`, `${pad(d.mo)} / ${pad(d.d)}`);
+        setText('lock-date', words(`${d.mo}月${d.d}日`, `${pad(d.mo)} / ${pad(d.d)}`));
     }
     function amount(bytes, rate=false) {
         if (bytes == null || !Number.isFinite(+bytes)) return '—';
@@ -206,6 +213,8 @@ window.T551M = (() => {
         }
     }
     function metric(id, text) {
+        if (el(id).dataset.metric === text) return;
+        el(id).dataset.metric = text;
         const [number, unit = ''] = text.split(' ');
         el(id).replaceChildren(document.createTextNode(number));
         const small = document.createElement('small');
@@ -230,16 +239,64 @@ window.T551M = (() => {
         const lockWasEnabled = config.lock_enabled !== false;
         config = data.screen || {};
         if (config.lock_enabled === false && screenLocked && !dark && (first || lockWasEnabled)) finishUnlock();
+        // Polling/data delivery keeps its original cadence while the display
+        // is dark. Paint the newest snapshot on wake, not invisible DOM now.
+        if (dark) return;
         apply();
         clock();
+        setText('hero-uptime-label', words('本次运行时长', 'Uptime'));
+        setText('hero-uptime', data.system?.uptime == null ? '—' : fmtDuration(data.system.uptime));
+        const usb = data.usb || {}, attached = usb.devices || [];
+        const computer = ['enumerated','lease','online'].includes(usb.link) && usb.role !== 'host';
+        const usbHidden = !(usb.role === 'host' && attached.length || computer);
+        if (el('home-usb').hidden !== usbHidden) el('home-usb').hidden = usbHidden;
+        setText('home-usb-title', usb.role === 'host'
+            ? attached.map(d => words(usbDeviceName(d) + ' 已连接', usbDeviceName(d) + ' connected')).join('\n')
+            : computer ? words('USB 已连接', 'USB connected') : '');
+        setText('home-usb-detail', usb.role === 'host'
+            ? words(`OTG 主机 · ${attached.length} 台设备`, `OTG host · ${attached.length} device(s)`)
+            : computer ? words('设备模式 · 已连接电脑', 'Device mode · Computer connected') : '');
+        const inserted = (data.sims || []).filter(s => s.present === true);
+        if (el('bar-dual').hidden !== (inserted.length < 2)) el('bar-dual').hidden = inserted.length < 2;
+        const singleDisplay = inserted.length >= 2 ? 'none' : '';
+        if (el('bar-bars').style.display !== singleDisplay) el('bar-bars').style.display = singleDisplay;
+        const primary = Number(data.modem?.sim_card ?? data.sims?.find(s=>s.data)?.slot ?? 0);
+        const descriptions=[];
+        for (let slot=0; slot<2; slot++) {
+            const sim=data.sims?.find(s=>s.slot===slot), rsrp=sim?.signal?.rsrp;
+            const bars=sim?.stale || sim?.error || rsrp == null ? 0 : rsrp>=-90 ? 4 : rsrp>=-100 ? 3 : rsrp>=-110 ? 2 : 1;
+            const row = el('bar-signal-'+slot);
+            row.classList.toggle('secondary', slot !== primary);
+            row.querySelectorAll('i').forEach((node,i)=>node.classList.toggle('on',i<bars));
+            descriptions.push(`SIM ${slot+1}: ${bars}/4`);
+        }
+        const description=descriptions.join(', ');
+        if(el('bar-dual').getAttribute('aria-label')!==description)el('bar-dual').setAttribute('aria-label',description);
+        const states = {
+            home:['已注册','Registered'], roaming:['漫游','Roaming'], searching:['搜网中','Searching'],
+            denied:['注册被拒绝','Registration denied'], idle:['未注册','Not registered'],
+            emergency:['仅紧急服务','Emergency only'], absent:['未插卡','No SIM'],
+            locked:['SIM 已锁定','SIM locked'], disabled:['射频关闭','Radio off'],
+            camped:['已驻网','Camped'], unknown:['状态未知','Unknown']
+        };
+        for (let slot=0; slot<2; slot++) {
+            const sim = data.sims?.find(s => s.slot === slot) || {};
+            setText('sim-operator-'+slot, operator(sim.operator) || words('待获取运营商','Operator unavailable'));
+            setText('sim-role-'+slot, slot === data.modem?.sim_card ? words('数据卡','Data') : words('副卡','Secondary'));
+            setText('sim-state-'+slot, words(...(states[sim.registration] || states.unknown)));
+            setText('sim-radio-'+slot, sim.radio_label || '—');
+            setText('sim-signal-'+slot, sim.signal?.rsrp == null ? '— dBm' : sim.signal.rsrp+' dBm');
+            setText('sim-note-'+slot, sim.stale || sim.error ? words('状态暂不可用','Status unavailable') : sim.registration === 'camped' ? words('注册详情未上报','Registration details not reported') : '');
+            el('sim-line-'+slot).classList.toggle('data-sim', slot === data.modem?.sim_card);
+        }
         for (const direction of ['rx','tx']) {
             const [number, unit] = speed(data.traffic?.[direction+'_rate']);
             metric('lock-'+direction, number+' '+unit);
             // A settings save updates both surfaces before the next poll.
-            el('ov-'+direction).textContent = number;
-            el('ov-'+direction+'-u').textContent = unit;
+            setText('ov-'+direction, number);
+            setText('ov-'+direction+'-u', unit);
         }
-        el('lock-network').textContent = data.wan?.up ? words('蜂窝网络已连接', 'Mobile network connected') : words('等待网络连接', 'Connecting');
+        setText('lock-network', data.wan?.up ? words('蜂窝网络已连接', 'Mobile network connected') : words('等待网络连接', 'Connecting'));
         el('lock-network').parentNode.classList.toggle('offline', !data.wan?.up);
         if (screenLocked) usage();
         if (first) {
@@ -282,6 +339,7 @@ window.T551M = (() => {
         blockUntil = performance.now() + 450;
         resetGesture();
         resetIdle();
+        if (last) render(last);
     }
     function unlock(velocity=0) {
         if (animation != null) return;
@@ -298,6 +356,7 @@ window.T551M = (() => {
         lock();
         if (!on && config.lock_enabled === false) finishUnlock();
         apply();
+        if (!on && last) status(last);
     }
     function start(x, y, count) {
         if (count != 1) { resetGesture(); return; }
@@ -438,6 +497,7 @@ window.T551M = (() => {
     }
     function appClosed(previousFocus) {
         pageChanged(page);
+        if (last && !dark) render(last);
         // Pages are laid out side by side. Focusing a button on another page
         // scrolls the root viewport, independently of our translateX routing.
         const visible = previousFocus?.isConnected && previousFocus.offsetParent !== null &&
@@ -465,7 +525,8 @@ window.T551M = (() => {
         usb:'M12 20V3m-3 3 3-3 3 3M12 16l-6-4V9m6 4 6-3V7M4 6h4v3H4zM16 4h4v3h-4z',
         bluetooth:'M7 7l10 10-5 4V3l5 4L7 17',
         chip:'M6 6h12v12H6zM9 9h6v6H9zM9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3',
-        refresh:'M20 7v5h-5M4 17v-5h5M5 8a8 8 0 0 1 13-3l2 3M4 16l2 3a8 8 0 0 0 13-3',
+        refresh:'M3 11a9 9 0 0 1 15.36-6.36L21 7M21 3v4h-4M21 13a9 9 0 0 1-15.36 6.36L3 17M3 21v-4h4',
+        navigation:'M5 3h14a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1M4 15h16M8 18h.01M12 18h.01M16 18h.01',
         download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
         power:'M12 2v10M7 5a9 9 0 1 0 10 0',
         check:'m5 12 4 4L19 6',
@@ -480,15 +541,16 @@ window.T551M = (() => {
         root.dataset.view = view.view;
         const names = {
             network:'signal',at:'terminal',devices:'device',appmgr:'apps',bluetooth:'bluetooth',
-            charge:'battery',notify:'bell',sound:'volume',screen:'device',ui:'palette',navigation:'layout',usb:'usb',system:'chip',about:'info',
+            charge:'battery',notify:'bell',sound:'volume',screen:'device',ui:'palette',navigation:'navigation',usb:'usb',system:'chip',about:'info',
             speed_unit:'traffic',ui_theme:'palette',ui_opacity:'opacity',ui_size:'type',ui_accent:'palette',ui_density:'density',ui_motion:'motion',
-            status_bar:'layout',nav_bar:'layout',lock_enabled:'lock',lock_daily:'traffic',lock_monthly:'traffic',lock_speed:'signal',unlock_distance:'touch',
-            brightness:'sun',idle:'clock',touch:'touch',lang:'globe',volume:'volume',vibrate:'bell',
+            status_bar:'layout',nav_bar:'navigation',lock_enabled:'lock',lock_daily:'traffic',lock_monthly:'traffic',lock_speed:'signal',unlock_distance:'touch',
+            brightness:'sun',idle:'clock',touch:'touch',lang:'globe',volume:'volume',call_volume:'phone',vibrate:'bell',
             sim_card:'simcard',apn:'globe',net_mode:'signal',nr_mode:'signal',lte_bands:'signal',nr_bands:'signal',cell_lock:'lock',bands_default:'refresh',reconnect:'refresh',
             start:'battery',stop:'battery',full_once:'battery',state:'info',timezone:'globe',clock_seconds:'clock',
             version:'info',built:'clock',screen_version:'info',update_check:'refresh',update_apply:'download',update_rollback:'refresh',
             traffic_clear:'trash',next_boot:'power',default_boot:'power',reboot:'refresh',poweroff:'power',android_once:'power',
             check:'search',diagnosis:'info',wireless_error:'wifi',hardware_error:'chip',controller:'usb',host_address:'device',reset_status:'info',reset:'refresh',
+            usb_role_state:'usb',usb_role:'usb',usb_host_boot:'power',usb_net_current:'globe',usb_net_mode:'globe',usb_net_scope:'clock',usb_net_auto:'check',usb_lan_auto:'device',
             name:'info',maintainer:'user',copyright:'shield',license:'shield',donate:'heart',disclaimer:'info',
             mac:'device',ip:'globe',via:'wifi',appid:'apps',appver:'info',appkind:'apps',appdesc:'info',btname:'bluetooth',btmac:'bluetooth',btst:'info'
         };

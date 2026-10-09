@@ -15,7 +15,7 @@ def main():
     ap.add_argument('--port')
     ap.add_argument('--timeout', type=float, default=15)
     a = ap.parse_args()
-    ports = [p.device for p in list_ports.comports() if (p.vid, p.pid) == (0x0525, 0xa4a1)]
+    ports = [p.device for p in list_ports.comports() if p.vid == 0x0525 and p.pid in (0xa4a1, 0xa4a2, 0xa4a3)]
     if not a.port and len(ports) != 1:
         raise SystemExit('Expected one Linux ACM console; use --port')
     with serial.Serial(a.port or ports[0], 115200, timeout=.2) as s:

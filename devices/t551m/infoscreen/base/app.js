@@ -11,6 +11,7 @@
 
 const I18N = {
 	zh: {
+		call_volume: '通话音量',
 		overview: '概览', signal: '信号', sms: '短信', hotspot: '热点', device: '设备',
 		back: '返回', delete: '删除', delete_confirm: '再按一次删除', deleted: '已删除',
 		no_sms: '没有短信', unknown_sender: '未知号码', new_sms: '新短信',
@@ -50,6 +51,7 @@ const I18N = {
 		excellent: '极好', good: '好', fair: '一般', weak: '弱', poor: '差'
 	},
 	en: {
+		call_volume: 'Call volume',
 		overview: 'Overview', signal: 'Signal', sms: 'Messages', hotspot: 'Hotspot', device: 'Device',
 		back: 'Back', delete: 'Delete', delete_confirm: 'Press again to delete', deleted: 'Deleted',
 		no_sms: 'No messages', unknown_sender: 'Unknown', new_sms: 'New message',
@@ -221,8 +223,10 @@ function renderBar(st) {
 	setText('bar-tech', m.tech ? techName(m.tech) : '--');
 	tech.classList.toggle('off', !st.wan.up);
 
-	const q = m.quality ?? 0;
-	const n = !m.present || m.quality == null ? 0 : q >= 75 ? 4 : q >= 50 ? 3 : q >= 25 ? 2 : q > 0 ? 1 : 0;
+	const inserted = (st.sims || []).filter(s => s.present === true);
+	const single = inserted.length === 1 ? inserted[0] : null;
+	const q = single ? (single.stale || single.error || single.signal?.rsrp == null ? 0 : Math.max(0, Math.min(100, (single.signal.rsrp + 120) * 2.5))) : (m.quality ?? 0);
+	const n = q >= 75 ? 4 : q >= 50 ? 3 : q >= 25 ? 2 : q > 0 ? 1 : 0;
 	$('bar-bars').querySelectorAll('i').forEach((el, i) => el.classList.toggle('on', i < n));
 
 	const b = st.battery, bat = $('bar-bat');
@@ -321,11 +325,11 @@ function usage(id, used, total) {
 
 function renderSignal(st) {
 	const m = st.modem, c = m.cell;
-	setText('sg-tech', m.tech ? techName(m.tech) : '--');
+	setText('sg-tech', m.radio_label || (m.tech ? techName(m.tech) : '--'));
 	setText('sg-band', c?.band ?? '');
 	setText('sg-op', [m.operator, m.registration == 'roaming' ? t('roaming') : null].filter(Boolean).join(' · ') || '--');
 	const sig = m.signal ?? {};
-	for (const [kind, v, unit] of [['rsrp', sig.rsrp, ' dBm'], ['rsrq', sig.rsrq, ' dB'], ['sinr', sig.snr, ' dB']]) {
+	for (const [kind, v, unit] of [['rsrp', sig.rsrp, ' dBm'], ['sinr', sig.snr, ' dB'], ['rsrq', sig.rsrq, ' dB']]) {
 		const g = grade(kind, v);
 		setText('sg-' + kind, v == null ? '--' : `${v.toFixed(1)}${unit} · ${t(g.word)}`);
 		const bar = $('sg-' + kind + '-bar');
@@ -363,9 +367,7 @@ async function renderHotspot(st) {
 	if (w.ssid && qrFor !== qrKey) {
 		qrFor = qrKey;
 		try {
-			const r = await fetch('/api/qr', { cache: 'no-store' });
-			setHTML('hs-qr', r.ok ? await r.text() : '');
-			if (!r.ok) qrFor = null;
+			setHTML('hs-qr', await pageRead('/api/qr', P.hotspot, 'text'));
 		} catch (e) { qrFor = null; }
 	}
 
@@ -376,9 +378,18 @@ async function renderHotspot(st) {
 	).join('') : `<div class="sub">${esc(t('none'))}</div>`);
 }
 
+function usbDeviceName(d) {
+	const name = d.name || 'USB';
+	if (d.kind !== 'ethernet') return name;
+	const label = lang == 'zh' ? 'USB 网卡' : 'USB Ethernet';
+	return name === 'USB' ? label : `${label} · ${name}`;
+}
+
 // the USB row: what the link is, the host's address, its traffic while it uses the E5
 function usbText(u) {
+	if (u?.role == 'host') return (u.devices || []).map(usbDeviceName).join(' · ') || (lang == 'zh' ? 'OTG 主机，等待设备' : 'OTG host, waiting for device');
 	if (!u) return '--';
+	if (u.link == 'host') return lang == 'zh' ? 'USB 供电，未建立数据连接' : 'USB power, no data connection';
 	let s = t('usb_' + u.link);
 	if ((u.link == 'lease' || u.link == 'online') && u.ip) s += ` · ${u.ip}`;
 	// (the host's down is what the E5 sends on usb0)
@@ -403,11 +414,12 @@ function renderDevice(st) {
 
 function render(st) {
 	renderBar(st);
-	renderOverview(st);
-	renderSignal(st);
-	renderHotspot(st);
-	renderDevice(st);
 	renderUpdateNotice();
+	if (window.T551M?.isLocked() || appOpen) return;
+	if (page == P.overview) renderOverview(st);
+	else if (page == P.signal) renderSignal(st);
+	else if (page == P.hotspot) renderHotspot(st);
+	else if (page == P.device) renderDevice(st);
 }
 
 /* ---------- clock ---------- */
@@ -430,10 +442,78 @@ setInterval(() => { if (!blank) tickClock(); }, 1000);
 
 /* ---------- data ---------- */
 
+const pageLoads = new Map(), pageRequests = new Map();
+function loadState(index) {
+	if (!pageLoads.has(index)) pageLoads.set(index, { count: 0, pending: false, error: false, timer: null, shown: false });
+	return pageLoads.get(index);
+}
+function paintPageLoad(index) {
+	const state = loadState(index), root = pages[index];
+	if (!root) return;
+	let node = root.querySelector(':scope > .screen-loading');
+	if (!node) {
+		node = document.createElement('div'); node.className = 'screen-loading'; node.hidden = true;
+		node.setAttribute('role', 'status'); node.innerHTML = '<i aria-hidden="true"></i><span></span>';
+		// Loading belongs to the content, below any navigation breadcrumb.
+		const path = root.querySelector(':scope > .stpath');
+		root.insertBefore(node, path ? path.nextSibling : root.firstChild);
+	}
+	const waiting = state.count > 0 || state.pending;
+	node.hidden = !state.error && (!waiting || !state.shown);
+	node.classList.toggle('load-error', state.error);
+	root.setAttribute('aria-busy', String(waiting && !state.error));
+	node.querySelector('span').textContent = state.error
+		? (lang == 'zh' ? '加载失败，请重新进入页面重试' : 'Could not load. Reopen this page to retry.') : t('loading');
+}
+function beginPageLoad(index) {
+	const state = loadState(index);
+	state.count++; state.error = false;
+	paintPageLoad(index);
+	if (!state.timer && !state.shown) state.timer = setTimeout(() => {
+		state.timer = null; state.shown = true; paintPageLoad(index);
+	}, 150);
+	let ended = false;
+	return error => {
+		if (ended) return; ended = true;
+		state.count--; state.error ||= !!error;
+		if (!state.count && !state.pending) {
+			clearTimeout(state.timer); state.timer = null; state.shown = false;
+		}
+		paintPageLoad(index);
+	};
+}
+function pageLoadPending(index, pending) {
+	const state = loadState(index); state.pending = !!pending;
+	if (pending) state.shown = true;
+	else if (!state.count) {
+		clearTimeout(state.timer); state.timer = null; state.shown = false;
+	}
+	paintPageLoad(index);
+}
+function pageRead(path, index, type = 'json') {
+	const key = index + ':' + path;
+	if (pageRequests.has(key)) return pageRequests.get(key);
+	const done = beginPageLoad(index), controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), 25000);
+	let failed = false;
+	const request = fetch(path, { cache: 'no-store', signal: controller.signal }).then(async response => {
+		if (!response.ok) throw new Error('HTTP ' + response.status);
+		return type == 'text' ? await response.text() : await response.json();
+	}).catch(error => { failed = true; throw error; }).finally(() => {
+		clearTimeout(timer); pageRequests.delete(key); done(failed);
+	});
+	pageRequests.set(key, request);
+	return request;
+}
+
 async function poll() {
 	clearTimeout(pollTimer);
+	const done = last == null ? beginPageLoad(P.overview) : () => {};
+	const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 25000);
+	let failed = false;
 	try {
-		const r = await fetch('/api/status', { cache: 'no-store' });
+		const r = await fetch('/api/status', { cache: 'no-store', signal: controller.signal });
+		if (!r.ok) throw new Error('HTTP ' + r.status);
 		if (r.ok) {
 			const st = await r.json();
 			const first = last == null;
@@ -452,8 +532,11 @@ async function poll() {
 			pollUpdate();
 		}
 	} catch (e) {
+		failed = true;
 		console.log('poll: ' + e);
 	}
+	clearTimeout(timeout);
+	done(failed);
 	pollTimer = setTimeout(poll, blank ? POLL_BLANK : POLL_AWAKE);
 }
 
@@ -540,6 +623,7 @@ async function volumeKey(step) {
 	if (blank) return;
 	resetIdle();
 	const osd = $('vol-osd');
+	setText('vol-label', r.kind === 'call' ? t('call_volume') : t('volume'));
 	setText('vol-n', r.level > 0 ? String(r.level) : t('muted'));
 	$('vol-bar').style.width = Math.round(r.level / (r.max || 15) * 100) + '%';
 	osd.classList.add('show');
@@ -652,11 +736,13 @@ function keyLock(power, star) {
 
 function showPage(n) {
 	page = (n + pages.length) % pages.length;
+	pages.forEach((node, index) => node.classList.toggle('is-current', index == page));
 	$('pages').style.transform = `translateX(${-100 * page}%)`;
 	$('dots').innerHTML = pages.map((_, i) => `<i class="${i == page ? 'on' : ''}"></i>`).join('');
 	$('foot-title').textContent = t(pages[page].dataset.title);
 	if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 	pages[page].scrollTop = 0;
+	if (last) render(last);
 	if (page == P.hotspot) {
 		qrFor = null;
 		if (last) renderHotspot(last);
@@ -872,12 +958,12 @@ function fmtSmsTime(ts) {
 
 async function loadSms() {
 	try {
-		const r = await fetch('/api/sms', { cache: 'no-store' });
-		if (r.ok) smsList = (await r.json()).messages ?? [];
+		const data = await pageRead('/api/sms', P.sms);
+		smsList = data.messages ?? [];
+		renderSmsList();
 	} catch (e) {
 		console.log('sms: ' + e);
 	}
-	renderSmsList();
 	if (smsOpen != null) {
 		const current = smsList.find(m => m.id == smsOpen);
 		if (current) {
@@ -995,8 +1081,7 @@ on('sv-delete', 'click', async () => {
 async function loadTraffic() {
 	let u = null;
 	try {
-		const r = await fetch('/api/traffic', { cache: 'no-store' });
-		if (r.ok) u = await r.json();
+		u = await pageRead('/api/traffic', P.traffic);
 	} catch (e) {
 		console.log('traffic: ' + e);
 	}
@@ -1098,7 +1183,7 @@ on('ad-moretemps', 'click', () => {
 
 on('ad-showids', 'click', async () => {
 	if (showIds) return hideIds();
-	const r = await fetch('/api/identity', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+	const r = await pageRead('/api/identity', P.adv_info).catch(() => null);
 	if (!r) return;
 	showIds = true;
 	setText('id-imei', r.imei ?? '--');
@@ -1124,15 +1209,15 @@ async function stOpen() {
 	if (!st.length) st = [{ view: 'menu' }];
 	stRender();
 	if (!stCats) {
-		const r = await fetch('/api/settings', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
-		stCats = r?.categories ?? [];
+		const r = await pageRead('/api/settings', P.settings).catch(() => null);
+		if (r) stCats = r.categories ?? [];
 		stRender();
 	}
 }
 
 async function stLoadCat(v) {
-	const r = await fetch('/api/settings/' + v.cat.id, { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
-	v.items = r?.items ?? [];
+	const r = await pageRead('/api/settings/' + v.cat.id, P.settings).catch(() => null);
+	if (r) v.items = r.items ?? [];
 	if (stTop() === v) stRender();
 }
 
@@ -1188,10 +1273,10 @@ function stRender() {
 	if (v.view == 'menu') {
 		// Apps and their settings share the app manager; plugin categories stay
 		// in the API so an app's detail view can open its own settings.
-		html = stCats == null ? `<div class="sub">${esc(t('loading'))}</div>` :
+		html = stCats == null ? '' :
 			stCats.map((c, i) => c.plugin ? '' : stRow('cat:' + i, lbl(c.label), '', { chev: true })).join('');
 	} else if (v.view == 'cat') {
-		html = v.items == null ? `<div class="sub">${esc(t('loading'))}</div>` :
+		html = v.items == null ? '' :
 			v.items.map((it) => stRow('item:' + it.id, lbl(it.label), stValue(it),
 				{ info: it.type == 'info', on: it.type == 'toggle' && it.value, note: lbl(it.note),
 				  chev: ['choice', 'number', 'multi', 'image'].includes(it.type) })).join('');
@@ -1210,7 +1295,7 @@ function stRender() {
 		}
 		if (it.note) html += `<div class="stnote">${esc(lbl(it.note))}</div>`;
 	} else if (v.view == 'at') {
-		html = v.presets == null ? `<div class="sub">${esc(t('loading'))}</div>` :
+		html = v.presets == null ? '' :
 			v.presets.map((p, i) => stRow('atp:' + i, lbl(p.label), p.cmd)).join('') +
 			`<div class="stnote">${esc(t('at_note'))}</div>`;
 	} else if (v.view == 'atres') {
@@ -1219,19 +1304,19 @@ function stRender() {
 			(v.warn ? `<div class="stnote">${esc(v.warn)}</div>` : '') +
 			stRow('atagain:', t('at_again'), '');
 	} else if (v.view == 'devices') {
-		html = v.list == null ? `<div class="sub">${esc(t('loading'))}</div>` : v.list.length ?
+		html = v.list == null ? '' : v.list.length ?
 			v.list.map((d, i) => stRow('dev:' + i, d.name ?? d.ip ?? d.mac,
 				d.blocked ? t('blocked') : d.online ? `${t('online')} · ${t(d.via ?? 'wifi')}` : t('offline'),
 				{ on: d.online && !d.blocked, chev: true })).join('') : `<div class="sub">${esc(t('no_devices'))}</div>`;
 	} else if (v.view == 'apps') {
-		html = stRow('store:', t('app_store'), '', { chev: true }) + (v.list == null ? `<div class="sub">${esc(t('loading'))}</div>` :
+		html = stRow('store:', t('app_store'), '', { chev: true }) + (v.list == null ? '' :
 			(v.list.length ? v.list.map((m) => stRow('apm:' + m.id, lbl(m.name) || m.id,
 				(m.version ? 'v' + m.version + ' · ' : '') + (m.builtin ? t('app_builtin') : t('app_user')), { chev: true })).join('')
 				: `<div class="sub">${esc(t('no_apps'))}</div>`) +
 			`<div class="stnote">${esc(t('app_install_note'))}</div>`);
 	} else if (v.view == 'store') {
 		const s = v.store;
-		if (!s) html = `<div class="sub">${esc(t('loading'))}</div>`;
+		if (!s) html = '';
 		else if (!s.available) html = `<div class="sub">${esc(t('store_fail'))}${s.error ? ': ' + esc(s.error) : ''}</div>`;
 		else html = s.plugins.length ? s.plugins.map((p) => {
 			const have = p.installed != null, same = have && p.installed == p.version;
@@ -1252,7 +1337,7 @@ function stRender() {
 			(m.builtin ? `<div class="stnote">${esc(t('app_builtin_note'))}</div>` : '');
 	} else if (v.view == 'bluetooth') {
 		const b = v.bt;
-		if (!b) html = `<div class="sub">${esc(t('loading'))}</div>`;
+		if (!b) html = '';
 		else if (!b.adapter) html = `<div class="sub">${esc(t('bt_none'))}</div>`;
 		else {
 			html = stRow('bt:power', t('bluetooth'), b.powered ? t('on') : t('off'), { on: b.powered }) +
@@ -1299,11 +1384,11 @@ async function stPost(v, body) {
 		if (i >= 0) v.items[i] = r.item;
 	}
 	if (r?.ok && r.item?.reload) stLoadCat(v);
-	if (r?.ok && v.cat.id == 'usb' && body.id == 'reset') {
+	if (r?.ok && v.cat.id == 'usb' && ['reset','usb_role','usb_host_boot'].includes(body.id)) {
 		const refresh = async () => {
 			if (!st.includes(v)) return;
 			await stLoadCat(v);
-			if (v.items?.find(i => i.id == 'reset_status')?.busy) setTimeout(refresh, 2000);
+			if (v.items?.some(i => ['reset_status','usb_role_state'].includes(i.id) && i.busy)) setTimeout(refresh, 2000);
 		};
 		setTimeout(refresh, 2000);
 	}
@@ -1358,7 +1443,7 @@ async function stClick(key, el) {
 		if (c.view == 'at') {
 			const nv = { view: 'at', cat: c, presets: null };
 			st.push(nv); stRender();
-			const r = await fetch('/api/at/presets', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+			const r = await pageRead('/api/at/presets', P.settings).catch(() => null);
 			nv.presets = r?.presets ?? [];
 			if (stTop() === nv) stRender();
 			return;
@@ -1366,7 +1451,7 @@ async function stClick(key, el) {
 		if (c.view == 'apps') {
 			const nv = { view: 'apps', cat: c, list: null };
 			st.push(nv); stRender();
-			const r = await fetch('/api/plugins', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+			const r = await pageRead('/api/plugins', P.settings).catch(() => null);
 			nv.list = r?.plugins ?? [];
 			if (stTop() === nv) stRender();
 			return;
@@ -1380,7 +1465,7 @@ async function stClick(key, el) {
 		if (c.view == 'devices') {
 			const nv = { view: 'devices', cat: c, list: null };
 			st.push(nv); stRender();
-			const r = await fetch('/api/devices', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+			const r = await pageRead('/api/devices', P.settings).catch(() => null);
 			nv.list = r?.devices ?? [];
 			if (stTop() === nv) stRender();
 		} else {
@@ -1444,8 +1529,7 @@ async function stClick(key, el) {
 		const nv = k == 'store' ? { view: 'store', store: null, parent: v } : v;
 		if (k == 'store') st.push(nv);
 		nv.store = null; stRender();
-		nv.store = await fetch('/api/store' + (k == 'storerf' ? '?refresh=1' : ''), { cache: 'no-store' })
-			.then((r) => r.json()).catch(() => ({ available: false }));
+		nv.store = await pageRead('/api/store' + (k == 'storerf' ? '?refresh=1' : ''), P.settings).catch(() => ({ available: false }));
 		if (stTop() === nv) stRender();
 		return;
 	}
@@ -1457,9 +1541,9 @@ async function stClick(key, el) {
 		const r = await post('store-install', { id: p.id });
 		v.busy = null;
 		toast(r?.ok ? t('saved') : `${t('failed')}${r?.error ? ': ' + r.error : ''}`);
-		v.store = await fetch('/api/store', { cache: 'no-store' }).then((r) => r.json()).catch(() => v.store);
+		v.store = await pageRead('/api/store', P.settings).catch(() => v.store);
 		// (the apps list below it, and the Apps page, see the new one)
-		if (v.parent?.view == 'apps') v.parent.list = (await fetch('/api/plugins', { cache: 'no-store' }).then((r) => r.json()).catch(() => null))?.plugins ?? v.parent.list;
+		if (v.parent?.view == 'apps') v.parent.list = (await pageRead('/api/plugins', P.settings).catch(() => null))?.plugins ?? v.parent.list;
 		loadApps();
 		if (stTop() === v) stRender();
 		return;
@@ -1554,7 +1638,7 @@ function btReason(s) {
 
 async function btPoll(v) {
 	while (st.includes(v)) {
-		const r = await fetch('/api/bluetooth', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+		const r = await pageRead('/api/bluetooth', P.settings).catch(() => null);
 		if (!st.includes(v)) break;
 		if (r) v.bt = r;
 		const top = stTop();
@@ -1708,7 +1792,8 @@ document.addEventListener('focusin', (event) => {
 });
 
 async function loadApps() {
-	const r = await fetch('/api/plugins', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+	const r = await pageRead('/api/plugins', P.apps).catch(() => null);
+	if (!r) return;
 	apps = r?.plugins ?? [];
 	setHTML('ap-list', apps.length ? apps.map((m, i) =>
 		`<button class="strow" data-app="${i}"><span>${esc(lbl(m.name) || m.id)}</span><span class="sv chev">${esc(lbl(m.description) ?? '')}</span></button>`).join('')

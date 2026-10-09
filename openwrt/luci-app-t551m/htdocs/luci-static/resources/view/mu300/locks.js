@@ -25,6 +25,7 @@ return view.extend({
     <div style="font-size:.78rem;color:var(--text-muted,var(--text-light,#777))">当前驻网</div>
     <div style="font-size:1.25rem;font-weight:700;margin-top:2px" id="mud-srv-rat">--</div>
     <div class="mud-cellline" id="mud-srv"></div>
+    <div class="mud-loadline" id="mud-serving-loading" role="status"></div>
   </div>
   <div class="mud-hero-r">
     <div class="mud-rsrp" id="mud-srv-rsrp" style="font-size:1.9rem">--</div>
@@ -34,6 +35,7 @@ return view.extend({
 
 <div class="mud-sec">
   <h3>网络模式 · EN-DC</h3>
+  <div class="mud-loadline" id="mud-lock-loading" role="status"></div>
   <div class="mud-ctl" id="mud-lock-modes" style="grid-template-columns:repeat(4,1fr);max-width:520px"></div>
   <div class="mud-ctl" style="margin-top:7px;grid-template-columns:1fr 1fr;max-width:340px">
     <button class="mud-btn" id="mud-lock-endc">EN-DC</button>
@@ -69,6 +71,7 @@ return view.extend({
 
 <div class="mud-sec">
   <h3>邻区与小区锁定</h3>
+  <div class="mud-loadline" id="mud-neigh-loading" role="status"></div>
   <div id="mud-lockedcells"></div>
   <div class="mud-ctl" style="max-width:400px;margin-bottom:8px">
     <button class="mud-btn" id="mud-lock-cell">锁定当前服务小区</button>
@@ -76,20 +79,23 @@ return view.extend({
   </div>
   <div class="mud-scroll">
   <table class="mud-table"><thead><tr><th>制式/频段</th><th>PCI</th><th>频点</th><th>RSRP</th><th>RSRQ</th><th>SINR</th><th></th></tr></thead>
-  <tbody id="mud-neigh"><tr><td colspan="7" style="color:var(--text-muted,var(--text-light,#777))">--</td></tr></tbody></table>
+  <tbody id="mud-neigh"></tbody></table>
   </div>
   <div class="mud-note">手动应用会短暂重建蜂窝连接。启用“开机自动应用”后，保存的设置会在 AT 就绪、首次拨号前应用，不额外重启射频。频段全不选再点应用 = 恢复自动。</div>
 </div>`;
 		M.localize(root);
 		this.wire(root);
+		M.simSelector(root);
 		return root;
 	},
 
 	wire: function(root) {
 		var self = this;
+		this._root = root; this._disposed = false;
 		this.lockSel = { nr: {}, lte: {} };
 		this.lockCand = { nr: NR_CAND, lte: LTE_CAND };
 		this.Q = function(id) { return root.querySelector('#mud-' + id); };
+		this.loading('serving', true); this.loading('lock', true); this.loading('neigh', true);
 
 		/* 主题化确认框替代浏览器 confirm；确认后再进入实际执行 */
 		var apply = function(kind, val, what, opts) {
@@ -161,10 +167,10 @@ return view.extend({
 				self.lastLock = l || {};
 				self.paint();
 				self.note(l && !l.error ? '已刷新' : '刷新失败：' + (l && l.error || '无法读取模组'), l && !l.error ? 'success' : 'error');
-				var nb = self.Q('neigh');
-				if (nb && self.lastCell) nb.innerHTML = M.neighborRows(self.lastCell, self.lastLock.cells || []);
+				self.paintNeighbors();
 			}, function() { M.busy(btn, false); self.note('刷新失败', 'error'); });
 			self.loadServing();
+			self.loadServingMeta();
 		};
 
 		this.chipRow = function(el, rat, cand) {
@@ -218,7 +224,36 @@ return view.extend({
 		this.refresh();
 		this.loadServingMeta();
 		this.loadServing();
-		poll.add(function() { return self.loadServing(); }, 2);
+		/* A slow live AT request must not hold up cache/neighbor discovery. */
+		this._poll = function() { self.loadServing(); return self.loadServingMeta(); };
+		poll.add(this._poll, 2);
+	},
+	unload: function() {
+		this._disposed = true;
+		clearTimeout(this._lockRetry);
+		if (this._poll) poll.remove(this._poll);
+	},
+	loading: function(part, pending, error) {
+		var el = this.Q && this.Q(part + '-loading'); if (!el) return;
+		el.hidden = !pending && !error;
+		el.classList.toggle('is-error', !!error);
+		var text = error || ({serving:'正在读取服务小区…',lock:'正在读取锁定设置…',neigh:'正在读取邻小区…'})[part];
+		var html = (pending ? '<i class="mud-loading-spinner" aria-hidden="true"></i>' : '') + '<span>' + M.esc(M.translate(text)) + '</span>';
+		if (el.innerHTML !== html) el.innerHTML = html;
+	},
+	paintNeighbors: function() {
+		var nb = this.Q && this.Q('neigh');
+		if (nb && this.neighborCell) nb.innerHTML = M.neighborRows(this.neighborCell, (this.lastLock || {}).cells || []);
+	},
+	mergeServing: function() {
+		if (!this.lastSignal) return;
+		var c = {}, meta = this.servingMeta || {}, live = this.lastSignal;
+		Object.keys(meta).forEach(function(k) { c[k] = meta[k]; });
+		Object.keys(live).forEach(function(k) { c[k] = live[k]; });
+		if (live.partial && (meta.lte || meta.nr)) {
+			['sig', 'sig_src', 'lte', 'nr'].forEach(function(k) { c[k] = meta[k]; });
+		}
+		this.paintServing(c);
 	},
 
 	/* 统一反馈：所有提示走顶部 toast（M.toast），进行中的用 busy 自带转圈；
@@ -231,21 +266,41 @@ return view.extend({
 	/* 运营商与邻区属于低频元数据；实时信号不会从这里读取。 */
 	loadServingMeta: function() {
 		var self = this;
-		return L.resolveDefault(M.callStatus()).then(function(st) {
-			self.servingMeta = (st || {}).cell || {};
-		});
+		if (this._disposed || this._metaRequest) return this._metaRequest;
+		this._metaRequest = M.callCells().then(function(st) {
+			if (self._disposed) return;
+			if (!st || st.error) throw new Error(st && st.error || '邻区读取失败');
+			var cell = st.cell;
+			if (cell && cell.error) throw new Error(cell.error);
+			if (cell) self.servingMeta = cell;
+			if (!self._liveLoaded && st.sig && !st.sig.error && st.sig_age >= 0 && st.sig_age <= 10) {
+				self.lastSignal = st.sig; self.loading('serving', false);
+			}
+			self.mergeServing();
+			var pending = !cell || !!cell.neigh_pending;
+			if (!pending) { self.neighborCell = cell; self._neighborSince = null; self.paintNeighbors(); }
+			else if (!self._neighborSince) self._neighborSince = Date.now();
+			var stalled = pending && Date.now() - self._neighborSince > 30000;
+			self.loading('neigh', pending && !stalled, stalled ? '邻区读取较慢，正在等待模组回应' : null);
+		}).catch(function(error) {
+			if (!self._disposed) self.loading('neigh', false, error.message || '邻区读取失败');
+		}).finally(function() { self._metaRequest = null; });
+		return this._metaRequest;
 	},
 
 	/* 每次都由后端完成一轮新的 AT 快照；不接受上一轮 signal/cell 缓存。 */
 	loadServing: function() {
 		var self = this;
-		return L.resolveDefault(M.callSignal()).then(function(live) {
-			live = live || {};
-			var c = {}, meta = self.servingMeta || {};
-			Object.keys(meta).forEach(function(k) { c[k] = meta[k]; });
-			Object.keys(live).forEach(function(k) { c[k] = live[k]; });
-			self.paintServing(c);
-		});
+		if (this._disposed || this._signalRequest) return this._signalRequest;
+		this._signalRequest = M.callSignal().then(function(live) {
+			if (self._disposed) return;
+			if (!live || live.error) throw new Error(live && live.error || '信号读取失败');
+			self.lastSignal = live; self._liveLoaded = true;
+			self.loading('serving', false); self.mergeServing();
+		}).catch(function(error) {
+			if (!self._disposed) self.loading('serving', false, error.message || '信号读取失败');
+		}).finally(function() { self._signalRequest = null; });
+		return this._signalRequest;
 	},
 
 	paintServing: function(c) {
@@ -256,7 +311,7 @@ return view.extend({
 			e.innerHTML = '';
 			return;
 		}
-		var ratTxt = (c.nr && c.nr.band) ? ((c.lte && c.lte.band) ? '5G NSA' : '5G SA') : 'LTE';
+		var ratTxt = (c.nr && c.nr.band) ? ((c.lte && c.lte.band) ? '5G NSA' : '5G SA') : (c.lte && c.lte.band) ? 'LTE' : '--';
 		var sig = c.sig || {}, label = M.qLabel(sig.rsrp, sig.rsrq, sig.sinr);
 		var operName = M.carrierName(c.operator);
 			if (operName === '--' && c.ident && c.ident.imsi)
@@ -265,6 +320,7 @@ return view.extend({
 		this.Q('srv-rat').style.color = M.qCol(label);
 		var rsrpEl = this.Q('srv-rsrp');
 		if (sig.rsrp != null) { rsrpEl.innerHTML = sig.rsrp.toFixed(1) + '<small> dBm</small>'; rsrpEl.style.color = M.qCol(label); }
+		else { rsrpEl.textContent = '--'; rsrpEl.style.color = ''; }
 		this.Q('srv-chips').innerHTML =
 			(sig.rsrq != null ? '<span class="mud-tag">RSRQ ' + sig.rsrq.toFixed(1) + '</span>' : '') +
 			(sig.sinr != null ? '<span class="mud-tag">SINR ' + sig.sinr.toFixed(1) + '</span>' : '');
@@ -274,8 +330,6 @@ return view.extend({
 		e.innerHTML = rows.map(function(x) {
 			return '<div class="mud-srvline"><span class="k">' + M.esc(M.translate(x[0])) + '</span><span class="v">' + M.esc(x[1]) + '</span></div>';
 		}).join('');
-		var nb = this.Q('neigh');
-		if (nb) nb.innerHTML = M.neighborRows(c, (this.lastLock || {}).cells || []);
 	},
 
 	/* Follow this operation's result; device and browser clocks can differ. */
@@ -285,7 +339,7 @@ return view.extend({
 			return M.callLockGet();
 		}).then(function(l) {
 			if (!l || l.error) throw new Error(l && l.error || '无法读取应用后的状态');
-			self.lastLock = l; self.paint(); self.paintServing(self.lastCell);
+			self.lastLock = l; self.paint(); self.paintServing(self.lastCell); self.paintNeighbors();
 			self.note('已应用并核对模组状态', 'success');
 		}).catch(function(error) {
 			self.note('应用失败：' + (error.message || error), 'error');
@@ -300,23 +354,25 @@ return view.extend({
 
 	refresh: function() {
 		var self = this;
-		L.resolveDefault(M.callLockGet()).then(function(l) {
+		if (this._disposed) return;
+		return L.resolveDefault(M.callLockGet()).then(function(l) {
+			if (self._disposed) return;
 			l = l || {};
 			/* 空结果多半是 rpcd 高并发下的一次瞬时失败（实测同请求重发即好）：轻量重试 */
 			if (!l.mode && (self._retry = (self._retry || 0) + 1) <= 3)
-				return setTimeout(function() { self.refresh(); }, 1800);
+				return self._lockRetry = setTimeout(function() { self.refresh(); }, 1800);
 			self._retry = 0;
 			self.lastLock = l;
 			self.paint();
 			/* 锁定状态回来了，把邻区表的“已锁定”标记也刷新一下 */
-			var nb = self.Q('neigh');
-			if (nb && self.lastCell) nb.innerHTML = M.neighborRows(self.lastCell, self.lastLock.cells || []);
+			self.paintNeighbors();
 		});
 	},
 
 	paint: function() {
 		var l = this.lastLock || {};
 		var self = this;
+		this.loading('lock', false, l.error || (!l.mode ? '锁定状态读取失败，请刷新' : null));
 		var setR = function(id, txt) { var e = self.Q(id); if (e) e.textContent = (txt == null || txt === '') ? '--' : txt; };
 		if (l.error) { setR('lock-nrline', l.error); setR('lock-lteline', ''); return; }
 		var MODE_TXT = { auto: '自动（5G/4G）', '4g': '仅 4G', sa: '仅 5G SA', nsa: '仅 5G NSA' };
@@ -347,16 +403,18 @@ return view.extend({
 		}
 		[ 'nr', 'lte' ].forEach(function(rat) {
 			var capList = (caps[rat] || '').split(',').map(Number).filter(function(b) { return b > 0; });
-			if (capList.length) {
+			{
 				capList.sort(function(a, b) { return a - b; });
 				self.lockCand[rat] = capList;
+				self.lockSel[rat] = {};
 				var box = self.Q('lock-' + rat);
 				if (box) self.chipRow(box, rat, capList);
 			}
 			var locked = (l[rat] && l[rat].locked) || '';
 			var arr = locked ? locked.split(',').map(Number) : [];
-			var isAuto = arr.length === 0 || arr.length >= self.lockCand[rat].length;
-			setR('lock-' + rat + 'line', M.translate(isAuto
+			var isAuto = arr.length === 0 || (capList.length > 0 && capList.every(function(b) { return arr.indexOf(b) >= 0; }));
+			setR('lock-' + rat + 'line', M.translate(!capList.length ? '频段能力暂不可用，请刷新'
+				: isAuto
 				? '自动（支持 ' + self.lockCand[rat].length + ' 个）'
 				: '已锁 ' + arr.length + ' 个：' + (rat === 'nr' ? 'n' : 'B') + arr.join(' ' + (rat === 'nr' ? 'n' : 'B'))));
 			var box = self.Q('lock-' + rat);

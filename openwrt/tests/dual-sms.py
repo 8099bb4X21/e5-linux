@@ -4,6 +4,7 @@ import importlib.machinery
 import importlib.util
 from pathlib import Path
 import sys
+import hashlib
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -73,6 +74,48 @@ class Pdu(unittest.TestCase):
 class Inbox(unittest.TestCase):
     def fresh(self):
         return {'version':1,'next_id':receiver.MIN_ID,'initialized':[],'messages':[],'slots':{}}
+
+    def test_capacity_release_requires_durable_copy_and_matching_sim_and_pdu(self):
+        ccid='89860012345678901234'; identity=hashlib.sha256(ccid.encode()).hexdigest()
+        for failure in ['', 'archive', 'identity', 'index', 'inbox']:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory); (root/'run').mkdir(); commands=[]
+                data=self.fresh(); message=sms_pdu.assemble([incoming('keep me',7)])
+                receiver.ingest(data,1,identity,message,1)
+                def fake(card, query):
+                    self.assertEqual(card,1); commands.append(query)
+                    if query=='CPMS?': return '+CPMS: "SM",40,40'
+                    if query=='CCID?': return '+CCID: '+('89860099999999999999' if failure=='identity' else ccid)
+                    if query=='CMGR=7': return '+CMGR: 0,,20\n'+ucs2('different' if failure=='index' else 'keep me')+'\nOK'
+                    if query=='CMGD=7':
+                        archive=list((root/'archive/1'/identity).glob('*.json'))
+                        self.assertEqual(len(archive),1)
+                        self.assertIn(ucs2('keep me'),archive[0].read_text())
+                        self.assertEqual(receiver.load()['messages'][0]['text'],'keep me')
+                        return 'OK'
+                    self.fail(query)
+                with patch.object(receiver,'DATA',root),patch.object(receiver,'RUN',root/'run'),patch.object(receiver,'INBOX',root/'inbox.json'),patch.object(receiver,'at',side_effect=fake):
+                    receiver.save(data)
+                    if failure=='archive':
+                        with patch.object(receiver,'atomic',side_effect=OSError('full')):
+                            with self.assertRaises(OSError): receiver.archive_capacity(data,1,identity)
+                    elif failure=='inbox':
+                        (root/'inbox.json').unlink()
+                        with self.assertRaises(RuntimeError): receiver.archive_capacity(data,1,identity)
+                    elif failure=='identity':
+                        with self.assertRaises(RuntimeError): receiver.archive_capacity(data,1,identity)
+                    else: receiver.archive_capacity(data,1,identity)
+                    self.assertEqual([q for q in commands if q.startswith('CMGD')], [] if failure else ['CMGD=7'])
+                    if not failure: self.assertTrue(receiver.load()['messages'][0]['archived'])
+
+    def test_partial_archive_rescan_preserves_complete_multipart_message(self):
+        data=self.fresh(); one=incoming('one',1,55,1); two=incoming('two',2,55,2)
+        receiver.ingest(data,0,'card0',sms_pdu.assemble([one,two]),1)
+        data['messages'][0]['archived_parts']=[two['fingerprint']]
+        receiver.ingest(data,0,'card0',sms_pdu.assemble([one]),2)
+        self.assertEqual(data['messages'][0]['text'],'onetwo')
+        self.assertEqual(data['messages'][0]['state'],'received')
+        self.assertEqual(len(data['messages'][0]['parts']),2)
 
     def test_secondary_notification_on_primary_ring_wakes_both_cards(self):
         events=receiver.Events();events.path='fixture';events.fd=55;events.sequence=1
@@ -162,7 +205,7 @@ class Inbox(unittest.TestCase):
         def read(card,own):
             if card==0:raise RuntimeError('SIM identity unavailable')
             return 'card2',sms_pdu.assemble([incoming('fixture')])
-        with tempfile.TemporaryDirectory() as directory,patch.object(receiver,'RUN',Path(directory)),patch.object(receiver,'load',return_value=data),patch.object(receiver,'save'),patch.object(receiver,'alert'),patch.object(receiver,'forward'),patch.object(receiver,'execute',return_value='No calls were found'),patch.object(receiver,'current_card',return_value=0),patch.object(receiver,'at'),patch.object(receiver,'read_card',side_effect=read):
+        with tempfile.TemporaryDirectory() as directory,patch.object(receiver,'RUN',Path(directory)),patch.object(receiver,'load',return_value=data),patch.object(receiver,'save'),patch.object(receiver,'alert'),patch.object(receiver,'forward'),patch.object(receiver,'execute',return_value='No calls were found'),patch.object(receiver,'current_card',return_value=0),patch.object(receiver,'at',return_value='OK'),patch.object(receiver,'read_card',side_effect=read):
             receiver.scan({0,1})
         self.assertFalse(data['slots']['0']['ok']);self.assertTrue(data['slots']['1']['ok'])
         self.assertEqual(data['messages'][0]['sim'],'SIM2')

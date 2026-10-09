@@ -58,6 +58,16 @@ return function(ctx) {
 				if (type(b[key]) != 'bool') return fail({ ok: false, error: 'Invalid audio setting' }, 400);
 				settings[key] = b[key];
 			}
+			if (b.route != null || b.speaker != null) {
+				let route = b.route ?? (b.speaker ? 'speaker' : 'receiver');
+				if (index([ 'auto', 'receiver', 'speaker', 'bluetooth' ], route) < 0)
+					return fail({ ok: false, error: 'Invalid audio route' }, 400);
+				if (route == 'bluetooth' && !audio().bluetooth?.connected)
+					return fail({ ok: false, error: 'Bluetooth headset is not connected for calls' }, 409);
+				settings.route = route;
+				let now = clock(true);
+				settings.route_updated = now[0] + now[1] / 1000000000;
+			}
 			let tmp = AUDIO + '/request.' + clock();
 			if (!writefile(tmp, sprintf('%J\n', settings)) || !rename(tmp, AUDIO + '/settings.json'))
 				return fail({ ok: false, error: 'Cannot save call audio setting' }, 500);

@@ -46,6 +46,12 @@ class BootReplay(unittest.TestCase):
         self.assertEqual(self.run_boot('early').returncode,0)
         self.assertFalse(self.trace.exists())
 
+    def test_only_secondary_saved_settings_still_replay_early(self):
+        (self.state/'mode').unlink()
+        (self.state/'sim1').mkdir();(self.state/'sim1/mode').write_text('4g')
+        self.assertEqual(self.run_boot('early').returncode,0)
+        self.assertIn('lock:replay early',self.trace.read_text())
+
     def test_failed_early_replay_is_not_retried_late(self):
         self.script('lock', 'echo "lock:$*" >> "$TRACE"; exit 1')
         self.assertEqual(self.run_boot('early').returncode,1)

@@ -14,7 +14,7 @@
  <span id="call-state" class="call-state"></span>
  <div class="avatar call-avatar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h4l2 5-3 2c1 3 3 5 6 6l2-3 5 2v4c0 1-1 2-2 2C10 21 3 14 3 5c0-1 1-2 3-2z"/></svg></div>
  <strong id="call-name"></strong><span id="call-number"></span><span id="call-duration"></span>
- <div id="audio-actions" class="audio-actions"><button id="speaker" data-text="speaker" aria-pressed="false">扬声器</button><button id="mute" data-text="mute" aria-pressed="false">静音</button></div>
+ <div id="audio-actions" class="audio-actions"><button id="speaker" aria-haspopup="dialog" aria-expanded="false" aria-pressed="false">手机</button><button id="mute" data-text="mute" aria-pressed="false">静音</button></div>
  <button id="dtmf-toggle" class="dtmf-toggle" aria-expanded="false" data-text="keypad">键盘</button>
  <div id="dtmf-panel" hidden>
   <output id="dtmf-digits" aria-live="polite"></output>
@@ -60,6 +60,14 @@
  <strong data-text="deleteContact">删除联系人？</strong><p id="delete-name"></p>
  <div class="call-actions"><button id="delete-cancel" data-text="cancel">取消</button><button id="delete-confirm" class="end" data-text="delete">删除</button></div>
 </div></div>
+<div id="audio-sheet" class="scrim" hidden><section class="sheet audio-sheet" role="dialog" aria-modal="true" aria-labelledby="audio-title">
+ <div class="section-heading"><strong id="audio-title" data-text="audioOutput">通话音频</strong><button id="audio-close" data-text="done">完成</button></div>
+ <div class="audio-routes" role="group" aria-labelledby="audio-title">
+  <button data-route="receiver" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10 5h4m-3 13h2"/></svg><span data-text="receiver">手机</span><i></i></button>
+  <button data-route="speaker" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4V4zm4 4a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></svg><span data-text="speaker">扬声器</span><i></i></button>
+  <button data-route="bluetooth" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10-5 5V2l5 5L7 17"/></svg><span><b data-text="bluetooth">蓝牙耳机</b><small id="bluetooth-name"></small></span><i></i></button>
+ </div>
+</section></div>
 <script src="/sdk/e5.js"></script>
 <link rel="stylesheet" href="/mobile-phone.css">
 <script src="phone.js"></script>

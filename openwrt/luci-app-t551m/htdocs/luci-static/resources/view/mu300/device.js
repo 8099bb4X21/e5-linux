@@ -34,13 +34,14 @@ return view.extend({
   <h3>USB 角色</h3>
   <div class="mud-r"><span class="mud-k">当前角色</span><span class="mud-v" id="mud-usb-role-now">--</span></div>
   <div class="mud-device-field"><label for="mud-usb-role">切换 USB 角色</label>
-   <select id="mud-usb-role"><option value="device">设备模式</option><option value="host">主机模式</option></select></div>
+   <select id="mud-usb-role"><option value="auto">自动识别（默认）</option><option value="device">设备模式</option><option value="host">主机模式</option></select></div>
   <label class="mud-device-toggle"><input type="checkbox" id="mud-usb-role-auto">开机自动启用主机模式</label>
   <div class="mud-device-actions"><button class="mud-btn" id="mud-usb-role-apply">应用角色</button></div>
-  <div class="mud-note">主机模式会断开本端口的 USB 网络与串口。当前固件仅提供 NCM 设备模式，主机供电和协议切换尚未适配。</div>
+  <div class="mud-note" id="mud-usb-role-note">自动模式根据连接设备选择充电或 OTG；手动主机模式会断开本端口的 USB 网络与串口。未勾选开机自动启用时，重启恢复自动模式。</div>
  </section>
  <section class="mud-card" id="mud-usb-net-card">
   <h3>USB 网络模式</h3>
+  <div class="mud-r"><span class="mud-k">当前协议</span><span class="mud-v" id="mud-usb-net-current">--</span></div>
   <div class="mud-device-field"><label for="mud-usb-net-mode">网络协议</label>
    <select id="mud-usb-net-mode"><option value="ncm">NCM</option><option value="ecm">ECM</option><option value="rndis">RNDIS</option></select></div>
   <div class="mud-device-field"><label for="mud-usb-net-scope">生效期限</label>
@@ -52,7 +53,8 @@ return view.extend({
 </div>
 <section class="mud-card" style="margin-top:14px" id="mud-usb-adapters-card">
  <div class="mud-device-head"><h3>USB 网卡</h3><button class="mud-btn" id="mud-usb-refresh">刷新</button></div>
- <div class="mud-note">仅主机模式可用。刷新时会尝试启用发现的 USB 网卡；添加到 LAN 后将保存到网桥并重新加载网络。</div>
+ <label class="mud-device-toggle" style="margin-top:12px"><input type="checkbox" id="mud-usb-lan-auto">新接入的 USB 网卡自动加入 LAN</label>
+ <div class="mud-note">已加入 LAN 的网卡会在重新插入后自动连接。已分配给其他网络的网卡保留原配置；关闭自动加入不会移除已保存的 LAN 端口。</div>
  <div class="mud-device-list" id="mud-usb-adapters"></div>
 </section>`;
 		M.localize(root);
@@ -65,13 +67,19 @@ return view.extend({
 	q: function(id) { return this.root.querySelector('#mud-usb-' + id); },
 	paint: function() {
 		var s = this.state || {};
-		this.q('role-now').textContent = s.role === 'host' ? M.translate('主机模式') : s.role === 'device' ? M.translate('设备模式') : M.translate('不可用');
+		this.q('role-now').textContent = M.translate(s.role === 'host' ? '主机模式' : s.role === 'device' ? '设备模式' : '未连接');
 		this.q('role').querySelector('option[value="host"]').disabled = s.host_supported === 0;
-		this.q('role').value = s.role === 'host' || s.role_auto ? 'host' : 'device';
+		this.q('role').value = s.policy || 'auto';
 		this.q('role-auto').checked = !!s.role_auto;
+		this.q('lan-auto').checked = !!s.lan_auto;
+		this.q('role-note').textContent = M.translate(s.last_error || (s.host_supported === 0 ? '当前内核支持自动识别，但未提供手动角色切换接口。' : '自动模式根据连接设备选择充电或 OTG；手动主机模式会断开本端口的 USB 网络与串口。未勾选开机自动启用时，重启恢复自动模式。'));
 		this.q('net-mode').value = s.net_mode || 'ncm';
 		this.q('net-scope').value = s.net_scope || 'permanent';
 		this.q('net-auto').checked = !!s.net_auto;
+		this.q('net-current').textContent = (s.net_current || 'ncm').toUpperCase();
+		this.q('net-mode').querySelectorAll('option').forEach(function(option) {
+			option.disabled = Array.isArray(s.net_supported) && s.net_supported.indexOf(option.value) < 0;
+		});
 		this.updateDisabled();
 		this.refreshAdapters();
 	},
@@ -80,11 +88,10 @@ return view.extend({
 		this.q('role-auto').disabled = this.q('role').value !== 'host';
 		if (this.q('role').value !== 'host') this.q('role-auto').checked = false;
 		this.q('role-apply').disabled = this.state.host_supported === 0;
-		var locked = this.state.net_available === 0 || host || !!this.state.role_auto || hostAuto;
+		var locked = this.state.net_available === 0;
 		[ 'net-mode', 'net-scope', 'net-auto', 'net-apply' ].forEach(function(id) { this.q(id).disabled = locked; }, this);
-		if (locked) this.q('net-auto').checked = false;
-		this.q('net-note').textContent = this.state.net_available === 0 ? '当前构建固定使用 NCM，暂不支持切换协议。' : M.translate(locked ? '主机模式下不可选择 USB 网络模式；主机开机自启会自动关闭 USB 网络开机自启。' : 'NCM 为默认模式。Windows 不原生支持 ECM；RNDIS 会改变枚举方式。关闭“启用所选协议”时仅保存选择；选择“仅下次重启”则成功应用一次后恢复默认 NCM。');
-		this.q('refresh').disabled = !host;
+		this.q('net-note').textContent = M.translate(this.state.net_boot?.error || (locked ? '当前内核尚未支持协议切换，请先更新内核。' : '下次重启生效，当前连接不会中断。NCM 为默认模式；ECM 主要用于 Linux/macOS。选择“仅下次重启”则应用一次后恢复 NCM。主机模式不使用共享协议，切回设备模式时使用。'));
+		this.q('refresh').disabled = false;
 	},
 	wire: function() {
 		var self = this;
@@ -94,7 +101,7 @@ return view.extend({
 		this.q('net-scope').addEventListener('change', function() { self.q('net-auto').checked = true; });
 		this.q('role-apply').addEventListener('click', function() {
 			var role = self.q('role').value, auto = self.q('role-auto').checked ? '1' : '0';
-			var warning = role === 'host' ? '切换主机模式会立即断开 USB 管理连接。F50 没有电池，外设可能需要自供电；请确认有其他管理途径。' : '切回设备模式后 USB 网络和串口会重新枚举。';
+			var warning = role === 'host' ? '切换主机模式会断开本端口的 USB 管理连接，请通过 Wi-Fi 管理。插入 OTG 外设后才会开启供电。' : role === 'auto' ? '恢复自动识别充电器、电脑和 OTG 外设，当前 USB 连接可能重新枚举。' : '切回设备模式后 USB 网络和串口会重新枚举。';
 			M.confirmBox('确认切换 USB 角色？', warning, { danger: role === 'host', okText: '应用' }).then(function(yes) {
 				if (!yes) return;
 				var btn = self.q('role-apply'); M.busy(btn, true);
@@ -133,7 +140,15 @@ return view.extend({
 				});
 			});
 		});
-		this.q('refresh').addEventListener('click', function() { self.refreshAdapters(0); });
+		this.q('refresh').addEventListener('click', function() { self.reloadState(); });
+		this.q('lan-auto').addEventListener('change', function() {
+			var input = self.q('lan-auto'), value = input.checked ? '1' : '0'; input.disabled = true;
+			L.resolveDefault(M.callUsbSet('lan', value, '', ''), {}).then(function(r) {
+				input.disabled = false;
+				M.toast(r.ok ? '自动加入 LAN 设置已保存' : '保存失败：' + (r.error || '连接中断'), { type: r.ok ? 'success' : 'error' });
+				self.reloadState();
+			});
+		});
 	},
 	reloadState: function() {
 		var self = this;
@@ -143,7 +158,12 @@ return view.extend({
 		var self = this;
 		setTimeout(function() {
 			M.callUsbGet().then(function(s) {
-				if (s && s.ok && s.role === role) {
+				if (s && s.ok && !s.pending && s.last_error) {
+					msg.update('切换失败：' + s.last_error, 'error');
+					setTimeout(function() { msg.close(); }, 6000);
+					self.state = s; self.paint(); return;
+				}
+				if (s && s.ok && !s.pending && s.policy === role) {
 					msg.update('USB 角色已应用', 'success');
 					setTimeout(function() { msg.close(); }, 2500);
 					self.state = s; self.paint();
@@ -162,9 +182,6 @@ return view.extend({
 		attempt = attempt || 0;
 		var self = this, list = this.q('adapters');
 		list.replaceChildren();
-		if (this.state.role !== 'host') {
-			list.textContent = M.translate('切换到主机模式后显示 USB 网卡。'); return;
-		}
 		var wait = document.createElement('div'); wait.className = 'mud-note mud-booting';
 		wait.textContent = M.translate('正在扫描 USB 网卡…'); list.appendChild(wait);
 		M.busy(this.q('refresh'), true);
@@ -172,7 +189,7 @@ return view.extend({
 			M.busy(self.q('refresh'), false);
 			list.replaceChildren();
 			if (!r.ok || !r.devices || !r.devices.length) {
-				list.textContent = M.translate('没有发现 USB 网卡。');
+				list.textContent = !r.ok ? M.translate('读取失败：') + (r.error || M.translate('连接中断')) : M.translate('没有发现 USB 网卡，请通过 OTG 接入受支持的 USB 以太网卡。');
 				if (self.state.role === 'host' && attempt < 2)
 					setTimeout(function() { if (self.state.role === 'host') self.refreshAdapters(attempt + 1); }, 1600);
 				return;
@@ -183,9 +200,9 @@ return view.extend({
 				var dot = document.createElement('i'); dot.className = 'mud-device-dot' + (d.carrier ? ' up' : ''); main.appendChild(dot);
 				var info = document.createElement('div');
 				var name = document.createElement('div'); name.className = 'mud-device-item-name'; name.textContent = d.name;
-				var sub = document.createElement('div'); sub.className = 'mud-device-item-sub'; sub.textContent = M.translate(d.carrier ? '链路已连接' : '链路未连接，已尝试启用');
+				var sub = document.createElement('div'); sub.className = 'mud-device-item-sub'; sub.textContent = M.translate(d.carrier ? '链路已连接' : '链路未连接') + ' · ' + (d.driver || '') + (d.mac ? ' · ' + d.mac : '');
 				info.appendChild(name); info.appendChild(sub); main.appendChild(info); row.appendChild(main);
-				var btn = document.createElement('button'); btn.className = 'mud-btn'; btn.textContent = M.translate(d.in_lan ? '已加入 LAN' : '添加到 LAN'); btn.disabled = !!d.in_lan;
+				var btn = document.createElement('button'); btn.className = 'mud-btn'; btn.textContent = M.translate(d.managed_elsewhere ? '已分配其他网络' : d.in_lan && d.bound ? '已加入 LAN' : d.in_lan ? '重新连接 LAN' : '添加到 LAN'); btn.disabled = !!d.managed_elsewhere || !!(d.in_lan && d.bound);
 				btn.addEventListener('click', function() {
 					M.confirmBox('添加 USB 网卡到 LAN？', '这会保存网桥配置并重新加载网络，现有连接可能短暂中断。', { okText: '添加' }).then(function(yes) {
 						if (!yes) return;

@@ -11,9 +11,11 @@ stage=${1:-verify}
 deadline=$(cfg replay_timeout); deadline=${deadline:-90}
 case $deadline in ''|*[!0-9]*) deadline=90 ;; esac
 
-[ "$(cat "$state/auto_apply" 2>/dev/null)" != off ] || exit 0
 have=0
-for k in endc mode lte nr cell; do [ -s "$state/$k" ] && have=1; done
+for dir in "$state" "$state/sim0" "$state/sim1"; do
+    [ "$(cat "$dir/auto_apply" 2>/dev/null)" != off ] || continue
+    for k in endc mode lte nr cell; do [ -s "$dir/$k" ] && have=1; done
+done
 [ "$have" = 1 ] || exit 0
 
 case "$stage" in

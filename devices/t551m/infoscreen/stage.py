@@ -60,7 +60,7 @@ def sources():
     app = replace(app, '<div class="card"><div class="sub">${esc(v.cmd)}</div>',
                   '<div class="card st-at-result"><div class="st-at-command">${esc(v.cmd)}</div>')
     app = replace(app, '<div class="smstext" style="margin-top:6px;font-size:13px">${esc(v.reply ?? t(\'at_running\'))}</div>',
-                  '<pre class="st-at-output">${esc(v.reply ?? t(\'at_running\'))}</pre>')
+                  '${v.reply == null ? `<div class="screen-inline-loading" role="status"><i aria-hidden="true"></i>${esc(t(\'at_running\'))}</div>` : `<pre class="st-at-output">${esc(v.reply)}</pre>`}')
     app = replace(app, '<div class="card stnum">', '<div class="stnumber-editor"><div class="card stnum">')
     app = replace(app, '<div style="height:8px"></div><button class="strow" data-st="num:save"><span>${esc(t(\'save\'))}</span><span class="sv"></span></button>',
                   '<button class="strow" data-st="num:save"><span>${esc(t(\'save\'))}</span><span class="sv"></span></button></div>')
@@ -118,9 +118,12 @@ async function loadAdvanced() {
 	advancedBusy = true;
 	clearTimeout(advancedRetry);
 	try {
-		const r = await fetch('/api/advanced', {cache:'no-store'});
-		if (r.ok) adv = await r.json();
-	} catch (e) { console.log('advanced: ' + e); }
+		adv = await pageRead('/api/advanced', P.adv_info);
+		pageLoadPending(P.adv_info, adv?.radio_pending);
+	} catch (e) {
+		pageLoadPending(P.adv_info, false);
+		console.log('advanced: ' + e);
+	}
 	finally { advancedBusy = false; }
 	if (adv) renderAdvanced(adv);
 	if (adv?.radio_pending && page === P.adv_info && !blank)
@@ -134,6 +137,8 @@ async function loadAdvanced() {
 	setText('ad-freshness', a.radio_pending ? (lang == 'zh' ? '正在更新无线信息…' : 'Updating radio details…') : a.radio_error ? (lang == 'zh' ? '部分无线信息暂不可用' : 'Some radio details unavailable') : '');
 	$('ad-freshness').hidden = !a.radio_pending && !a.radio_error;''')
     api = (HERE / 'base/api.uc').read_text(encoding='utf-8')
+    api = replace(api, 'function status() {', (HERE / 'sims.uc').read_text(encoding='utf-8') + '\nfunction status() {')
+    api = replace(api, '\tlet m = modem_status();\n\treturn {', '\tlet sims = sim_status();\n\tlet m = card_modem(modem_status(), sims);\n\treturn {\n\t\tsims,')
     api = replace(api, "model: 'Rongyue E5',", "model: ubus_call('system', 'board')?.model ?? null,")
     api = replace(api, 'function advanced() {', 'function advanced_base() {')
     api = api.replace("state_get('advanced', 30)", "state_get('advanced-base', 30)").replace("state_put('advanced', r)", "state_put('advanced-base', r)")
@@ -206,6 +211,8 @@ def stage(root):
         dest.write_bytes(content.replace('\r\n', '\n').encode())
         dest.chmod(0o644)
     for source, name in [('screen-power.py', 'usr/libexec/t551m-screen-power'),
+                         ('sim-status.py', 'usr/libexec/t551m-sim-status'),
+                         ('sim-service', 'etc/init.d/t551m-sim-status'),
                          ('details-radio.py', 'usr/libexec/t551m-screen-details'),
                          ('power-service', 'etc/init.d/t551m-screen-power'),
                          ('wallpaper-rpc.py', 'usr/libexec/rpcd/t551m-screen')]:
@@ -217,6 +224,27 @@ def stage(root):
     voice = root / 'usr/libexec/e5-voice-audio'
     voice.write_bytes((HERE.parents[2] / 'openwrt/overlay/usr/libexec/e5-voice-audio').read_bytes().replace(b'\r\n', b'\n'))
     voice.chmod(0o755)
+    # A screen-only staging pass also carries the audio route implementation
+    # required by the phone app; do not ship a picker with an old backend.
+    repo = HERE.parents[2]
+    for name, source in {
+        'usr/libexec/e5-hfp': repo / 'openwrt/overlay/usr/libexec/e5-hfp',
+        'usr/libexec/e5-volume': repo / 'openwrt/overlay/usr/libexec/e5-volume',
+        'usr/libexec/e5-call-volume': repo / 'openwrt/overlay/usr/libexec/e5-call-volume',
+        'usr/lib/e5/e5_call_volume.py': repo / 'openwrt/overlay/usr/lib/e5/e5_call_volume.py',
+        'etc/init.d/e5-hfp': repo / 'openwrt/overlay/etc/init.d/e5-hfp',
+        'etc/sysctl.d/10-e5-printk.conf': repo / 'openwrt/overlay/etc/sysctl.d/10-e5-printk.conf',
+        'opt/e5/e5-call-audio.py': repo / 'rootfs/overlay/opt/e5/e5-call-audio.py',
+    }.items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
+        target.chmod(0o644 if name.startswith('etc/sysctl.d/') else 0o755)
+    for source in (repo / 'openwrt/overlay/usr/lib/e5/vendor').iterdir():
+        target = root / 'usr/lib/e5/vendor' / source.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())  # wheel must stay byte-identical
+        target.chmod(0o644)
     for source in (HERE / 'phone').iterdir():
         if not source.is_file():
             continue
@@ -297,6 +325,17 @@ def stage(root):
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text('/etc/e5-infoscreen/wallpapers/\n/etc/config/e5-infoscreen\n', encoding='utf-8')
     if __import__('os').name != 'nt':
+        for name in ('S98e5-hfp', 'K08e5-hfp'):
+            link = root / 'etc/rc.d' / name
+            link.parent.mkdir(parents=True, exist_ok=True)
+            if not link.is_symlink(): link.symlink_to('../init.d/e5-hfp')
+        sim_link = root / 'etc/rc.d/S96t551m-sim-status'
+        sim_link.parent.mkdir(parents=True, exist_ok=True)
+        if not sim_link.is_symlink():
+            sim_link.symlink_to('../init.d/t551m-sim-status')
+        sim_stop = root / 'etc/rc.d/K10t551m-sim-status'
+        if not sim_stop.is_symlink():
+            sim_stop.symlink_to('../init.d/t551m-sim-status')
         link = root / 'etc/rc.d/S94t551m-screen-power'
         link.parent.mkdir(parents=True, exist_ok=True)
         if not link.is_symlink():

@@ -59,6 +59,9 @@ def atomic(path, value):
         file.write('\n')
         file.flush(); os.fsync(file.fileno())
     temporary.replace(path)
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try: os.fsync(directory)
+    finally: os.close(directory)
 
 
 @contextlib.contextmanager
@@ -118,7 +121,11 @@ def ingest(data, card, identity, messages, now):
             data['next_id'] += 1; data['messages'].append(old)
             if not baseline:
                 alerts.append(old['id'])
-        old.update(message)
+        # An interrupted archive may leave only some multipart fragments on
+        # the SIM. Never replace the durable complete message with that subset.
+        if not (old.get('state') == 'received' and message['state'] != 'received'
+                and fingerprints <= {p['fingerprint'] for p in old['parts']}):
+            old.update(message)
         old['direction'] = 'in'
         if old['state'] == 'received' and not old.get('forward_attempted'):
             old['forward_attempted'] = True
@@ -161,6 +168,46 @@ def alert(ids, data):
                          stderr=subprocess.DEVNULL, start_new_session=True)
 
 
+def archive_capacity(data, card, identity):
+    """Release near-full storage only after durable, verified PDU archival."""
+    capacity = at(card, 'CPMS?')
+    match = re.search(r'\+CPMS:\s*"(SM|ME)"\s*,\s*(\d+)\s*,\s*(\d+)', capacity)
+    if not match: return
+    store, used, total = match[1], int(match[2]), int(match[3])
+    data['slots'][str(card)].update(storage=store, used=used, total=total)
+    if total <= 0 or used < max(1, min(total-5, int(total*.8))): return
+    candidates = [m for m in data['messages'] if m['card']==card and m['identity']==identity
+                  and m.get('direction')=='in' and m.get('state')=='received' and not m.get('deleted')]
+    for message in candidates:
+        for part in sorted(message['parts'], key=lambda p:p['index'], reverse=True):
+            if part['fingerprint'] in message.get('archived_parts', []): continue
+            pdu = part.get('pdu')
+            if not pdu or hashlib.sha256(bytes.fromhex(pdu)).hexdigest()!=part['fingerprint']: continue
+            # Read back the durable inbox as well as the raw archive. A disk
+            # failure must never cause SIM deletion.
+            saved = next((m for m in load()['messages'] if m['id']==message['id']), None)
+            if not saved or saved['state']!='received' or not any(p.get('pdu')==pdu for p in saved['parts']):
+                raise RuntimeError('SMS archive is not durable')
+            path = DATA / 'archive' / str(card) / identity / (part['fingerprint']+'.json')
+            atomic(path, {'pdu':pdu,'card':card,'identity':identity,'message_id':message['id']})
+            if json.loads(path.read_text()).get('pdu') != pdu: raise RuntimeError('SMS archive verification failed')
+            ccid = at(card, 'CCID?')
+            found = re.search(r'\+CCID:\s*"?([0-9A-Fa-f]{10,24})', ccid)
+            if not found or hashlib.sha256(found[1].upper().encode()).hexdigest()!=identity:
+                raise RuntimeError('SIM changed during SMS archival')
+            reply = at(card, f'CMGR={part["index"]}')
+            current = re.search(r'\+CMGR:[^\r\n]*[\r\n]+([a-fA-F0-9]+)(?:[\r\n]|$)', reply)
+            if not current or current[1].lower()!=pdu.lower(): continue
+            result = at(card, f'CMGD={part["index"]}')
+            if not result.strip().endswith('OK'): raise RuntimeError('SIM storage release was rejected')
+            message.setdefault('archived_parts', []).append(part['fingerprint'])
+            message['archived'] = len(message['archived_parts']) == len(message['parts'])
+            save(data)
+    capacity = at(card, 'CPMS?')
+    match = re.search(r'\+CPMS:\s*"(?:SM|ME)"\s*,\s*(\d+)\s*,\s*(\d+)', capacity)
+    if match: data['slots'][str(card)].update(used=int(match[1]), total=int(match[2]))
+
+
 def forward(ids):
     for identifier in ids:
         subprocess.Popen(['/usr/libexec/e5-sms', 'forward', str(identifier)],
@@ -189,6 +236,11 @@ def scan_locked(cards):
                     identity, messages = read_card(card, own)
                     new, ready = ingest(data, card, identity, messages, int(time.time()))
                     alerts += new; forwards += ready
+                    save(data)
+                    try:
+                        archive_capacity(data, card, identity)
+                    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
+                        data['slots'][str(card)]['archive_error'] = str(error)
                 except (RuntimeError, ValueError, subprocess.TimeoutExpired) as error:
                     data['slots'][str(card)] = {'ok': False, 'updated': int(time.time()), 'error': str(error)}
         finally:
@@ -235,7 +287,7 @@ def delete_locked(identifier):
         message = next((m for m in data['messages'] if m['id'] == identifier and not m.get('deleted')), None)
         if not message:
             return {'ok': False, 'error': 'No such message'}
-        if message['direction'] == 'out':
+        if message['direction'] == 'out' or message.get('archived'):
             message['deleted'] = True; save(data)
             return {'ok': True}
         own = current_card()

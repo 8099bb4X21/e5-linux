@@ -42,8 +42,8 @@ SIGF=$DIR/sig.json
 COLLECT_LCK=$DIR/collect.lck
 FAST_LCK=$DIR/fast.lck
 HIST=$DIR/at-history
-TTL=${MU300_DASH_TTL:-15}          # full tier: neighbours/QoS/operator
-TTL_FAST=${MU300_DASH_TTL_FAST:-3} # serving tier: kick whenever older than 1 s (a fast round is ~300 ms)
+TTL=${MU300_DASH_TTL:-5}          # full tier: neighbours/QoS/operator
+TTL_FAST=${MU300_DASH_TTL_FAST:-1} # serving tier; refreshed only while a view requests it
 MU300_AT_LOCK_WAIT=12
 export MU300_AT_LOCK_WAIT
 
@@ -53,6 +53,27 @@ inp() {  # inp JSONPATH [default] -> param value
     case $_v in ''|null) _v=${2-} ;; esac
     printf '%s' "$_v"
 }
+# Scope is per request, never a persistent data-SIM selection. Detached workers
+# inherit the immutable slot and private cache path from this request.
+if [ "${1:-}" = call ]; then
+    case ${2:-} in
+        status|rates|cells|signal|act|at|at_history|lock_get|lock_set|lock_status|traffic_get|traffic_set)
+            selected=$(inp '@.slot')
+            case "$selected" in
+                '') selected=$(cat /sys/module/sipc_wwan/parameters/card 2>/dev/null) ;;
+                0|1) ;;
+                *) printf '{"ok":0,"error":"Invalid SIM slot"}\n'; exit 0 ;;
+            esac
+            case "$selected" in 0|1) ;; *) printf '{"ok":0,"error":"SIM slot unavailable"}\n'; exit 0 ;; esac
+            export MU300_SIM_SLOT=$selected
+            DIR=$DIR/sim$selected
+            export MU300_DASH_DIR=$DIR
+            CELL=$DIR/cell.json; SIGF=$DIR/sig.json
+            COLLECT_LCK=$DIR/collect.lck; FAST_LCK=$DIR/fast.lck; HIST=$DIR/at-history
+            mkdir -p "$DIR"
+            ;;
+    esac
+fi
 esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\r'; }
 now() { date +%s; }
 collecting() {
@@ -68,12 +89,14 @@ fast_busy() {
 age_of() { [ -s "$1" ] && echo $(( $(now) - $(date -r "$1" +%s 2>/dev/null || echo 0) )) || echo -1; }
 
 m_status() {
-    local info cage sage busy=0 fbusy=0
-    info=$("$DASH/dashboard-info" 2>/dev/null)
-    [ -n "$info" ] || info='{"error":"dashboard-info failed"}'
+    local info=null cage sage busy=0 fbusy=0
+    if [ "${1:-}" != cells ]; then
+        info=$("$DASH/dashboard-info" 2>/dev/null)
+        [ -n "$info" ] || info='{"error":"dashboard-info failed"}'
+    fi
     cage=$(age_of "$CELL"); sage=$(age_of "$SIGF")
     # two refresh tiers, both detached: the fast one keeps the serving-cell data
-    # within ~3 s of reality, the full one refreshes neighbours/QoS/operator.
+    # fresh on the next status poll, the full one refreshes neighbours/QoS/operator.
     # a full round in flight also writes the fast cache, so it counts for both.
     # During a lock apply (SFUN restart) do not kick anything: the modem answers
     # garbage mid-restart and the collectors would only burn the AT channel.
@@ -82,10 +105,10 @@ m_status() {
     fast_busy && fbusy=1
     # A full round also refreshes sig.json. Prefer it when both tiers are stale;
     # starting full and fast together doubles the AT burst for no benefit.
-    if { [ "$cage" -lt 0 ] || [ "$cage" -gt "$TTL" ]; } && [ "$busy" = 0 ]; then
+    if { [ "$cage" -lt 0 ] || [ "$cage" -ge "$TTL" ]; } && [ "$busy" = 0 ]; then
         setsid "$DASH/cell" >/dev/null 2>&1 &
         busy=1; fbusy=1
-    elif { [ "$sage" -lt 0 ] || [ "$sage" -gt "$TTL_FAST" ]; } && [ "$fbusy" = 0 ]; then
+    elif [ "${1:-}" != cells ] && { [ "$sage" -lt 0 ] || [ "$sage" -ge "$TTL_FAST" ]; } && [ "$fbusy" = 0 ]; then
         setsid "$DASH/cell" fast >/dev/null 2>&1 &
         fbusy=1
     fi
@@ -94,6 +117,25 @@ m_status() {
         "$([ -s "$CELL" ] && cat "$CELL" || echo null)" \
         "$([ -s "$SIGF" ] && cat "$SIGF" || echo null)" \
         "$cage" "$sage" "$busy"
+}
+
+# Fast, uncached per-card counters. No AT, Wi-Fi enumeration or full sysinfo.
+# Fractional uptime avoids integer-second jitter in subsecond rate deltas.
+m_rates() {
+    local dev=sipa_eth0 stamp rest rx tx idx
+    [ "$MU300_SIM_SLOT" = 0 ] || dev=sipa_eth8
+    IFS=' ' read -r stamp rest < /proc/uptime
+    case "$stamp" in ''|*[!0-9.]*) printf '{"error":"Clock unavailable"}\n'; return ;; esac
+    if ! { IFS= read -r rx < "/sys/class/net/$dev/statistics/rx_bytes" &&
+           IFS= read -r tx < "/sys/class/net/$dev/statistics/tx_bytes" &&
+           IFS= read -r idx < "/sys/class/net/$dev/ifindex"; }; then
+        printf '{"card":%s,"ts":%s,"device":"%s","net":null}\n' "$MU300_SIM_SLOT" "$stamp" "$dev"
+        return
+    fi
+    case "$rx:$tx:$idx" in *[!0-9:]*) printf '{"error":"Counters unavailable"}\n'; return ;; esac
+    [ -n "$rx" ] && [ -n "$tx" ] && [ -n "$idx" ] || { printf '{"error":"Counters unavailable"}\n'; return; }
+    printf '{"card":%s,"ts":%s,"device":"%s","ifindex":%s,"net":{"rx":%s,"tx":%s}}\n' \
+        "$MU300_SIM_SLOT" "$stamp" "$dev" "$idx" "$rx" "$tx"
 }
 
 # Live serving-cell snapshot for views where stale radio readings are actively
@@ -242,14 +284,16 @@ do_list() {
     cat <<EOF
 {
 	"sysinfo": { },
-	"status": { },
-	"signal": { },
-	"act": { "op": "String", "arg": "String" },
-	"at": { "cmd": "String" },
-	"at_history": { },
-	"lock_get": { "fresh": "String" },
-	"lock_set": { "kind": "String", "val": "String" },
-	"lock_status": { "id": "String" },
+	"status": { "slot": "String" },
+	"rates": { "slot": "String" },
+	"signal": { "slot": "String" },
+	"cells": { "slot": "String" },
+	"act": { "op": "String", "arg": "String", "slot": "String" },
+	"at": { "cmd": "String", "slot": "String" },
+	"at_history": { "slot": "String" },
+	"lock_get": { "fresh": "String", "slot": "String" },
+	"lock_set": { "kind": "String", "val": "String", "slot": "String" },
+	"lock_status": { "id": "String", "slot": "String" },
 	"sms_list": { "page": "String" },
 	"sms_show": { "id": "String" },
 	"sms_send": { "num": "String", "text": "String", "card": "String" },
@@ -259,8 +303,8 @@ do_list() {
 	"forward_status": { },
 	"forward_set": { "payload": "String" },
 	"forward_test": { },
-	"traffic_get": { },
-	"traffic_set": { "payload": "String" },
+	"traffic_get": { "slot": "String" },
+	"traffic_set": { "payload": "String", "slot": "String" },
 	"usb_get": { },
 	"usb_set": { "kind": "String", "value": "String", "scope": "String", "auto": "String" },
 	"usb_net_list": { },
@@ -290,6 +334,8 @@ call)
     case ${2:-} in
         sysinfo)    run_m sysinfo    'm_sysinfo' ;;
         status)     run_m status     'm_status' ;;
+        rates)      m_rates ;;
+        cells)      run_m cells      'm_status cells' ;;
         signal)     run_m signal     'm_signal' ;;
         act)        run_m act        'm_act' ;;
         at)         run_m at         'm_at' ;;
@@ -315,7 +361,7 @@ call)
             printf '{"ok":0,"error":"Use the SMS forwarding page","redirect":"admin/modem/forward"}\n'
             ;;
         traffic_get)
-            ubus -t 3 call unisoc.traffic get 2>/dev/null || printf '{"error":"traffic_unavailable"}\n'
+            ubus -t 3 call unisoc.traffic get "{\"slot\":\"$selected\"}" 2>/dev/null || printf '{"error":"traffic_unavailable"}\n'
             ;;
         traffic_set)
             ubus -t 5 call unisoc.traffic set "$INPUT" 2>/dev/null || printf '{"ok":0,"error":"traffic_unavailable"}\n'
@@ -326,6 +372,7 @@ call)
             case $kind in
                 role) run_m usb_set:role '"$DASH/device-usb" set-role "$value" "$auto"' ;;
                 net)  run_m usb_set:net  '"$DASH/device-usb" set-net "$value" "$scope" "$auto"' ;;
+                lan)  run_m usb_set:lan  '"$DASH/device-usb" set-lan-auto "$value"' ;;
                 *)    printf '{"ok":0,"error":"unknown USB setting"}\n' ;;
             esac ;;
         usb_net_list) run_m usb_net_list '"$DASH/device-usb" net-list' ;;

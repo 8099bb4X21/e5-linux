@@ -26,11 +26,12 @@ const L = (zh, en) => ({ zh, en });
 
 /* ---------- network ---------- */
 
-// the bands Android's RIL itself allows on this modem (unisoc-cpd FINDINGS
-// 1.4), and the NR bands in the CP's tables that Chinese networks use
-const LTE_CHOICES = [ 1, 3, 5, 7, 8, 20, 28, 34, 38, 39, 40, 41 ];
-const LTE_ANDROID = LTE_CHOICES;
-const NR_CHOICES = [ 1, 3, 5, 8, 28, 41, 77, 78, 79 ];
+// Share the dashboard's platform LTE list and live NR capability parser.
+function band_caps(modem) {
+	let caps = ctx.sh_json('/usr/libexec/unisoc-modem/lock caps' + (modem ? '' : ' lte'));
+	let bands = (text) => filter(map(split(text ?? '', ','), (b) => int(b)), (b) => b > 0);
+	return { lte: bands(caps?.lte), nr: bands(caps?.nr) };
+}
 
 // AT+SPTESTMODE=<card 1>,<card 2>,<primary SIM>: the work mode of each card
 // (the values UFI-TOOLS uses on this CP generation, uficode's
@@ -135,6 +136,7 @@ const network = {
 	id: 'network', label: L('网络', 'Network'),
 	items: function() {
 		let modem = ctx.modem_present();
+		let caps = band_caps(modem);
 		let cells = modem ? ctx.cells() : [];
 		let cur_cell = modem ? cell_lock_value() : 'none';
 		let tm = modem ? testmode() : null;
@@ -163,14 +165,15 @@ const network = {
 			             { value: 'nsa', label: L('仅 NSA', 'NSA only') } ] },
 			{ id: 'lte_bands', type: 'multi', label: L('LTE 频段锁定', 'LTE band lock'), confirm: true,
 			  value: modem ? ctx.lte_bands(ctx.at('AT+SPLBAND=0')) : [],
-			  options: map(LTE_CHOICES, (b) => ({ value: b, label: `B${b}` })),
+			  options: map(caps.lte, (b) => ({ value: b, label: `B${b}` })),
 			  note: L('都不选 = 不锁定', 'None chosen = no lock') },
 			{ id: 'nr_bands', type: 'multi', label: L('NR 频段锁定', 'NR band lock'), confirm: true,
 			  value: modem ? ctx.nr_bands(ctx.at('AT+SPLBAND=3')) : [],
-			  options: map(NR_CHOICES, (b) => ({ value: b, label: `n${b}` })),
-			  note: L('都不选 = 不锁定', 'None chosen = no lock') },
+			  options: map(caps.nr, (b) => ({ value: b, label: `n${b}` })),
+			  note: length(caps.nr) ? L('都不选 = 不锁定', 'None chosen = no lock')
+			    : L('未获取到基带 NR 能力，请稍后重新进入', 'NR capabilities unavailable; reopen this page later') },
 			{ id: 'bands_default', type: 'action', label: L('恢复默认频段', 'Default bands'), confirm: true,
-			  note: L('LTE 恢复 Android 的频段组合，NR 不锁定', "LTE back to Android's set, NR unlocked") },
+			  note: L('LTE 恢复全部候选频段，NR 不锁定', 'LTE back to all supported bands, NR unlocked') },
 			{ id: 'cell_lock', type: 'choice', label: L('锁定小区', 'Cell lock'), value: cur_cell,
 			  options: opts, confirm: true,
 			  note: L('锁到某个小区后只连这个小区（实验）', 'Only that cell once locked (experimental)') },
@@ -232,17 +235,22 @@ const network = {
 			return (ctx.payload_ints(ctx.at('AT+SP5GRAN?'))[0] == v) ? null : 'the modem did not take it';
 		}
 		if (id == 'lte_bands' || id == 'nr_bands' || id == 'bands_default') {
-			let lte = (id == 'bands_default') ? LTE_ANDROID : (id == 'lte_bands') ? value : null;
+			let caps = band_caps(ctx.modem_present());
+			if (id == 'bands_default' && !length(caps.lte)) return 'LTE capabilities unavailable';
+			if (id != 'bands_default' && type(value) != 'array') return 'Invalid band list';
+			let lte = (id == 'bands_default') ? caps.lte : (id == 'lte_bands') ? value : null;
 			let nr = (id == 'bands_default') ? [] : (id == 'nr_bands') ? value : null;
 			if (lte != null) {
-				lte = filter(map(lte, (b) => +b), (b) => index(LTE_CHOICES, b) >= 0);
+				lte = map(lte, (b) => +b);
+				if (length(filter(lte, (b) => index(caps.lte, b) < 0))) return 'Unsupported LTE band';
 				ctx.at(lte_lock_cmd(lte));
 				// (a lock that did not take must not look like one)
 				if (!same_set(ctx.lte_bands(ctx.at('AT+SPLBAND=0')), lte))
 					return 'LTE: the modem read back other bands';
 			}
 			if (nr != null) {
-				nr = filter(map(nr, (b) => +b), (b) => index(NR_CHOICES, b) >= 0);
+				nr = map(nr, (b) => +b);
+				if (length(filter(nr, (b) => index(caps.nr, b) < 0))) return 'Unsupported or unavailable NR band';
 				ctx.at(nr_lock_cmd(nr));
 				if (!same_set(ctx.nr_bands(ctx.at('AT+SPLBAND=3')), nr))
 					return 'NR: the modem read back other bands';
@@ -378,8 +386,11 @@ const notify = uci_category('notify', L('通知', 'Notifications'), [
 // the speaker (e5-linux's e5-audio and e5-volume): shown when it is there
 const sound = uci_category('sound', L('声音', 'Sound'), [
 	{ id: 'volume', type: 'number', uci: 'e5-audio.main.volume', default: '10', min: 0, max: 15, step: 1,
-	  raw_min: 0, raw_max: 15, label: L('音量', 'Volume'), apply: '/usr/libexec/e5-volume apply',
-	  note: L('音量键也可以调节；0 为静音', 'The volume keys change it too; 0 is mute') }
+	  raw_min: 0, raw_max: 15, label: L('媒体音量', 'Media volume'), apply: '/usr/libexec/e5-volume apply',
+	  note: L('非通话时音量键调节此项；0 为静音', 'Volume keys adjust this outside calls; 0 is mute') },
+	{ id: 'call_volume', type: 'number', uci: 'e5-audio.main.call_volume', default: '15', min: 0, max: 15, step: 1,
+	  raw_min: 0, raw_max: 15, label: L('通话音量', 'Call volume'),
+	  note: L('通话时音量键调节此项；0 仅静音接听声音', 'Volume keys adjust this during calls; 0 mutes received audio only') }
 ], function() {
 	return [ { id: 'test', type: 'action', label: L('播放测试音', 'Play a test sound') } ];
 }, function(item, value) {
@@ -568,6 +579,8 @@ const usb_cat = {
 	id: 'usb', label: L('USB', 'USB'),
 	items: function() {
 		let u = ctx.usb_status(), r = u.reset;
+		let s = ctx.sh_json('/usr/libexec/unisoc-modem/device-usb get') ?? {};
+		let roles = { auto:L('自动识别','Automatic'), host:L('主机 · OTG','Host · OTG'), device:L('设备模式','Device mode'), none:L('未连接','Disconnected') };
 		let diagnosis = ctx.network_check_status();
 		let labels = {
 			no_controller:L('USB 控制器缺失','USB controller missing'),
@@ -585,6 +598,24 @@ const usb_cat = {
 		let checks = map(diagnosis?.checks ?? [], code => labels[code] ?? L(code,code));
 		let hardware_errors = filter(split(diagnosis?.details?.kernel_log ?? '', '\n'), line=>match(lc(line), /(failed|error|not found|timeout|wrong nth|power on wcn)/));
 		return [
+			{ id:'usb_role_state', type:'info', label:L('当前角色','Current role'), busy:!!s.pending,
+			  value:roles[s.role ?? 'none'], note:s.last_error || (s.pending ? L('正在切换…','Switching…') : null) },
+			{ id:'usb_role', type:s.host_supported ? 'choice' : 'info', label:L('USB 角色','USB role'),
+			  value:s.policy ?? 'auto', confirm:true, reload:true,
+			  options:map(['auto','device','host'], value=>({ value, label:roles[value] })),
+			  note:L('切换可能中断 USB 网络；自动模式按接入设备识别','Switching can interrupt USB networking; automatic mode follows the connected device') },
+			{ id:'usb_host_boot', type:'toggle', label:L('开机启用主机模式','Start in host mode'), value:!!s.role_auto, confirm:true, reload:true,
+			  note:L('开启会切到主机策略；关闭恢复自动识别','Enabling selects host mode; disabling restores automatic detection') },
+			{ id:'usb_net_current', type:'info', label:L('当前共享协议','Current sharing protocol'), value:uc(s.net_current || 'ncm'),
+			  note:s.net_boot?.error || L('主机模式下不使用共享协议','Sharing protocol is unused in host mode') },
+			{ id:'usb_net_mode', type:s.net_available ? 'choice' : 'info', label:L('USB 共享协议','USB sharing protocol'), value:s.net_mode ?? 'ncm', reload:true,
+			  options:map(s.net_supported ?? ['ncm'], value=>({value,label:uc(value)})),
+			  note:L('下次重启生效；ECM 主要用于 Linux/macOS','Applies at next boot; ECM is mainly for Linux/macOS') },
+			{ id:'usb_net_scope', type:'choice', label:L('生效期限','Apply for'), value:s.net_scope ?? 'permanent', reload:true,
+			  options:[{value:'permanent',label:L('永久','Every boot')},{value:'once',label:L('仅下次重启','Next boot only')}] },
+			{ id:'usb_net_auto', type:'toggle', label:L('启用所选协议','Use selected protocol'), value:!!s.net_auto, reload:true,
+			  note:L('关闭后下次启动使用默认 NCM','When off, the next boot uses NCM') },
+			{ id:'usb_lan_auto', type:'toggle', label:L('USB 网卡自动加入 LAN','Add USB Ethernet to LAN'), value:!!s.lan_auto, reload:true },
 			{ id: 'check', type: 'action', label:L('一键检查连接','Check connections'), reload:true,
 			  note:L('检查 USB、热点、网桥和 DHCP 并保存报告，不改变网络配置','Check USB, Wi-Fi, LAN and DHCP; save a report without changing network settings') },
 			{ id: 'diagnosis', type:'info', label:L('检查结论','Check result'),
@@ -604,7 +635,26 @@ const usb_cat = {
 			  note: L('电脑的 USB 网络会短暂断开；重新识别设备并恢复 LAN/DHCP，保留网络设置', 'USB networking disconnects briefly; re-enumerate and restore LAN/DHCP while keeping network settings') }
 		];
 	},
-	set: function(id) { return id == 'reset' ? ctx.usb_reset_start() : id == 'check' ? ctx.network_check() : 'no such setting'; }
+	set: function(id, value) {
+		if (id == 'reset') return ctx.usb_reset_start();
+		if (id == 'check') return ctx.network_check();
+		let s = ctx.sh_json('/usr/libexec/unisoc-modem/device-usb get');
+		if (!s?.ok) return 'USB status unavailable';
+		let args;
+		if (id == 'usb_role' && index(['auto','host','device'], value) >= 0)
+			args = `set-role ${value} ${value == 'host' && s.role_auto ? '1' : '0'}`;
+		else if (id == 'usb_host_boot' && type(value) == 'bool') args = `set-role ${value ? 'host 1' : 'auto 0'}`;
+		else if (id == 'usb_lan_auto' && type(value) == 'bool') args = `set-lan-auto ${value ? '1' : '0'}`;
+		else if (index(['usb_net_mode','usb_net_scope','usb_net_auto'], id) >= 0) {
+			let mode = id == 'usb_net_mode' ? value : s.net_mode;
+			let scope = id == 'usb_net_scope' ? value : s.net_scope;
+			if (index(['ncm','ecm','rndis'], mode) < 0 || index(['once','permanent'], scope) < 0 ||
+			    (id == 'usb_net_auto' && type(value) != 'bool')) return 'Invalid USB setting';
+			args = `set-net ${mode} ${scope} ${id == 'usb_net_auto' && !value ? '0' : '1'}`;
+		} else return 'Invalid USB setting';
+		let result = ctx.sh_json('/usr/libexec/unisoc-modem/device-usb ' + args);
+		return result?.ok ? null : result?.error ?? 'USB operation failed';
+	}
 };
 
 /* ---------- about ---------- */

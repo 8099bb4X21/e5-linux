@@ -33,12 +33,18 @@ def main():
         def do_POST(self):
             body=json.loads(self.rfile.read(int(self.headers.get('Content-Length',0))) or '{}')
             posts.append((self.path,body))
+            if self.path=='/api/volume':
+                return self.reply({'available':True,'level':5,'max':15,
+                                   'kind':'call' if model['calls'] else 'media'})
             if self.path=='/api/backlight':fixtures['/api/status']['screen']['awake']=body['level']>0
             if self.path.endswith('/dtmf'):
                 if fail_tone[0]:return self.reply({'ok':False,'error':'simulated failure'},502)
                 time.sleep(.06)
             if self.path.endswith('/answer'):model['calls']=[{**model['calls'][0],'state':'active'}]
             if self.path.endswith('/hangup'):model['calls']=[]
+            if self.path.endswith('/audio'):
+                model['audio'].update(body)
+                model['audio']['speaker']=model['audio'].get('route')=='speaker'
             return self.reply({'ok':True})
     server=ThreadingHTTPServer(('127.0.0.1',0),partial(Handler,directory=str(a.webroot)))
     threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -54,6 +60,31 @@ def main():
         page.evaluate("openApp({id:'phone',name:'Phone',entry:'index.html'})")
         frame=page.frame_locator('#app-frame')
         frame.locator('#dtmf-toggle').wait_for(state='visible')
+        page.evaluate('volumeKey(-1)')
+        page.wait_for_timeout(200)
+        assert page.locator('#vol-label').inner_text()=='通话音量'
+        assert page.locator('#vol-n').inner_text()=='5'
+        bounds=page.locator('#vol-osd').evaluate('e=>{const r=e.getBoundingClientRect();e.style.pointerEvents="auto";const top=e.contains(document.elementFromPoint(r.left+10,r.top+10));e.style.pointerEvents="";return {left:r.left,right:r.right,top}}')
+        assert bounds['left']>=0 and bounds['right']<=320 and bounds['top'],bounds
+        # Audio sheet fits a 320px display and only offers actual HFP headsets.
+        model['audio'].update(route='receiver',bluetooth={'connected':False})
+        frame.locator('#speaker').tap()
+        assert frame.locator('[data-route="bluetooth"]').is_disabled()
+        frame.locator('#audio-close').tap()
+        model['audio']['bluetooth']={'connected':True,'device':'Very long Bluetooth headset name for truncation'}
+        page.wait_for_timeout(500)
+        frame.locator('#speaker').tap()
+        assert frame.locator('[data-route="bluetooth"]').is_enabled()
+        bounds=frame.locator('.audio-sheet').evaluate('e=>({left:e.getBoundingClientRect().left,right:e.getBoundingClientRect().right,bottom:e.getBoundingClientRect().bottom,height:innerHeight})')
+        assert bounds['left']>=0 and bounds['right']<=320 and bounds['bottom']<=bounds['height']+1,bounds
+        page.screenshot(path='logs/t551m/phone-audio-sheet.png')
+        frame.locator('[data-route="bluetooth"]').tap()
+        page.wait_for_timeout(500)
+        assert frame.locator('#speaker').inner_text()=='蓝牙耳机'
+        frame.locator('#speaker').tap();frame.locator('[data-route="receiver"]').tap()
+        page.wait_for_timeout(500)
+        assert frame.locator('#speaker').inner_text()=='手机'
+        assert [b['route'] for p,b in posts if p.endswith('/audio')]==['bluetooth','receiver']
         frame.locator('#dtmf-toggle').tap()
         for digit in '1*#0':frame.locator(f'[data-tone="{digit}"]').tap()
         page.wait_for_function("document.querySelector('#app-frame').contentDocument.querySelector('#dtmf-digits').textContent==='1*#0'")

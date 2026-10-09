@@ -11,6 +11,7 @@ import secrets
 import shutil
 import subprocess
 import runpy
+import sys
 
 
 def main():
@@ -29,14 +30,20 @@ def main():
     release = (a.kernel / 'kernel.release').read_text().strip()
     if '-t551m' not in release:
         raise SystemExit('Expected the T551M kernel build')
-    # OpenWrt uses flat subdirectories for the shared audio and modem loaders.
-    for line in (top / 'upstream/root-modules.txt').read_text().splitlines():
-        if not line or line.startswith('#') or 'pa-aw87xxx' in line:
-            continue
-        src = a.kernel / 'modules' / Path(line).name
-        dst = root / 'lib/modules' / release / line
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
+    # Include on-demand virtualization/networking modules and their indexes,
+    # alongside the existing audio/modem aliases used by board services.
+    subprocess.run([sys.executable, str(top / 'upstream/stage-root-modules.py'),
+                    str(a.kernel), '--root', str(root)], check=True)
+    # OpenWrt has no generic modalias loader in this image. Load the host
+    # storage drivers once so later OTG attachments can bind automatically.
+    modules_d = root / 'etc/modules.d'
+    modules_d.mkdir(parents=True, exist_ok=True)
+    storage_modules = modules_d / '55-usb-host-storage'
+    shutil.copyfile(Path(__file__).with_name('usb-host-storage.modules'), storage_modules)
+    storage_modules.chmod(0o644)
+    network_modules = modules_d / '56-usb-host-network'
+    shutil.copyfile(Path(__file__).with_name('usb-host-network.modules'), network_modules)
+    network_modules.chmod(0o644)
     for name in ('vendor-start.sh', 'android-run', 'e5-modem-coldboot'):
         dst = root / 'opt/e5' / name
         shutil.copy2(top / 'rootfs/overlay/opt/e5' / name, dst)

@@ -9,7 +9,8 @@ spec = importlib.util.spec_from_loader(loader.name, loader)
 voice = importlib.util.module_from_spec(spec)
 loader.exec_module(voice)
 class Hardware:
-    def __init__(self): self.speaker = False; self.events = []
+    def __init__(self): self.speaker = False; self.events = []; self.volume = 15
+    def set_volume(self, value, remote=False): self.volume = value
     def start(self): self.events.append('start')
     def stop(self): self.events.append('stop'); self.speaker = False
     def set_speaker(self, value): self.speaker = value
@@ -22,6 +23,8 @@ assert suspends==[True] and hw.events==['start']
 # No timer expires or ends an active call; only observed modem state controls audio.
 for _ in range(100): assert c.update([{'id':'1','state':'active'}],{})['active']
 assert hw.events==['start']
+r=c.update([{'id':'1','state':'active'}],{'volume':4})
+assert r['volume']==4 and hw.events==['start'], 'volume restarted the call audio'
 r=c.update([{'id':'1','state':'active'}],{'speaker':True,'muted':True})
 assert r['speaker'] and r['muted']
 assert ('mute', True) in hw.events
@@ -107,3 +110,80 @@ with patch.object(voice.subprocess,'Popen',return_value=monitor):
 assert not worker.is_alive() and monitor.ended and monitor.stdout.closed
 os.close(write_fd)
 print('D-Bus event wake, split lines and monitor cleanup checks passed')
+
+# Exercise actual GLib variant decoding, including nested managed objects,
+# signed enums and the downstream unsigned source-SIM property.
+import ctypes as C
+bus=voice.CallBus()
+parse=bus.lib.g_variant_parse
+parse.restype=C.c_void_p
+parse.argtypes=[C.c_void_p,C.c_char_p,C.c_void_p,C.c_void_p,C.POINTER(C.c_void_p)]
+error=C.c_void_p()
+variant=parse(None,b"({'/call/8': {'org.test.Call': {'State': <int32 3>, 'SimSlot': <uint32 2>, 'Number': <'10010'>, 'Flag': <true>}}},)",None,None,C.byref(error))
+assert variant, bus.error(error)
+try:
+    props=bus.unpack(variant)[0]['/call/8']['org.test.Call']
+finally:
+    bus.g_variant_unref(variant)
+assert props=={'State':3,'SimSlot':2,'Number':'10010','Flag':True}
+modem=bus.ROOT+'/Modem/0';path=voice.CALL_PATH+'8';reads=[]
+def read(path_arg,interface,method,*args):
+    reads.append((path_arg,method))
+    if method=='GetManagedObjects':return {modem:{bus.VOICE:{}}}
+    if method=='Get':return [path]
+    return dict(props)
+with patch.object(bus,'call',side_effect=read):
+    for state,name in enumerate(bus.STATES):
+        props['State']=state
+        result=voice.calls(set(),bus.query)
+        if name=='terminated':assert result==[]
+        else:assert result[0]['state']==name and result[0]['card']==1
+    assert sum(method=='GetManagedObjects' for _,method in reads)==1
+    bus.modem=None
+    voice.calls(set(),bus.query)
+    assert sum(method=='GetManagedObjects' for _,method in reads)==2
+bus.close();bus.close()
+print('Native GVariant decode, all call states, source SIM and modem rediscovery checks passed')
+
+# Cache only unchanged UCI input; staged edits and deletion must be visible.
+import tempfile
+from types import SimpleNamespace
+with tempfile.TemporaryDirectory() as tmp:
+    root=Path(tmp);config=root/'config';delta=root/'delta'
+    config.write_text('saved')
+    with patch.object(voice,'Path',side_effect=lambda p:delta if '/tmp/.uci/' in p else config), \
+         patch.object(voice.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout="phone.main.ring_sound='1'")) as uci:
+        voice._alert_signature=voice._alert_values=None
+        for _ in range(100):assert voice.alert_settings()['sound']
+        assert uci.call_count==1
+        delta.write_text('staged')
+        uci.return_value.stdout="phone.main.ring_sound='0'"
+        assert not voice.alert_settings()['sound'] and uci.call_count==2
+        delta.unlink();uci.return_value.stdout="phone.main.ring_sound='1'"
+        assert voice.alert_settings()['sound'] and uci.call_count==3
+        config.unlink();uci.return_value.returncode=1;uci.return_value.stdout=''
+        assert voice.alert_settings()=={'sound':True,'vibrate':True,'tone':'call'}
+        voice.alert_settings();assert uci.call_count==4
+print('Ringtone config cache, staged changes and deleted-config defaults passed')
+
+# Atomic screen requests wake immediately; unrelated status writes must not
+# add wakeups to the normal 500ms fallback. Use real Linux inotify events.
+with tempfile.TemporaryDirectory() as tmp:
+    root=Path(tmp); stop=threading.Event(); changed=threading.Event()
+    with patch.object(voice,'RUN',root):
+        worker=threading.Thread(target=voice.watch_audio_settings,args=(stop,changed))
+        worker.start()
+        try:
+            # Watch registration is asynchronous; retry only the test input.
+            for _ in range(20):
+                (root/'request.tmp').write_text('{}')
+                (root/'request.tmp').replace(root/'settings.json')
+                if changed.wait(.05): break
+            assert changed.is_set(), 'atomic audio request did not wake observer'
+            changed.clear()
+            (root/'status.json').write_text('{}')
+            assert not changed.wait(.1), 'status output triggered a feedback loop'
+        finally:
+            stop.set();worker.join(1)
+        assert not worker.is_alive()
+print('Atomic audio-settings wake and unchanged idle polling checks passed')

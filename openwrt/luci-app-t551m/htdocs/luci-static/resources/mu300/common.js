@@ -11,16 +11,58 @@
  * 质量色不用写死的色值，走 --success/--warning/--danger 与 color-mix，
  * 深浅两套模式都跟随主题。 */
 
-var callStatus = rpc.declare({ object: 'mu300dash', method: 'status', expect: { '': {} } });
-var callSignal = rpc.declare({ object: 'mu300dash', method: 'signal', expect: { '': {} } });
+function simSlot() { return sessionStorage.getItem('modem-view-slot') === '1' ? '1' : '0'; }
+function scopedRpc(method, params, nobatch) {
+	params = params || [];
+	var call = rpc.declare({object:'mu300dash', method:method, params:params.concat(['slot']), expect:{'':{}}, nobatch:!!nobatch});
+	return function() {
+		var args = Array.prototype.slice.call(arguments, 0, params.length);
+		while (args.length < params.length) args.push('');
+		return call.apply(null, args.concat([simSlot()]));
+	};
+}
+function simSelector(root) {
+	var row=document.createElement('div');
+	row.className='mud-card mud-sim-selector';
+	row.innerHTML='<button type="button" class="mud-sim-toggle" aria-expanded="false" aria-controls="mud-sim-panel">'+
+		'<span class="mud-sim-title">查看 / 控制卡槽</span><span class="mud-sim-current"></span>'+
+		'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>'+
+		'<div id="mud-sim-panel" class="mud-sim-panel" aria-hidden="true" inert><div class="mud-sim-clip">'+
+		'<div class="mud-sim-options"><select aria-label="查看 / 控制卡槽"></select>'+
+		'<small>仅切换查看与操作对象，不切换上网卡</small></div></div></div>';
+	var toggle=row.querySelector('.mud-sim-toggle'), panel=row.querySelector('.mud-sim-panel'), select=row.querySelector('select');
+	row.querySelector('.mud-sim-current').textContent='SIM '+(Number(simSlot())+1);
+	['SIM 1','SIM 2'].forEach(function(name,i){var o=document.createElement('option');o.value=String(i);o.textContent=name;select.appendChild(o);});
+	select.value=simSlot();
+	select.onchange=function(){sessionStorage.setItem('modem-view-slot',select.value);window.location.reload();};
+	function expand(open) {
+		row.classList.toggle('is-open',open);
+		toggle.setAttribute('aria-expanded',String(open));
+		panel.setAttribute('aria-hidden',String(!open));
+		panel.toggleAttribute('inert',!open);
+	}
+	toggle.onclick=function(){expand(toggle.getAttribute('aria-expanded')!=='true');};
+	row.onkeydown=function(event){
+		if(event.key==='Escape' && toggle.getAttribute('aria-expanded')==='true'){
+			event.preventDefault();expand(false);toggle.focus();
+		}
+	};
+	localize(row);
+	root.insertBefore(row,root.firstChild);
+}
+var callStatus = scopedRpc('status');
+var callRates = scopedRpc('rates', [], true);
+/* Separate HTTP replies let cached neighbors/config paint during a live AT read. */
+var callCells = scopedRpc('cells', [], true);
+var callSignal = scopedRpc('signal', [], true);
 var callSysinfo = rpc.declare({ object: 'mu300dash', method: 'sysinfo', expect: { '': {} } });
-var callAct    = rpc.declare({ object: 'mu300dash', method: 'act', params: [ 'op', 'arg' ], expect: { '': {} } });
-var callAt     = rpc.declare({ object: 'mu300dash', method: 'at', params: [ 'cmd' ], expect: { '': {} } });
-var callAtHist = rpc.declare({ object: 'mu300dash', method: 'at_history', expect: { '': {} } });
-var callLockGet = rpc.declare({ object: 'mu300dash', method: 'lock_get', expect: { '': {} } });
-var callLockFresh = rpc.declare({ object: 'mu300dash', method: 'lock_get', params: [ 'fresh' ], expect: { '': {} } });
-var callLockSet = rpc.declare({ object: 'mu300dash', method: 'lock_set', params: [ 'kind', 'val' ], expect: { '': {} } });
-var callLockStatus = rpc.declare({ object: 'mu300dash', method: 'lock_status', params: [ 'id' ], expect: { '': {} } });
+var callAct = scopedRpc('act',['op','arg']);
+var callAt = scopedRpc('at',['cmd']);
+var callAtHist = scopedRpc('at_history');
+var callLockGet = scopedRpc('lock_get', [], true);
+var callLockFresh = scopedRpc('lock_get',['fresh'], true);
+var callLockSet = scopedRpc('lock_set',['kind','val']);
+var callLockStatus = scopedRpc('lock_status',['id']);
 function waitLockJob(started) {
 	return new Promise(function(resolve, reject) {
 		if (!started || !started.ok || !started.id) { reject(new Error(started && started.error || '网络设置提交失败')); return; }
@@ -52,8 +94,8 @@ var callForwardGet = rpc.declare({ object: 'mu300dash', method: 'forward_get', e
 var callForwardStatus = rpc.declare({ object: 'mu300dash', method: 'forward_status', expect: { '': {} } });
 var callForwardSet = rpc.declare({ object: 'mu300dash', method: 'forward_set', params: [ 'payload' ], expect: { '': {} } });
 var callForwardTest = rpc.declare({ object: 'mu300dash', method: 'forward_test', expect: { '': {} } });
-var callTrafficGet = rpc.declare({ object: 'mu300dash', method: 'traffic_get', expect: { '': {} } });
-var callTrafficSet = rpc.declare({ object: 'mu300dash', method: 'traffic_set', params: [ 'payload' ], expect: { '': {} } });
+var callTrafficGet = scopedRpc('traffic_get');
+var callTrafficSet = scopedRpc('traffic_set',['payload']);
 var callUsbGet = rpc.declare({ object: 'mu300dash', method: 'usb_get', expect: { '': {} } });
 var callUsbSet = rpc.declare({ object: 'mu300dash', method: 'usb_set', params: [ 'kind', 'value', 'scope', 'auto' ], expect: { '': {} } });
 var callUsbNetList = rpc.declare({ object: 'mu300dash', method: 'usb_net_list', expect: { '': {} } });
@@ -63,6 +105,15 @@ var callUsbNetAdd = rpc.declare({ object: 'mu300dash', method: 'usb_net_add', pa
  * standalone package works in any OpenWrt buildroot without po2lmo or extra
  * language packages. Chinese remains the source/fallback language. */
 var DASH_I18N = {
+	'正在读取服务小区…': ['Loading serving cell…', 'Hizmet hücresi yükleniyor…'],
+	'正在读取锁定设置…': ['Loading lock settings…', 'Kilit ayarları yükleniyor…'],
+	'正在读取邻小区…': ['Loading neighboring cells…', 'Komşu hücreler yükleniyor…'],
+	'邻区读取较慢，正在等待模组回应': ['Neighbor scan is taking longer; waiting for the modem.', 'Komşu taraması uzun sürüyor; modemin yanıtı bekleniyor.'],
+	'邻区读取失败': ['Could not load neighboring cells', 'Komşu hücreler yüklenemedi'],
+	'信号读取失败': ['Could not load signal', 'Sinyal yüklenemedi'],
+	'锁定状态读取失败，请刷新': ['Could not load lock settings; please refresh', 'Kilit ayarları yüklenemedi; lütfen yenileyin'],
+	'查看 / 控制卡槽': ['View / control SIM', 'SIM görüntüle / yönet'],
+	'仅切换查看与操作对象，不切换上网卡': ['Select the SIM to view and control; the data SIM stays unchanged.', 'Görüntülenecek ve yönetilecek SIM kartı seçin; veri SIM kartı değişmez.'],
 	'会话': ['Conversations', 'Görüşmeler'],
 	'收件人': ['Recipient', 'Alıcı'],
 	'发送卡': ['Send with', 'Gönderen SIM'],
@@ -407,7 +458,7 @@ var DASH_I18N = {
 	'AT 终端': ['AT terminal', 'AT terminali'],
 	'适配设置': ['Adapter settings', 'Bağdaştırıcı ayarları'],
 	'主页刷新间隔（秒）': ['Home dashboard refresh interval (seconds)', 'Ana pano yenileme aralığı (saniye)'],
-	'仅控制主页状态看板的刷新频率；允许 0.5–60 秒，保存后重新进入主页生效。': ['Controls only the home dashboard refresh rate; 0.5–60 seconds. Reopen Home after saving to apply.', 'Yalnızca ana panonun yenileme hızını kontrol eder; 0,5–60 saniye. Kaydettikten sonra uygulamak için Ana Sayfa’yı yeniden açın.'],
+	'状态刷新间隔为 2–60 秒；网速独立每 1 秒刷新，保存后重新进入主页生效。': ['Status refresh interval: 2–60 seconds. Network rates refresh separately every second. Reopen Home after saving.', 'Durum yenileme aralığı: 2–60 saniye. Ağ hızları ayrı olarak her saniye yenilenir. Kaydettikten sonra Ana Sayfa’yı yeniden açın.'],
 	'当前驻网': ['Serving network', 'Bağlı olunan ağ'],
 	'网络模式 · EN-DC': ['Network mode · EN-DC', 'Ağ modu · EN-DC'],
 	'自动（5G/4G）': ['Automatic (5G/4G)', 'Otomatik (5G/4G)'],
@@ -720,9 +771,29 @@ var CSS = `
 html.mud-bootstrap-theme{--surface:var(--background-color-high);--surface-sunken:var(--background-color-low);--brand-subtle:color-mix(in srgb,var(--primary-color-high) 10%,var(--background-color-high));--hairline:var(--border-color-low);--text:var(--text-color-high);--text-muted:var(--text-color-medium);--text-subtle:var(--text-color-low);--brand:var(--primary-color-high);--success:var(--success-color-high);--warning:var(--warn-color-high);--danger:var(--error-color-high);--info:var(--primary-color-high);--on-brand:var(--on-primary-color);--hover-faint:var(--background-color-medium)}
 .mud{color:var(--text,#222);font-size:.85rem;line-height:1.45}
 .mud *{box-sizing:border-box}
+.mud-loadline{display:flex;align-items:center;gap:7px;min-height:22px;margin:5px 0;font-size:.75rem;color:var(--text-muted,#787d85)}
+.mud-loadline[hidden]{display:none}.mud-loadline.is-error{color:var(--warning,#b76d00)}
+.mud-loading-spinner{flex:0 0 auto;width:12px;height:12px;border:2px solid color-mix(in srgb,currentColor 20%,transparent);border-top-color:currentColor;border-radius:50%;animation:mud-loading-spin .75s linear infinite}
+@keyframes mud-loading-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.mud-loading-spinner{animation:none}}
 .mud-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:10px;margin-top:6px}
 .mud-card{background:var(--surface,var(--background-alt,var(--background,#fff)));border:1px solid var(--hairline,var(--border,#e3e6ea));border-radius:calc(var(--radius-base,.5rem) + .375rem);padding:14px 16px;box-shadow:var(--app-shadow-sm,0 1px 3px rgba(0,0,0,.04));transition:border-color .15s}
 .mud-card:hover{border-color:color-mix(in oklab,var(--brand,var(--primary,#2f7bf6)) 30%,var(--hairline,var(--border,#e3e6ea)))}
+.mud-card.mud-sim-selector{padding:0;margin-bottom:10px;overflow:hidden}
+.mud-sim-toggle{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;margin:0;padding:9px 12px;border:0;border-radius:inherit;background:transparent;box-shadow:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.mud-sim-toggle:hover{background:var(--hover-faint,rgba(128,128,128,.06))}
+.mud-sim-toggle:focus-visible{outline:2px solid var(--brand,var(--primary,#2f7bf6));outline-offset:-3px}
+.mud-sim-title{flex:1;min-width:0;font-size:.8rem;font-weight:500}
+.mud-sim-current{flex-shrink:0;padding:2px 7px;border-radius:6px;background:var(--brand-subtle,rgba(128,128,128,.1));color:var(--brand,var(--primary,#2f7bf6));font-size:.72rem;font-weight:600;line-height:1.5}
+.mud-sim-toggle svg{flex-shrink:0;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;color:var(--text-muted,#787d85);transition:transform .24s ease}
+.mud-sim-selector.is-open .mud-sim-toggle svg{transform:rotate(180deg)}
+.mud-sim-panel{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .24s cubic-bezier(.2,.7,.2,1),opacity .18s ease,visibility 0s .24s}
+.mud-sim-selector.is-open .mud-sim-panel{grid-template-rows:1fr;opacity:1;visibility:visible;transition-delay:0s}
+.mud-sim-clip{min-height:0;overflow:hidden}
+.mud-sim-options{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:0 12px 12px}
+.mud-sim-options select{width:auto;min-width:100px;max-width:100%;margin:0}
+.mud-sim-options small{flex:1;min-width:min(100%,190px);color:var(--text-muted,#787d85);font-size:.72rem;line-height:1.5}
+@media(prefers-reduced-motion:reduce){.mud-sim-panel,.mud-sim-toggle svg{transition:none}}
 .mud-card>h3{margin:0 0 8px;font-size:.7rem;font-weight:600;color:var(--text-muted,var(--text-light,#787d85));letter-spacing:.08em}
 .mud-card>h3::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--brand,var(--primary,#2f7bf6));margin-right:7px;vertical-align:1px}
 .mud-hero{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center;background:var(--brand-subtle,var(--surface,#fff));margin-bottom:12px;padding:16px 20px}
@@ -1177,7 +1248,8 @@ function choiceBox(title, message, choices, opts) {
 
 /* LuCI 的 require 把模块当类工厂：必须返回 baseclass 派生的类，加载后拿到的是它的实例 */
 return baseclass.extend({
-	callStatus: callStatus, callSignal: callSignal, callSysinfo: callSysinfo, callAct: callAct, callAt: callAt, callAtHist: callAtHist,
+	simSlot: simSlot, simSelector: simSelector,
+	callStatus: callStatus, callRates: callRates, callCells: callCells, callSignal: callSignal, callSysinfo: callSysinfo, callAct: callAct, callAt: callAt, callAtHist: callAtHist,
 	callLockGet: callLockGet, callLockFresh: callLockFresh, callLockSet: callLockSet, callLockStatus: callLockStatus, waitLockJob: waitLockJob,
 	callSmsList: callSmsList, callSmsShow: callSmsShow, callSmsSend: callSmsSend,
 	callSmsDel: callSmsDel, callSmsSync: callSmsSync,

@@ -52,7 +52,7 @@ return view.extend({
    <div class="mud-tr-field"><label for="mud-tr-count_mode">套餐计量方式</label><select id="mud-tr-count_mode"><option value="total">上下行合计</option><option value="rx">仅下行</option><option value="tx">仅上行</option></select></div>
   </div>
   <div class="mud-note">额度为 0 表示不限量；1 GB = 1000 MB。重置日在设备当地时间零点生效，短月份使用当月最后一天。</div>
-  <div class="mud-tr-field"><label for="mud-tr-device">统计网卡</label><input id="mud-tr-device" placeholder="自动使用蜂窝 WAN 网卡" maxlength="15"></div>
+  <div class="mud-tr-field"><label for="mud-tr-device">当前卡槽统计网卡</label><input id="mud-tr-device" readonly aria-readonly="true"></div>
   <div class="mud-tr-field"><label for="mud-tr-used_gb">校准本周期已用（GB，可选）</label><input id="mud-tr-used_gb" type="number" min="0" max="100000" step="0.001" placeholder="留空保持现有统计"></div>
   <div class="mud-note">校准只调整当前套餐周期，不修改每日和自然月历史；下个周期自动恢复实际统计。</div>
   <div class="mud-tr-actions"><button class="mud-btn on" id="mud-tr-save">保存设置</button><button class="mud-btn" id="mud-tr-refresh">刷新状态</button></div>
@@ -71,12 +71,14 @@ return view.extend({
 		M.localize(root); this.root = root; this.data = data || {};
 		this.fill(this.data.config || {}); this.paint(); this.wire();
 		var self = this; poll.add(function() { return self.refresh(); }, 10);
+		M.simSelector(root);
 		return root;
 	},
 	q: function(k) { return this.root.querySelector('#mud-tr-' + k); },
 	fill: function(c) {
 		var self = this;
 		['plan_name','device'].forEach(function(k) { self.q(k).value = c[k] || ''; });
+		self.q('device').value = M.simSlot() === '1' ? 'sipa_eth8' : 'sipa_eth0';
 		['monthly_gb','daily_gb'].forEach(function(k) { self.q(k).value = c[k] || 0; });
 		this.q('reset_day').value = c.reset_day || 1; this.q('count_mode').value = c.count_mode || 'total';
 		this.q('used_gb').value = '';

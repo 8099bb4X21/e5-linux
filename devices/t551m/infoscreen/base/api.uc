@@ -440,8 +440,35 @@ function usb_reset_status() {
 }
 
 
+function usb_devices() {
+	let devices = [];
+	for (let p in glob('/sys/bus/usb/devices/*/idVendor')) {
+		let d = replace(p, /\/idVendor$/, '');
+		let vendor = read_trim(p), product = read_trim(d + '/idProduct');
+		// A device can disappear while this snapshot is being read.
+		if (!vendor || !product || read_trim(d + '/bDeviceClass') == '09') continue;
+		let interfaces = [];
+		// Network adapters often use vendor-specific USB classes. Inspect the
+		// registered interfaces, including devices behind nested dock hubs.
+		for (let n in glob(d + ':*/net/*'))
+			if (read_trim(n + '/type') == '1' && !stat(n + '/phy80211'))
+				push(interfaces, split(n, '/')[-1]);
+		push(devices, { id: split(d, '/')[-1],
+			name: read_trim(d + '/product') || read_trim(d + '/manufacturer') || 'USB',
+			kind: length(interfaces) ? 'ethernet' : 'device', interfaces,
+			vendor, product });
+	}
+	return devices;
+}
+
 function usb_status() {
 	let cable = false;
+	let role = 'none', policy = 'auto', devices = usb_devices();
+	let role_node = glob('/sys/bus/platform/devices/*/usb_role_policy')[0];
+	if (role_node) {
+		policy = read_trim(role_node) || 'auto';
+		role = read_trim(replace(role_node, /usb_role_policy$/, 'usb_role')) || 'none';
+	}
 	for (let e in glob('/sys/class/extcon/*/state'))
 		if (match(readfile(e) ?? '', /(^|\n)USB=1/))
 			cable = true;
@@ -477,8 +504,9 @@ function usb_status() {
 		else
 			link = (port == 'DCP') ? 'charger' : 'host';
 	}
+	if (role == 'host') link = 'otg';
 	return { cable, port, state, speed: udc ? read_trim(udc + '/current_speed') : null,
-	         ip, rx_rate, tx_rate, link,
+	         ip, rx_rate, tx_rate, link, role, policy, devices,
 	         reset: usb_reset_status() };
 }
 
@@ -1635,7 +1663,7 @@ global.handle_request = function(env) {
 				arg = (b.level != null) ? `set ${int(b.level)}` : (+b.step > 0) ? 'up' : (+b.step < 0) ? 'down' : '';
 			}
 			let r = json(trim(sh(`/usr/libexec/e5-volume ${arg} 2>/dev/null`) ?? '') || 'null');
-			return reply_json(200, { available: true, ...(r ?? {}) });
+			return reply_json(200, { available: r != null, ...(r ?? {}) });
 		}
 		if (post && path == '/key')
 			return reply_json(200, { ok: log_key(read_body(env)) });

@@ -74,6 +74,7 @@ rm -rf "$O/mod" $DEST/modules && mkdir -p $DEST/modules
 make -s O="$O" ARCH=arm64 INSTALL_MOD_PATH="$O/mod" INSTALL_MOD_STRIP=1 modules_install
 find "$O/mod/lib/modules" -name '*.ko' -exec cp {} $DEST/modules/ \;
 tar -C "$O/mod" -cf $DEST/modules.tar lib/modules
+python3 /work/check-container-support.py "$DEST" --record
 # Docker creates these files as root on Linux bind mounts. The host must be
 # able to add root-modules.tar and package the outputs after this container exits.
 if [ -n "${E5_OUTPUT_UID:-}" ] && [ -n "${E5_OUTPUT_GID:-}" ]; then

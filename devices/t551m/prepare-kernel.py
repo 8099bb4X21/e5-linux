@@ -4,6 +4,7 @@ import argparse
 import hashlib
 from pathlib import Path
 import re
+import runpy
 import subprocess
 import shutil
 import urllib.request
@@ -68,13 +69,28 @@ def board_charger(source):
 \t*cur = (value <= 13 ? value * 90 : (value - 14) * 115 / 2 + 805) * 1000;
 \treturn 0;''',
         'bq2560x_charger_register_vbus_regulator': '''
+\tstatic struct regulator_consumer_supply supply = {
+\t\t.supply = "vddvbus",
+\t};
+\tstruct regulator_init_data *init;
 \tstruct regulator_config cfg = {
 \t\t.dev = info->dev,
 \t\t.of_node = info->dev->of_node,
 \t\t.driver_data = info,
 \t};
 \tstruct regulator_dev *reg;
-\t/* otg-vbus is a child of the I2C charger on T551M, not a platform node. */
+\t/* Mirror the user's working A-slot OTG supply lookup in memory.
+\t * A DT phandle takes precedence; B-slot otherwise lacks this mapping.
+\t */
+\tinit = devm_kzalloc(info->dev, sizeof(*init), GFP_KERNEL);
+\tif (!init)
+\t\treturn -ENOMEM;
+\tinit->constraints.valid_ops_mask = REGULATOR_CHANGE_STATUS;
+\tinit->constraints.min_uV = 5000000;
+\tinit->constraints.max_uV = 5000000;
+\tinit->num_consumer_supplies = 1;
+\tinit->consumer_supplies = &supply;
+\tcfg.init_data = init;
 \treg = devm_regulator_register(info->dev, &bq2560x_charger_vbus_desc, &cfg);
 \treturn PTR_ERR_OR_ZERO(reg);''',
     }
@@ -163,6 +179,19 @@ def main():
     if 'T551M BC1.2 fallback' not in text:
         text = text.replace(marker, marker + '\n\t/* T551M BC1.2 fallback without the vendor PD stack. */\n\tif (!IS_ENABLED(CONFIG_SC27XX_PD))\n\t\tinfo->use_typec_extcon = false;')
     path.write_text(text)
+    runpy.run_path(str(Path(__file__).with_name('usb_charger.py')))['apply'](k, replace_function)
+    runpy.run_path(str(Path(__file__).with_name('otg.py')))['apply'](k)
+    # mu300-linux f0323bf: keep firmware debug traffic off across WCN power
+    # cycles. This board uses the integrated WCN stack, not MU300's PCIe path;
+    # its resume does not force armlog on, so only the shared default applies.
+    path = k / 'drivers/unisoc_platform/sprdwcn/platform/sysfs.c'
+    text = path.read_text()
+    if 'Default firmware debug log off' not in text:
+        old = '\t\tsysfs_info.armlog_status = 1;\n#endif'
+        if text.count(old) != 1:
+            raise SystemExit('Unexpected WCN firmware log default')
+        text = text.replace(old, old + '\n\t/* Default firmware debug log off; sysfs may enable it explicitly. */\n\tsysfs_info.armlog_status = 0;')
+        path.write_text(text)
     # The factory DT uses "qogirn6l" and a GPIO pulse backlight, not PWM.
     disp = k / 'drivers/unisoc_platform/sprd_disp'
     shutil.copy2(Path(__file__).with_name('t551m-backlight.h'), disp / 't551m-backlight.h')

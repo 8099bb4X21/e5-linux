@@ -24,6 +24,9 @@ def main():
     power_reply={'ok':True}
     fixtures['/api/status']['screen']['idle']=0
     fixtures['/api/status']['screen']['ui_size']='standard'
+    fixtures['/api/status']['sims']=[
+        {'slot':0,'present':True,'operator':'CHN-UNICOM','registration':'home','radio_label':'4G','signal':{'rsrp':-91}},
+        {'slot':1,'present':True,'operator':'46011','registration':'camped','radio_label':'5G SA','signal':{'rsrp':-104}}]
     for i, value in enumerate([0,1,2,3,7],1):
         fixtures['/api/status']['screen'][f'nav_slot{i}']=str(value)
     class Handler(SimpleHTTPRequestHandler):
@@ -60,8 +63,72 @@ def main():
         assert not errors,errors
         page.screenshot(path=str(args.screenshots/'screen-lock.png'))
         assert page.locator('#bar-op').inner_text()=='中国联通'
+        assert page.locator('#bar-tech').inner_text()=='4G'
+        assert page.locator('#sim-operator-1').text_content()=='中国电信'
+        assert page.locator('#sim-radio-0').text_content()=='4G'
+        assert page.locator('#sim-radio-1').text_content()=='5G SA'
+        assert page.locator('#sim-note-1').text_content()=='注册详情未上报'
+        assert page.locator('#hero-uptime-label').text_content()=='本次运行时长'
+        assert page.locator('#hero-uptime').text_content() not in ('—','')
+        assert page.locator('[data-title="signal"] .meter .mh > span:first-child').all_text_contents()==['RSRP','SINR','RSRQ']
+        original_signal=page.evaluate('last.modem.signal')
+        for snr in [4,0,-3.5,None]:
+            page.evaluate('(snr)=>{last.modem.signal={rsrp:-91,rsrq:-13,snr};renderSignal(last)}',snr)
+            shown=page.locator('#sg-sinr').text_content()
+            assert shown=='--' if snr is None else shown.startswith(f'{snr:.1f} dB'),shown
+        page.evaluate('(signal)=>{last.modem.signal=signal;renderSignal(last)}',original_signal)
+        assert page.locator('#bar-dual').is_visible()
+        assert page.locator('#bar-signal-0 .on').count()==3
+        assert page.locator('#bar-signal-1 .on').count()==2
+        for single in [0,1]:
+            result=page.evaluate('''single=>{
+                const sims=last.sims;last.sims=sims.map(s=>({...s,present:s.slot===single}));
+                T551M.status(last);renderBar(last);
+                const out={hidden:document.querySelector('#bar-dual').hidden,bars:document.querySelectorAll('#bar-bars .on').length};
+                last.sims=sims;T551M.status(last);renderBar(last);return out;
+            }''',single)
+            assert result=={'hidden':True,'bars':3 if single==0 else 2},result
         assert page.evaluate("T551M.operator('Vodafone')")=='Vodafone'
+        original_usb=page.evaluate('last.usb')
+        for usb, title in [({'role':'device','link':'lease','devices':[]},'USB 已连接'),
+                           ({'role':'device','cable':True,'port':'SDP','state':'not attached','link':'host','devices':[]},None),
+                           ({'role':'device','cable':True,'port':'DCP','link':'charger','devices':[]},None),
+                           ({'role':'host','link':'otg','devices':[{'name':'RTL8153 Ethernet','kind':'ethernet'}]},'USB 网卡 · RTL8153 Ethernet 已连接'),
+                           ({'role':'host','link':'otg','devices':[{'name':'USB Audio'},{'name':'USB 10/100/1000 LAN','kind':'ethernet'}]},'USB Audio 已连接\nUSB 网卡 · USB 10/100/1000 LAN 已连接'),
+                           ({'role':'host','link':'otg','devices':[{'name':'USB','kind':'ethernet'}]},'USB 网卡 已连接')]:
+            page.evaluate('(usb)=>{last.usb=usb;T551M.status(last)}',usb)
+            if title is None:
+                assert page.locator('#home-usb').evaluate('(node)=>node.hidden')
+                continue
+            assert page.locator('#home-usb-title').text_content()==title
+            assert not page.locator('#home-usb').evaluate('(node)=>node.hidden')
+            assert page.locator('#home-usb-title').evaluate('(n)=>n.scrollWidth<=n.clientWidth && n.scrollHeight<=n.clientHeight')
+            if len(usb['devices'])>1:
+                assert 'USB 网卡' in page.evaluate('usbText(last.usb)')
+                assert page.locator('#home-usb-title').evaluate('(n)=>getComputedStyle(n).whiteSpace')=='pre-line'
+        page.evaluate("last.usb={role:'none',link:'none',devices:[]};T551M.status(last)")
+        assert page.locator('#home-usb').evaluate('(node)=>node.hidden')
+        page.evaluate('(usb)=>{last.usb=usb;T551M.status(last)}',original_usb)
         assert page.evaluate("T551M.amount(15830406)")=='15.83 MB'
+        # Stable snapshots do not rebuild metrics/themes. Dark snapshots retain
+        # fresh data without painting; wake must immediately use the latest one.
+        counts=page.evaluate('''() => {
+            T551M.status(last);
+            const watched=new MutationObserver(()=>{});
+            watched.observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});
+            for(let i=0;i<20;i++)T551M.status(last);
+            const unchanged=watched.takeRecords().length;
+            setBlank(true);watched.takeRecords();
+            const old=last.traffic.rx_rate;last.traffic.rx_rate=987654;
+            T551M.status(last);
+            const dark=watched.takeRecords().length;
+            setBlank(false);
+            const fresh=document.getElementById('lock-rx').textContent===T551M.speed(987654).join('');
+            last.traffic.rx_rate=old;T551M.status(last);watched.disconnect();
+            return {unchanged,dark,fresh};
+        }''')
+        assert counts=={'unchanged':0,'dark':0,'fresh':True},counts
+        page.wait_for_timeout(500)  # retain the wake guard before gesture tests
         # Same byte-rate source and formatter for home/lock, including live changes.
         for unit, expected in [(None,['10','Mbps']),('bits',['10','Mbps']),('bytes',['1.19','MB/s']),('mbps',['10','Mbps']),('mbs',['1.19','MB/s']),('auto',['1.19','MB/s'])]:
             page.evaluate('(unit)=>{last.screen.speed_unit=unit;T551M.status(last)}',unit)

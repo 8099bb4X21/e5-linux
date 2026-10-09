@@ -22,6 +22,7 @@ class LocksTest(unittest.TestCase):
         locks.STATE = root / 'state';locks.STATE.mkdir()
         locks.CARD = root / 'card';locks.CARD.write_text('0')
         locks.MARKER = root / 'replayed'
+        locks.TARGET = None; locks.LOCK_RUN = None
         self.tm, self.gran, self.endc = [3,134,0], 1, 0
         self.cells = {12: [],16: []}
         self.band = {0:[0,482,0,149,0],3:[549,0,272,0]}
@@ -68,6 +69,23 @@ class LocksTest(unittest.TestCase):
         locks.apply('mode','sa')
         self.assertEqual(self.tm,[134,128,1])
         self.assertEqual(locks.snapshot()['mode']['label'],'sa')
+
+    def test_scoped_state_migration_and_mode_preserve_data_card(self):
+        base,run,marker=locks.STATE,locks.RUN,locks.MARKER
+        (base/'lte').write_text('1,3');(base/'auto_apply').write_text('0')
+        with patch.dict(locks.os.environ):
+            locks.migrate_legacy(base)
+            self.assertEqual((base/'sim0/lte').read_text(),'1,3')
+            self.assertFalse((base/'sim1/lte').exists())
+            locks.scope(1,base,run,marker)
+            locks.apply('mode','sa')
+            self.assertEqual(self.tm,[3,128,0])
+            self.assertEqual(locks.CARD.read_text(),'0')
+            self.assertEqual((base/'sim1/mode').read_text(),'sa')
+            self.assertFalse((base/'sim0/mode').exists())
+            self.assertEqual(locks.os.environ['MU300_SIM_SLOT'],'1')
+            locks.CARD.write_text('1');locks.migrate_legacy(base)
+            self.assertFalse((base/'sim1/lte').exists())
 
     def test_error_never_persists_or_claims_success(self):
         self.fail='AT+SPTESTMODE=134,134,0'
@@ -165,6 +183,28 @@ class LocksTest(unittest.TestCase):
 
     def test_nr_capability_count_is_not_a_band(self):
         self.assertEqual(locks.nr_capabilities(),[1,5,8,28,41,78])
+
+    def test_automatic_nr_readback_uses_actual_capabilities(self):
+        with patch.object(locks,'nr_capabilities',return_value=[3,77]),patch.object(locks,'band_state',return_value={'raw':'expanded','locked':'3,77'}):
+            self.assertTrue(locks.verify('nr','','0,0,0,0'))
+        self.assertTrue(locks.matches_saved('nr','',{'nr':{'locked':'3,77'},'caps':{'nr':'3,77'}}))
+        self.assertFalse(locks.matches_saved('nr','',{'nr':{'locked':'1,78'},'caps':{'nr':'3,77'}}))
+
+    def test_shared_caps_use_platform_lte_and_dynamic_nr(self):
+        with patch.object(locks, 'LTE', [1,3,5,8,34,39,40,41]), patch.object(locks, 'value', return_value='get nr support_band,3,3,77,79'):
+            self.assertEqual(locks.main(['caps']), {'lte':'1,3,5,8,34,39,40,41','nr':'3,77,79'})
+
+    def test_nr_query_failure_never_invents_capabilities(self):
+        self.fail = 'AT+SP5GCMDS="get nr support_band"'
+        self.assertEqual(locks.main(['caps'])['nr'], '')
+        locks.write_json(locks.RUN/'lock.json', {'caps': {'nr':''}})
+        with self.assertRaisesRegex(ValueError, 'Unsupported band'):
+            locks.validate('nr','78')
+        locks.validate('nr','')  # Unlock remains available.
+
+    def test_lte_only_caps_never_access_modem(self):
+        self.assertEqual(locks.main(['caps','lte'])['lte'], ','.join(map(str,locks.LTE)))
+        self.assertEqual(self.sent, [])
 
     def test_late_replay_is_refused_without_writes(self):
         with self.assertRaises(ValueError): locks.replay('late')
