@@ -1,41 +1,34 @@
-// Run with ucode test_screen_bands.uc /path/to/staged/settings.uc.
-// Every modem/config/command operation is mocked; never modifies a real lock.
+// Shared network contract; no modem access, configuration writes or reconnects.
 'use strict';
-let caps = {lte:'1,3,5,8,34,39,40,41', nr:'1,5,8,28,41,78'};
-let commands = [], queries = [], present = true, lte_value = [], nr_value = [];
-let ctx = {
-    run: () => 1, uci: () => ({get: () => null}),
-    modem_present: () => present, cells: () => [], cell_locks: () => [],
-    sim_card: () => 0, payload_ints: () => [134,134,0],
-    lte_bands: () => lte_value, nr_bands: () => nr_value,
-    NR_V1: [1,2,3,5,7,8,12,20,25,28,66,70,71,74],
-    NR_V3: [34,38,39,40,41,50,51,77,78,79], NR_SUPER: [75,76,80,81,82,83,84,86],
-    at: (cmd) => { push(commands, cmd); return ''; },
-    sh_json: (cmd) => { push(queries,cmd); return index(cmd, 'lock caps') >= 0 ? caps : {}; }
-};
-let categories = loadfile(ARGV[0], {raw_mode:true})()(ctx);
-let network = filter(categories, c => c.id == 'network')[0];
-function check(ok, message) { if (!ok) die(message); }
-function item(id) { return filter(network.items(), i => i.id == id)[0]; }
-function choices(id) { return join(',', map(item(id).options, o => o.value)); }
-check(choices('lte_bands') == caps.lte, 'LTE differs from dashboard');
-check(choices('nr_bands') == caps.nr, 'NR differs from modem capability');
-caps.nr = '3,77,79';
-check(choices('nr_bands') == caps.nr, 'NR capabilities did not refresh');
-commands = [];nr_value = [77];
-check(network.set('nr_bands', [77]) == null, 'Dynamic NR candidate rejected');
-check(commands[0] == 'AT+SPLBAND=2,0,0,128,0', 'NR candidate encoded incorrectly');
-commands = [];
-check(network.set('nr_bands', [78]) != null && !length(commands), 'Unsupported NR silently filtered/written');
-check(network.set('lte_bands', [38]) != null && !length(commands), 'Unsupported LTE silently filtered/written');
-lte_value = [1,3,5,8,34,39,40,41];nr_value = [];
-check(network.set('bands_default', null) == null, 'Default bands failed');
-check(commands[0] == 'AT+SPLBAND=1,0,450,0,149,0', 'Default uses old LTE bands');
-caps.nr = '';commands = [];
-check(!length(item('nr_bands').options), 'Missing NR capability invented bands');
-commands = [];
-check(network.set('nr_bands', [78]) != null && !length(commands), 'Missing capability allowed a lock');
-check(network.set('nr_bands', []) == null, 'Missing capability prevented unlock');
-present = false;queries = [];network.items();
-check(index(queries, '/usr/libexec/unisoc-modem/lock caps lte') >= 0, 'No-modem view queried NR');
-print('Screen band candidates, dynamic validation, encoding, defaults and failure handling: PASS\n');
+let calls=[],selected='1',fail=false;
+let state={mode:{label:'4g',gran:'1'},lte:{locked:'1,8'},nr:{locked:''},cells:[],endc:'1',auto_apply:1,
+    caps:{lte:'1,3,5,8,34,39,40,41',nr:'1,5,8,28,41,78'}};
+let ctx={run:()=>1,uci:()=>({get:(c,s,k)=>k=='control_slot'?selected:null}),
+    sim_card:()=>0,sh_json:()=>null,at:()=>die('Screen bypassed shared AT owner'),
+    ubus:(object,method,args)=>{
+        push(calls,{object,method,args});
+        if (method=='lock_get') return state;
+        if (method=='cells') return {cell:{neigh:[{rat:'lte',arfcn:3740,pci:36}]}};
+        return fail ? {ok:0,error:'Unsupported band requested'} : {ok:1,started:1,id:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'};
+    }};
+let network=filter(loadfile(ARGV[0],{raw_mode:true})()(ctx),c=>c.id=='network')[0];
+function check(v,why){if(!v)die(why);}
+function item(id){return filter(network.items(),i=>i.id==id)[0];}
+check(join(',',map(item('lte_bands').options,o=>o.value))==state.caps.lte,'LTE differs from web');
+state.caps.nr='3,77,79';
+check(join(',',map(item('nr_bands').options,o=>o.value))==state.caps.nr,'NR is not dynamic');
+check(item('net_mode').value=='4g' && item('net_mode').slot=='1','Wrong SIM scope');
+check(item('nr_mode').value=='sa','Standalone 5G access setting lost');
+check(length(filter(item('cell_lock').options,o=>o.value=='lte:3740,36'))==1,'Neighbors lost');
+for(let pair in [['net_mode','sa'],['net_mode','5g4g'],['nr_mode','nsa'],['nr_bands',[77]],['lte_bands',[1,8]],['bands_default',null],['auto_apply',false],['cell_lock','lte:3740,36']]) {
+    let r=network.set(pair[0],pair[1],'0');
+    check(r.job && r.slot=='0','Async job or captured slot lost');
+    let last=calls[length(calls)-1];
+    check(last.object=='mu300dash'&&last.method=='lock_set'&&last.args.slot=='0','Not using common scoped mutation');
+}
+fail=true;check(network.set('nr_bands',[77],'1')=='Unsupported band requested','Backend failure hidden');
+let count=length(calls);
+check(type(network.set('lte_bands','1;reboot','1'))=='string'&&length(calls)==count,'Invalid input reached backend');
+state={error:'AT unavailable',auto_apply:1};
+check(item('lte_bands').type=='info'&&item('lte_bands').value==null,'Failed read reported unlocked');
+print('PASS: shared per-SIM network modes, dynamic bands, neighbors, captured scope, asynchronous jobs and failures\n');

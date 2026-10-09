@@ -11,6 +11,8 @@
 
 const I18N = {
 	zh: {
+		sms_delete_note:'删除本地记录，与网页同步；SIM 原件保留。',
+		traffic_view:'查看流量',traffic_data_sim:'跟随数据卡',traffic_unavailable:'流量统计暂不可用',traffic_history:'网卡离线 · 历史记录仍可查看',traffic_clock:'系统时间尚未同步',traffic_storage:'流量记录保存失败',traffic_session_note:'网卡累计独立计数，清空历史不会重置网卡',traffic_cleared:'流量记录已清空',
 		call_volume: '通话音量',
 		overview: '概览', signal: '信号', sms: '短信', hotspot: '热点', device: '设备',
 		back: '返回', delete: '删除', delete_confirm: '再按一次删除', deleted: '已删除',
@@ -51,6 +53,8 @@ const I18N = {
 		excellent: '极好', good: '好', fair: '一般', weak: '弱', poor: '差'
 	},
 	en: {
+		sms_delete_note:'Deletes the shared local record; keeps the SIM copy.',
+		traffic_view:'View usage',traffic_data_sim:'Follow data SIM',traffic_unavailable:'Usage unavailable',traffic_history:'Interface offline · History is available',traffic_clock:'Clock not synchronized',traffic_storage:'Could not save usage',traffic_session_note:'Live interface counters are separate from usage history',traffic_cleared:'Traffic history cleared',
 		call_volume: 'Call volume',
 		overview: 'Overview', signal: 'Signal', sms: 'Messages', hotspot: 'Hotspot', device: 'Device',
 		back: 'Back', delete: 'Delete', delete_confirm: 'Press again to delete', deleted: 'Deleted',
@@ -570,7 +574,7 @@ function renderUpdateNotice() {
 	$('update-notes').hidden = !updateExpanded;
 	const error = u.action == 'apply' && u.result == 'failed' ? u.error : null;
 	$('update-error').hidden = !error;
-	setText('update-error', error ?? '');
+	setText('update-error', errorText(error, lang));
 	const busy = u.busy || u.checking || updateRequest;
 	setText('update-now', t(u.busy ? 'update_busy' : error ? 'update_retry' : 'update_now'));
 	$('update-now').disabled = busy;
@@ -609,7 +613,7 @@ async function updateAction(action) {
 		updateState = result;
 		if (action == 'apply') updateState.busy = true;
 		else toast(t('update_deferred'));
-	} else toast(`${t('failed')}${result?.error ? ': ' + result.error : ''}`);
+	} else toast(`${t('failed')}${result?.error ? ': ' + errorText(result.error, lang) : ''}`);
 	renderUpdateNotice();
 	setTimeout(() => pollUpdate(true), 500);
 }
@@ -974,7 +978,7 @@ async function loadSms() {
 		if (current) {
 			setText('sv-time', [current.sim, fmtSmsTime(current.time)].filter(Boolean).join(' · '));
 			setText('sv-text', current.text ?? '');
-		}
+		} else closeSms();
 	}
 	return smsList;
 }
@@ -1036,7 +1040,11 @@ function markSmsRead() {
 
 // a message in the unread list that was not there at the last poll: light
 // the screen (if e5-notify.sms.screen) and show it
+let smsHiddenRevision;
 async function smsCheck(st) {
+	const hiddenChanged=smsHiddenRevision!=null && smsHiddenRevision!==st.sms?.hidden_revision;
+	smsHiddenRevision=st.sms?.hidden_revision;
+	if (hiddenChanged && page==P.sms && !blank) await loadSms();
 	const now = st.sms?.unread ?? [];
 	const before = smsUnread;
 	smsUnread = now;
@@ -1076,6 +1084,7 @@ on('sv-delete', 'click', async () => {
 	disarmDelete();
 	const r = await post('sms-delete', { id });
 	toast(r?.ok ? t('deleted') : '✗');
+	if (!r?.ok) return;
 	smsList = smsList.filter((m) => m.id != id);
 	closeSms();
 	loadSms();
@@ -1083,19 +1092,28 @@ on('sv-delete', 'click', async () => {
 
 /* ---------- traffic ---------- */
 
+let trafficRequest = 0;
+function clearTrafficDisplay() {
+	for (const id of ['tf-day-used','tf-mon-used','tf-day-rx','tf-day-tx','tf-mon-rx','tf-mon-tx','tf-boot-rx','tf-boot-tx']) setText(id,'—');
+	for (const id of ['tf-days','tf-day-since','tf-mon-since']) setText(id,'');
+}
+on('tf-slot','change',()=>{clearTrafficDisplay();loadTraffic();});
 async function loadTraffic() {
+	const request = ++trafficRequest, slot = $('tf-slot')?.value || '';
 	let u = null;
 	try {
-		u = await pageRead('/api/traffic', P.traffic);
+		u = await pageRead('/api/traffic' + (slot ? '?slot='+slot : ''), P.traffic);
 	} catch (e) {
 		console.log('traffic: ' + e);
 	}
-	const b = (n) => { const [v, unit] = fmtBytes(n); return `${v} ${unit}`; };
-	if (last) {
-		setText('tf-boot-rx', b(last.traffic.rx_total));
-		setText('tf-boot-tx', b(last.traffic.tx_total));
-	}
-	if (!u || !u.available) return;
+	if (request !== trafficRequest) return;
+	const b = T551M.amount;
+	clearTrafficDisplay();
+	const warning = !u || u.error ? t('traffic_unavailable') : !u.available ? t('traffic_clock') : u.storage_error ? t('traffic_storage') : u.interface_available === false ? t('traffic_history') : '';
+	setText('tf-state', (u?.slot == null ? '' : 'SIM '+(+u.slot+1)+(warning ? ' · ' : ''))+warning);
+	setText('tf-boot-rx',b(u?.session?.rx));setText('tf-boot-tx',b(u?.session?.tx));
+	if (!u?.available) return;
+	setText('tf-day-used',b(u.today_used));setText('tf-mon-used',b(u.month_used));
 	setText('tf-day-rx', b(u.today.rx)); setText('tf-day-tx', b(u.today.tx));
 	setText('tf-mon-rx', b(u.month.rx)); setText('tf-mon-tx', b(u.month.tx));
 	const l = u.lan?.available ? u.lan : null;
@@ -1206,7 +1224,7 @@ on('ad-showids', 'click', async () => {
 let st = [];
 let stCats = null;
 let stArmed = null;               // { key, timer }: the row waiting for its second press
-const lbl = (l) => (l && typeof l == 'object') ? (l[lang] ?? l.zh ?? '') : (l ?? '');
+const lbl = (l) => errorText((l && typeof l == 'object') ? (l[lang] ?? l.zh ?? '') : (l ?? ''), lang);
 
 function stTop() { return st[st.length - 1]; }
 
@@ -1258,7 +1276,7 @@ function stValue(it) {
 		if (!it.value?.length) return lbl(it.none_label) || t('not_locked');
 		return it.value.map((v) => lbl((it.options ?? []).find((o) => o.value == v)?.label) || v).join(' ');
 	}
-	if (it.type == 'info') return (it.value && typeof it.value == 'object') ? lbl(it.value) : String(it.value ?? '--');
+	if (it.type == 'info') return lbl(it.value ?? '--');
 	return '';
 }
 
@@ -1279,12 +1297,12 @@ function stRender() {
 		// Apps and their settings share the app manager; plugin categories stay
 		// in the API so an app's detail view can open its own settings.
 		html = stCats == null ? '' :
-			stCats.map((c, i) => c.plugin ? '' : stRow('cat:' + i, lbl(c.label), '', { chev: true })).join('');
+			stCats.map((c, i) => c.plugin || c.parent ? '' : stRow('cat:' + i, lbl(c.label), '', { chev: true })).join('');
 	} else if (v.view == 'cat') {
 		html = v.items == null ? '' :
 			v.items.map((it) => stRow('item:' + it.id, lbl(it.label), stValue(it),
 				{ info: it.type == 'info', on: it.type == 'toggle' && it.value, note: lbl(it.note),
-				  chev: ['choice', 'number', 'multi', 'image'].includes(it.type) })).join('');
+				  chev: ['choice', 'number', 'multi', 'image', 'category'].includes(it.type) })).join('');
 	} else if (v.view == 'edit') {
 		const it = v.item;
 		if (it.type == 'choice') {
@@ -1301,6 +1319,7 @@ function stRender() {
 		if (it.note) html += `<div class="stnote">${esc(lbl(it.note))}</div>`;
 	} else if (v.view == 'at') {
 		html = v.presets == null ? '' :
+			stRow('atslot:',lang=='zh'?'AT 卡槽':'AT SIM','SIM '+(+(v.slot ?? last?.modem?.sim_card ?? 0)+1),{chev:true})+
 			v.presets.map((p, i) => stRow('atp:' + i, lbl(p.label), p.cmd)).join('') +
 			`<div class="stnote">${esc(t('at_note'))}</div>`;
 	} else if (v.view == 'atres') {
@@ -1322,7 +1341,7 @@ function stRender() {
 	} else if (v.view == 'store') {
 		const s = v.store;
 		if (!s) html = '';
-		else if (!s.available) html = `<div class="sub">${esc(t('store_fail'))}${s.error ? ': ' + esc(s.error) : ''}</div>`;
+		else if (!s.available) html = `<div class="sub">${esc(t('store_fail'))}${s.error ? ': ' + esc(errorText(s.error, lang)) : ''}</div>`;
 		else html = s.plugins.length ? s.plugins.map((p) => {
 			const have = p.installed != null, same = have && p.installed == p.version;
 			const what = same ? `${t('store_have')} v${p.version}` : have ? `${t('store_update')} v${p.version}` : `${t('store_install')} v${p.version}`;
@@ -1380,10 +1399,33 @@ function stRender() {
 }
 
 async function stPost(v, body) {
-	const r = await fetch('/api/settings/' + v.cat.id, {
+	const item = v.items?.find(i=>i.id===body.id);
+	if (item?.slot != null) body.slot = item.slot;
+	const done = beginPageLoad(P.settings);
+	v.saving = true;
+	let r = await fetch('/api/settings/' + v.cat.id, {
 		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
 	}).then((r) => r.json()).catch(() => null);
-	toast(r?.ok ? (v.cat.id == 'usb' && body.id == 'reset' ? t('usb_resetting') : t('saved')) : `${t('failed')}${r?.error ? ': ' + r.error : ''}`);
+	if (r?.pending && r.job) {
+		const job=r.job, slot=r.slot, until=Date.now()+245000;
+		try {
+			while (Date.now()<until) {
+				await new Promise(resolve=>setTimeout(resolve,800));
+				r=await fetch('/api/network-job?id='+encodeURIComponent(job)+'&slot='+encodeURIComponent(slot),{cache:'no-store'}).then(r=>r.json());
+				if (!['queued','running'].includes(r.state)) break;
+			}
+			if (r.state!=='done') r={ok:false,error:r.error || (lang=='zh'?'操作尚未完成，请刷新实际状态':'Operation incomplete; refresh actual state')};
+		} catch(e) {r={ok:false,error:String(e)};}
+		await stLoadCat(v);
+	}
+	v.saving = false;done(!r?.ok);
+	toast(r?.ok ? (v.cat.id == 'usb' && body.id == 'reset' ? t('usb_resetting') : t('saved')) : `${t('failed')}${r?.error ? ': ' + errorText(r.error, lang) : ''}`);
+	if (r?.ok && v.cat.id == 'traffic_clear') {
+		++trafficRequest;
+		clearTrafficDisplay();
+		T551M.refreshUsage();
+		toast(t('traffic_cleared'));
+	}
 	if (r?.item) {
 		const i = v.items.findIndex((x) => x.id == r.item.id);
 		if (i >= 0) v.items[i] = r.item;
@@ -1428,18 +1470,20 @@ function stScreenApplied(id, value) {
 
 async function stClick(key, el) {
 	const v = stTop();
+	if (v?.saving || v?.parent?.saving) return;
 	const [k, arg] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+	if (k == 'atslot') {v.slot=String(1-+(v.slot ?? last?.modem?.sim_card ?? 0));stRender();return;}
 	if (k == 'atp' || k == 'atagain') {
 		const cmd = k == 'atp' ? v.presets[+arg].cmd : v.cmd;
-		const nv = k == 'atp' ? { view: 'atres', cmd, reply: null } : v;
+		const nv = k == 'atp' ? { view: 'atres', cmd, reply: null, slot: v.slot ?? String(last?.modem?.sim_card ?? 0) } : v;
 		if (k == 'atp') st.push(nv);
 		nv.reply = null;
 		stRender();
 		const done = beginPageLoad(P.settings);
 		const r = await fetch('/api/at', {
-			method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd })
+			method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd, slot:nv.slot })
 		}).then((r) => r.json()).catch(() => null).finally(() => done());
-		nv.reply = r?.ok ? (r.reply || 'OK') : `${t('failed')}: ${r?.error ?? ''}`;
+		nv.reply = r?.ok ? (r.reply || 'OK') : `${t('failed')}: ${errorText(r?.error, lang)}`;
 		nv.warn = r?.warning ? t('at_risky') : null;
 		if (stTop() === nv) stRender();
 		return;
@@ -1484,6 +1528,14 @@ async function stClick(key, el) {
 	if (k == 'item') {
 		const it = v.items.find((x) => x.id == arg);
 		if (!it) return;
+		if (it.type == 'category') {
+			const c = stCats.find(x => x.id == it.category);
+			if (!c) return;
+			const nv = {view:'cat',cat:c,items:null};
+			st.push(nv); stRender();
+			await stLoadCat(nv);
+			return;
+		}
 		if (it.type == 'toggle') {
 			if (it.confirm && !stConfirm(key, el)) return;
 			await stPost(v, { id: it.id, value: !it.value });
@@ -1508,13 +1560,13 @@ async function stClick(key, el) {
 		if (k == 'opt') {
 			const o = it.options[+arg];
 			if (it.confirm && String(o.value) != String(it.value) && !stConfirm(key, el)) return;
-			if (String(o.value) != String(it.value)) await stPost(v.parent, { id: it.id, value: o.value });
-			st.pop(); stRender();
+			if (String(o.value) != String(it.value) && !(await stPost(v.parent, { id: it.id, value: o.value }))?.ok) return;
+			if (stTop()===v) st.pop(); stRender();
 		} else if (k == 'num') {
 			if (arg == 'save') {
 				if (it.confirm && !stConfirm(key, el)) return;
-				await stPost(v.parent, { id: it.id, value: v.draft });
-				st.pop(); stRender();
+				if (!(await stPost(v.parent, { id: it.id, value: v.draft }))?.ok) return;
+				if (stTop()===v) st.pop(); stRender();
 			} else {
 				v.draft = Math.min(it.max, Math.max(it.min, +v.draft + (arg == '+' ? 1 : -1) * (it.step ?? 1)));
 				stRender();
@@ -1526,8 +1578,8 @@ async function stClick(key, el) {
 		} else if (k == 'multi') {
 			if (arg == 'clear') { v.draft = []; stRender(); return; }
 			if (it.confirm && !stConfirm(key, el)) return;
-			await stPost(v.parent, { id: it.id, value: v.draft });
-			st.pop(); stRender();
+			if (!(await stPost(v.parent, { id: it.id, value: v.draft }))?.ok) return;
+			if (stTop()===v) st.pop(); stRender();
 		}
 		return;
 	}
@@ -1546,7 +1598,7 @@ async function stClick(key, el) {
 		v.busy = p.id; stRender();
 		const r = await post('store-install', { id: p.id });
 		v.busy = null;
-		toast(r?.ok ? t('saved') : `${t('failed')}${r?.error ? ': ' + r.error : ''}`);
+		toast(r?.ok ? t('saved') : `${t('failed')}${r?.error ? ': ' + errorText(r.error, lang) : ''}`);
 		v.store = await pageRead('/api/store', P.settings).catch(() => v.store);
 		// (the apps list below it, and the Apps page, see the new one)
 		if (v.parent?.view == 'apps') v.parent.list = (await pageRead('/api/plugins', P.settings).catch(() => null))?.plugins ?? v.parent.list;
@@ -1576,7 +1628,7 @@ async function stClick(key, el) {
 		}
 		if (!stConfirm(key, el)) return;
 		const r = await post('plugins-remove', { id: v.app.id });
-		toast(r?.ok ? t('app_removed') : `${t('failed')}${r?.error ? ': ' + r.error : ''}`);
+		toast(r?.ok ? t('app_removed') : `${t('failed')}${r?.error ? ': ' + errorText(r.error, lang) : ''}`);
 		if (r?.ok) {
 			st.pop();
 			v.parent.list = v.parent.list.filter((x) => x.id != v.app.id);
@@ -1603,7 +1655,7 @@ async function stClick(key, el) {
 		if ((arg == 'remove' || arg == 'disconnect') && !stConfirm(key, el)) return;
 		const r = await btPost(v.parent, { action: arg, mac: v.mac });
 		if (r?.ok && arg == 'remove') { st.pop(); }
-		toast(r?.ok ? (arg == 'connect' ? t('bt_connecting') : t('saved')) : `${t('failed')}${r?.error ? ': ' + r.error : ''}`);
+		toast(r?.ok ? (arg == 'connect' ? t('bt_connecting') : t('saved')) : `${t('failed')}${r?.error ? ': ' + errorText(r.error, lang) : ''}`);
 		stRender();
 		return;
 	}
@@ -1618,7 +1670,7 @@ async function stClick(key, el) {
 			method: 'POST', headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ mac: v.dev.mac, action: arg })
 		}).then((r) => r.json()).catch(() => null);
-		toast(r?.ok ? (arg == 'kick' ? t('kicked') : t('saved')) : `${t('failed')}${r?.error ? ': ' + r.error : ''}`);
+		toast(r?.ok ? (arg == 'kick' ? t('kicked') : t('saved')) : `${t('failed')}${r?.error ? ': ' + errorText(r.error, lang) : ''}`);
 		if (r?.devices) {
 			v.parent.list = r.devices;
 			v.dev = r.devices.find((d) => d.mac == v.dev.mac) ?? v.dev;
@@ -1935,7 +1987,7 @@ on('hs-toggle', 'click', async () => {
 	const r = await post('wifi', { on });
 	if (!r?.ok) {
 		wifiPending = null;
-		toast(`${t('failed')}${r?.error ? ': ' + r.error : ''}`);
+		toast(`${t('failed')}${r?.error ? ': ' + errorText(r.error, lang) : ''}`);
 	}
 	setTimeout(poll, 1500);
 });

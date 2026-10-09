@@ -24,6 +24,7 @@ window.T551M = (() => {
     let config = {}, mounted = false, screenLocked = true, dark = false;
     let gesture = null, blockUntil = 0, wakeAt = 0, animation = null;
     let usageAt = -Infinity, usageBusy = false, cachedUsage = null;
+    let usageGeneration = 0, usageSlot = null;
     let keyArmed = 0;
     let menuOpen = false, menuTimer = null;
     const label = index => words(...titles[index]);
@@ -232,19 +233,33 @@ window.T551M = (() => {
         if (usageBusy || dark || performance.now() - usageAt < 10000) return;
         usageBusy = true;
         usageAt = performance.now();
+        const generation = usageGeneration;
         try {
-            const r = await fetch('/api/traffic', {cache:'no-store'});
+            const r = await fetch('/api/traffic'+(usageSlot == null ? '' : '?slot='+usageSlot), {cache:'no-store'});
             if (!r.ok) throw new Error('usage unavailable');
             const data = await r.json();
-            cachedUsage = data.wan || data;
-        } catch (_) { cachedUsage = null; }
-        finally { usageBusy = false; paintUsage(); }
+            if (generation === usageGeneration) cachedUsage = data.wan || data;
+        } catch (_) { if (generation === usageGeneration) cachedUsage = null; }
+        finally {
+            usageBusy = false; paintUsage();
+            if (generation !== usageGeneration && !dark && screenLocked) usage();
+        }
+    }
+    function refreshUsage() {
+        ++usageGeneration;usageAt=-Infinity;cachedUsage=null;
+        if (mounted && !dark) paintUsage();
+        if (screenLocked && !dark) usage();
     }
     function status(data) {
         if (!mounted) return;
         const first = !Object.keys(config).length;
         const lockWasEnabled = config.lock_enabled !== false;
         config = data.screen || {};
+        const slot = data.modem?.sim_card;
+        if ([0,1].includes(slot) && slot !== usageSlot) {
+            usageSlot = slot;
+            refreshUsage();
+        }
         if (config.lock_enabled === false && screenLocked && !dark && (first || lockWasEnabled)) finishUnlock();
         // Polling/data delivery keeps its original cadence while the display
         // is dark. Paint the newest snapshot on wake, not invisible DOM now.
@@ -549,13 +564,14 @@ window.T551M = (() => {
         const names = {
             network:'signal',at:'terminal',devices:'device',appmgr:'apps',bluetooth:'bluetooth',
             charge:'battery',notify:'bell',sound:'volume',screen:'device',ui:'palette',navigation:'navigation',usb:'usb',system:'chip',about:'info',
+            cpu:'chip',cpu_thermal:'sun',persist:'power',current:'chip',voltage:'battery',
             speed_unit:'traffic',ui_theme:'palette',ui_opacity:'opacity',ui_size:'type',ui_accent:'palette',ui_density:'density',ui_motion:'motion',
             status_bar:'layout',nav_bar:'navigation',lock_enabled:'lock',lock_daily:'traffic',lock_monthly:'traffic',lock_speed:'signal',unlock_distance:'touch',
             brightness:'sun',idle:'clock',touch:'touch',lang:'globe',volume:'volume',call_volume:'phone',vibrate:'bell',
             sim_card:'simcard',apn:'globe',net_mode:'signal',nr_mode:'signal',lte_bands:'signal',nr_bands:'signal',cell_lock:'lock',bands_default:'refresh',reconnect:'refresh',
             start:'battery',stop:'battery',full_once:'battery',state:'info',timezone:'globe',clock_seconds:'clock',
             version:'info',built:'clock',screen_version:'info',update_check:'refresh',update_apply:'download',update_rollback:'refresh',
-            traffic_clear:'trash',next_boot:'power',default_boot:'power',reboot:'refresh',poweroff:'power',android_once:'power',
+            traffic_clear:'trash',clear_0:'trash',clear_1:'trash',clear_all:'trash',next_boot:'power',default_boot:'power',reboot:'refresh',poweroff:'power',android_once:'power',
             check:'search',diagnosis:'info',wireless_error:'wifi',hardware_error:'chip',controller:'usb',host_address:'device',reset_status:'info',reset:'refresh',
             usb_role_state:'usb',usb_role:'usb',usb_host_boot:'power',usb_net_current:'globe',usb_net_mode:'globe',usb_net_scope:'clock',usb_net_auto:'check',usb_lan_auto:'device',
             name:'info',maintainer:'user',copyright:'shield',license:'shield',donate:'heart',disclaimer:'info',
@@ -571,7 +587,8 @@ window.T551M = (() => {
             if (kind === 'cat') icon = names[categories?.[+id]?.id] || 'settings';
             else if (kind === 'item') icon = /^nav_slot[1-5]$/.test(id)
                 ? pageIcons[+view.items?.find(item => item.id === id)?.value] || 'layout'
-                : names[id] || names[view.cat?.id] || 'settings';
+                : /^cpu_policy|^policy\d+/.test(id) ? 'chip' : /^thermal_zone/.test(id) ? 'sun'
+                : /^voltage_/.test(id) ? 'battery' : names[id] || names[view.cat?.id] || 'settings';
             else if (kind === 'info') icon = names[id] || 'info';
             else if (kind === 'opt' || kind === 'chk') {
                 const option = String(view.item?.options?.[+id]?.value ?? '');
@@ -601,5 +618,5 @@ window.T551M = (() => {
             row.classList.toggle('has-value', !!row.querySelector('.sv')?.textContent.trim());
         }
     }
-    return {boot, status, power, page:pageChanged, isLocked:lockedNow, operator, amount, speed, app, appClosed, settings, attachKeys};
+    return {boot, status, power, page:pageChanged, isLocked:lockedNow, operator, amount, speed, app, appClosed, settings, attachKeys, refreshUsage};
 })();

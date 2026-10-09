@@ -25,6 +25,9 @@ endef
 
 define Package/luci-app-t551m/conffiles
 /etc/config/unisoc_modem
+/etc/e5-cpu.json
+/etc/e5-cpu-voltage.json
+/etc/e5-cpu-voltage-armed.json
 endef
 
 define Build/Compile
@@ -35,6 +38,7 @@ define Package/luci-app-t551m/install
 	$(CP) ./htdocs/. $(1)/www/
 	$(CP) ./root/. $(1)/
 	chmod 0755 $(1)/etc/init.d/unisoc-modem-ui $(1)/etc/init.d/unisoc-traffic $(1)/etc/hotplug.d/net/90-unisoc-usb-host $(1)/etc/hotplug.d/iface/90-unisoc-usb-host $(1)/usr/libexec/rpcd/mu300dash $(1)/usr/libexec/unisoc-modem/*
+	chmod 0755 $(1)/etc/init.d/e5-cpu $(1)/usr/libexec/rpcd/e5-cpu
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
 	$(CP) ./lmo/. $(1)/usr/lib/lua/luci/i18n/
 endef
@@ -60,6 +64,9 @@ define Package/luci-app-t551m/postinst
 
 	/etc/init.d/unisoc-traffic enable 2>/dev/null || true
 	/etc/init.d/unisoc-traffic start 2>/dev/null || true
+	/etc/init.d/e5-cpu disable 2>/dev/null || true
+	/etc/init.d/e5-cpu enable 2>/dev/null || true
+	/etc/init.d/e5-cpu start 2>/dev/null || true
 }
 exit 0
 endef
@@ -72,6 +79,7 @@ define Package/luci-app-t551m/postrm
 		/etc/init.d/unisoc-modem-ui disable 2>/dev/null || true
 		/etc/init.d/unisoc-traffic stop 2>/dev/null || true
 		/etc/init.d/unisoc-traffic disable 2>/dev/null || true
+		/etc/init.d/e5-cpu disable 2>/dev/null || true
 		rm -f /etc/unisoc-modem/usb-boot.conf
 	fi
 	rm -f /tmp/luci-indexcache /tmp/luci-modulecache/* 2>/dev/null

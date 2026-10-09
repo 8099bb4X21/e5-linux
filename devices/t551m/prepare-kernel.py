@@ -181,6 +181,7 @@ def main():
     path.write_text(text)
     runpy.run_path(str(Path(__file__).with_name('usb_charger.py')))['apply'](k, replace_function)
     runpy.run_path(str(Path(__file__).with_name('otg.py')))['apply'](k)
+    runpy.run_path(str(Path(__file__).with_name('cpufreq.py')))['apply'](k)
     # mu300-linux f0323bf: keep firmware debug traffic off across WCN power
     # cycles. This board uses the integrated WCN stack, not MU300's PCIe path;
     # its resume does not force armlog on, so only the shared default applies.

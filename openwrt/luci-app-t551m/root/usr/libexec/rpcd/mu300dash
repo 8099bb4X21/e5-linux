@@ -28,13 +28,7 @@
 export PATH="$PATH:/opt/mu300/bin:/opt/mu300/busybox-bin:/usr/libexec/unisoc-modem:/usr/sbin:/sbin"
 
 DASH=${MU300_DASH_BIN:-/usr/libexec/unisoc-modem}
-# One pool everywhere: a platform SMS adapter may honor this environment value.
-# Keep the former MU300 path as an automatic upgrade fallback.
-SMS_POOL=$(uci -q get unisoc_modem.main.sms_pool 2>/dev/null)
-[ -d "${SMS_POOL:-/etc/unisoc-modem/sms}" ] || [ ! -d /etc/mu300/sms ] || SMS_POOL=/etc/mu300/sms
-export MU300_SMS_POOL=${MU300_SMS_POOL:-${SMS_POOL:-/etc/unisoc-modem/sms}}
-SMS=${MU300_SMS_BIN:-$(uci -q get unisoc_modem.main.sms_command 2>/dev/null)}
-[ -n "$SMS" ] || SMS=$(command -v mu300-sms 2>/dev/null || true)
+# SMS uses the system's shared two-SIM pool through t551m-sms below.
 AT=${MU300_AT:-/usr/libexec/unisoc-modem/at}
 DIR=${MU300_DASH_DIR:-/tmp/unisoc-modem}
 CELL=$DIR/cell.json
@@ -252,7 +246,7 @@ m_lock_set() {
     kind=$(inp '@.kind')
     val=$(inp '@.val')
     case "$kind" in
-        mode|endc|lte|nr|cell|auto_apply) ;;
+        mode|gran|endc|lte|nr|cell|auto_apply|bands_default) ;;
         *) printf '{"ok":0,"error":"unknown lock kind"}\n'; return ;;
     esac
     "$DASH/lock" start "$kind" "$val"
@@ -284,6 +278,9 @@ do_list() {
     cat <<EOF
 {
 	"sysinfo": { },
+	"sim_get": { },
+	"sim_set": { "slot": "String", "current": "String", "confirm": false },
+	"sim_status": { "id": "String" },
 	"status": { "slot": "String" },
 	"rates": { "slot": "String" },
 	"signal": { "slot": "String" },
@@ -305,6 +302,7 @@ do_list() {
 	"forward_test": { },
 	"traffic_get": { "slot": "String" },
 	"traffic_set": { "payload": "String", "slot": "String" },
+	"traffic_clear": { "slot": "String", "confirm": false },
 	"usb_get": { },
 	"usb_set": { "kind": "String", "value": "String", "scope": "String", "auto": "String" },
 	"usb_net_list": { },
@@ -333,6 +331,9 @@ list)
 call)
     case ${2:-} in
         sysinfo)    run_m sysinfo    'm_sysinfo' ;;
+        sim_get)    "$DASH/data-sim" get ;;
+        sim_set)    printf '%s' "$INPUT" | "$DASH/data-sim" set ;;
+        sim_status) "$DASH/data-sim" status "$(inp '@.id')" ;;
         status)     run_m status     'm_status' ;;
         rates)      m_rates ;;
         cells)      run_m cells      'm_status cells' ;;
@@ -365,6 +366,11 @@ call)
             ;;
         traffic_set)
             ubus -t 5 call unisoc.traffic set "$INPUT" 2>/dev/null || printf '{"ok":0,"error":"traffic_unavailable"}\n'
+            ;;
+        traffic_clear)
+            # Preserve the explicit scope and boolean confirmation. The daemon
+            # rejects absent/invalid scopes instead of resolving the active SIM.
+            ubus -t 5 call unisoc.traffic clear "$INPUT" 2>/dev/null || printf '{"ok":0,"error":"traffic_unavailable"}\n'
             ;;
         usb_get)    run_m usb_get    '"$DASH/device-usb" get' ;;
         usb_set)

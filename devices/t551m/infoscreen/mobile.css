@@ -170,6 +170,10 @@ body.no-motion #pages,body.no-motion #mobile-lockscreen,body.no-motion #mobile-m
 #hs-key:empty { display:none; }
 [data-title="hotspot"] .list { padding:10px 12px; }
 .traffic-used { font:500 28px/1.4 "DejaVu Sans",sans-serif; color:var(--accent); margin:8px 0; }
+.traffic-scope { display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
+.traffic-scope label { flex:1; }
+.traffic-scope select { min-width:0;max-width:65%;min-height:38px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;color:var(--text);background:var(--card);font:inherit; }
+.traffic-scope .sub { width:100%;overflow-wrap:anywhere; }
 [data-title="traffic"] .mid { font-size:12px; font-weight:400; }
 #toast { z-index:70; bottom:calc(var(--nav-h) + 8px); }
 body.desktop-wallpaper::before { content:""; position:fixed; inset:0; z-index:0; pointer-events:none; background-image:linear-gradient(#0c121b55,#0c121b88),var(--desktop-wallpaper); background-position:center; background-size:cover; }

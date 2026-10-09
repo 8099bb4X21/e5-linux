@@ -1,5 +1,6 @@
 {
 	"id": "phone",
+	"device_integration": "e5-phone-audio-v1",
 	"api_version": 2,
 	"version": "1.5",
 	"name": {

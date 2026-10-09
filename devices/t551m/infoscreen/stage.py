@@ -45,6 +45,10 @@ def confirmation_rows(app):
 
 def sources():
     app = (HERE / 'base/app.js').read_text(encoding='utf-8')
+    common = (HERE.parents[2] / 'openwrt/luci-app-t551m/htdocs/luci-static/resources/mu300/common.js').read_text(encoding='utf-8')
+    start = common.index('/* BEGIN SHARED PLATFORM MESSAGES:')
+    end = common.index('/* END SHARED PLATFORM MESSAGES */', start)
+    app = replace(app, 'const I18N = {', common[start:end] + '\nconst I18N = {')
     app = confirmation_rows(app)
     app = replace(app, "f.src = `/plugins/${encodeURIComponent(m.id)}/${m.entry ?? 'index.html'}?lang=${lang}`;",
                   "f.src = `/plugins/${encodeURIComponent(m.id)}/${m.entry ?? 'index.html'}?lang=${lang}${m.callOverlay ? '&callonly=1' : ''}`;")
@@ -105,11 +109,6 @@ def sources():
     app = replace(app, "if (page != P.sms) showPage(P.sms);", "if (!T551M.isLocked() && page != P.sms) showPage(P.sms);")
     app = replace(app, "setText('bar-op', m.operator ??", "setText('bar-op', T551M.operator(m.operator) ??")
     app = replace(app, "[m.operator, m.registration", "[T551M.operator(m.operator), m.registration")
-    app = replace(app, 'const b = (n) => { const [v, unit] = fmtBytes(n); return `${v} ${unit}`; };', 'const b = T551M.amount;')
-    app = replace(app, '\tif (!u || !u.available) return;', '''
-	setText('tf-day-used', u?.available ? b(u.today_used) : '—');
-	setText('tf-mon-used', u?.available ? b(u.month_used) : '—');
-	if (!u || !u.available) return;''')
     start = app.index('async function loadAdvanced() {')
     end = app.index('\nfunction renderAdvanced', start)
     app = app[:start] + '''let advancedBusy = false, advancedRetry = null;
@@ -142,7 +141,7 @@ async function loadAdvanced() {
     api = replace(api, '\tlet m = modem_status();\n\treturn {', '\tlet sims = sim_status();\n\tlet m = card_modem(modem_status(), sims);\n\treturn {\n\t\tsims,')
     api = replace(api, "model: 'Rongyue E5',", "model: ubus_call('system', 'board')?.model ?? null,")
     api = replace(api, 'function advanced() {', 'function advanced_base() {')
-    api = api.replace("state_get('advanced', 30)", "state_get('advanced-base', 30)").replace("state_put('advanced', r)", "state_put('advanced-base', r)")
+    api = api.replace("state_get('advanced', 30)", "state_get('advanced-base-' + sim_card(), 30)").replace("state_put('advanced', r)", "state_put('advanced-base-' + sim_card(), r)")
     for query in ['AT+SPLBAND=0','AT+SPLBAND=3','AT+SPACTCARD?','AT+SP5GRAN?','AT+SPFORCEFRQ=12,3','AT+SPFORCEFRQ=16,3']:
         # Only replace the details function, never mutation/settings handlers.
         start = api.index('function advanced_base() {')
@@ -174,27 +173,21 @@ async function loadAdvanced() {
         config += f"nav_slot{i}: c.get('e5-infoscreen', 'main', 'nav_slot{i}') ?? '{fallback}',\n\t\t"
     api = replace(api, "idle: +(c.get('e5-infoscreen', 'main', 'idle') ?? 60),", config + "idle: +(c.get('e5-infoscreen', 'main', 'idle') ?? 60),")
     api = replace(api, "return writefile(p + '/brightness', `${level}\\n`) != null;", "return system(`/usr/libexec/t551m-screen-power set ${level}`) == 0;")
-    api = replace(api, '''let wan = traffic_iface(wan_dev());''', '''// Share the dashboard's reboot-aware counters. Legacy vnstat history
-	// on this board contains bogus wrap deltas; do not display them as usage.
-	let data = ubus_call('unisoc.traffic', 'get');
-	let s = data?.status;
-	let wan = s && s.clock_ok ? {
-		available: s.available, since: s.started_at, today: s.today, month: s.month,
-		today_used: s.today_used, month_used: s.month_used,
-		total: s.period, days: map(slice(reverse(data.days ?? []), -7), d => ({ date: substr(d.date, 5), rx: d.rx, tx: d.tx })), source: 'unisoc.traffic'
-	} : { available: false, source: 'unisoc.traffic' };''')
-    api = replace(api, "return { ...wan, wan, lan: traffic_iface('br-lan') };", "return { ...wan, wan, lan: { available: false } };")
     settings = (HERE / 'base/settings.uc').read_text(encoding='utf-8')
     settings = replace(settings, '与荣悦及设备、芯片厂商无关', '与设备、芯片厂商无关')
     settings = replace(settings, 'not affiliated with Rongyue or the device and chip makers', 'not affiliated with the device and chip makers')
     settings = replace(settings, 'const screen = uci_category(', (HERE / 'ui-settings.uc').read_text(encoding='utf-8') + '\nconst screen = uci_category(')
+    settings = replace(settings, 'const system_cat = {', (HERE / 'cpu-settings.uc').read_text(encoding='utf-8') + '\nconst system_cat = {')
+    settings = replace(settings, "{ id: 'traffic_clear', type: 'category',", "cpu_link('cpu', 'CPU 设置', 'CPU settings'),\n\t\t\t{ id: 'traffic_clear', type: 'category',")
     settings = replace(settings, "default: '1', label: L('触摸', 'Touch'),", "default: '1', label: L('触摸', 'Touch'), confirm: true, apply: '/usr/libexec/t551m-screen-power sync',")
-    settings = replace(settings, 'screen, usb_cat, system_cat, about ];', 'screen, mobile_ui, mobile_navigation, usb_cat, system_cat, about ];')
+    settings = replace(settings, 'screen, usb_cat, system_cat, traffic_records, about ];', 'screen, mobile_ui, mobile_navigation, usb_cat, system_cat, traffic_records, ...cpu_categories, about ];')
     index = (HERE / 'base/index.html').read_text(encoding='utf-8')
     index = replace(index, '<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="style.css">\n<link rel="stylesheet" href="mobile.css">')
     index = replace(index, '<script src="app.js"></script>', '<script src="power-menu.js"></script>\n<script src="mobile.js"></script>\n<script src="calls.js"></script>\n<script src="app.js"></script>')
     index = replace(index, '<section class="page" data-title="adv_info">', '<section class="page" data-title="adv_info"><div id="ad-freshness" hidden></div>')
     return {'www/app.js': app, 'api.uc': api, 'settings.uc': settings, 'www/index.html': index,
+            'updates.uc': (HERE / 'base/updates.uc').read_text(encoding='utf-8'),
+            'ADAPTATION': 'e5-device-ui-v1\n',
             'www/style.css': scalable_css((HERE / 'base/style.css').read_text(encoding='utf-8')),
             'www/mobile.js': (HERE / 'mobile.js').read_text(encoding='utf-8'),
             'www/calls.js': (HERE / 'calls.js').read_text(encoding='utf-8'),
@@ -212,6 +205,9 @@ def stage(root):
         dest.write_bytes(content.replace('\r\n', '\n').encode())
         dest.chmod(0o644)
     for source, name in [('screen-power.py', 'usr/libexec/t551m-screen-power'),
+                         ('base/update', 'usr/libexec/e5-infoscreen/update'),
+                         ('base/service', 'etc/init.d/e5-infoscreen'),
+                         ('base/plugin', 'usr/libexec/e5-infoscreen/plugin'),
                          ('sim-status.py', 'usr/libexec/t551m-sim-status'),
                          ('sim-service', 'etc/init.d/t551m-sim-status'),
                          ('details-radio.py', 'usr/libexec/t551m-screen-details'),

@@ -11,9 +11,10 @@ if [ -n "${MU300_SIM_SLOT:-}" ]; then
 	case "$MU300_SIM_SLOT" in 0|1) ;; *) echo 'Invalid SIM slot' >&2; exit 2 ;; esac
 	upper=$(printf '%s' "$cmd" | tr '[:lower:]' '[:upper:]')
 	case "$upper" in
+		AT+SPACTCARD\?) ;; # Read the explicitly selected context; never override it.
 		*+SPACTCARD*|*+SPSWDATA*) echo 'The selected SIM scope cannot be overridden' >&2; exit 2 ;;
-		AT?*) cmd="AT+SPACTCARD=$MU300_SIM_SLOT;$(printf '%s' "$cmd" | cut -c 3-)" ;;
 	esac
+	case "$upper" in AT?*) cmd="AT+SPACTCARD=$MU300_SIM_SLOT;$(printf '%s' "$cmd" | cut -c 3-)" ;; esac
 fi
 [ "$available" = 1 ] || [ -n "$cmd" ] || { echo "unisoc-at: command required" >&2; exit 2; }
 

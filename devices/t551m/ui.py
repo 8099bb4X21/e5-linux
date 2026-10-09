@@ -79,6 +79,7 @@ def stage(root):
         (Path(__file__).with_name('ui-cleanup.py'), 'opt/e5/t551m-ui-cleanup'),
         (TOP / 'rootfs/overlay/opt/e5/e5-at', 'opt/e5/e5-at'),
         (TOP / 'openwrt/overlay/usr/libexec/e5-volume', 'usr/libexec/e5-volume'),
+        (TOP / 'openwrt/overlay/usr/libexec/e5-sms', 'usr/libexec/e5-sms'),
         (TOP / 'openwrt/overlay/etc/init.d/e5-pulseaudio', 'etc/init.d/e5-pulseaudio'),
     ]:
         target = root / destination
@@ -93,12 +94,15 @@ def stage(root):
     # S10boot runs uci-defaults after rcS has expanded its startup file list.
     # Pre-create these links in offline Linux roots for the very first boot.
     if os.name != 'nt':
-        for name, priority in [('t551m-at', '81'), ('unisoc-modem-ui', '95'), ('unisoc-traffic', '96')]:
+        old_cpu_link = root / 'etc/rc.d/S18e5-cpu'
+        if old_cpu_link.is_symlink():
+            old_cpu_link.unlink()
+        for name, priority in [('e5-cpu', '13'), ('t551m-at', '81'), ('unisoc-modem-ui', '95'), ('unisoc-traffic', '96')]:
             link = root / f'etc/rc.d/S{priority}{name}'
             link.parent.mkdir(parents=True, exist_ok=True)
             if not link.is_symlink():
                 link.symlink_to('../init.d/' + name)
-        for name, priority in [('t551m-at', '09'), ('unisoc-traffic', '01')]:
+        for name, priority in [('e5-cpu', '89'), ('t551m-at', '09'), ('unisoc-traffic', '01')]:
             link = root / f'etc/rc.d/K{priority}{name}'
             if not link.is_symlink():
                 link.symlink_to('../init.d/' + name)

@@ -14,7 +14,7 @@
 //   POST /api/sms-read       the messages have been seen (e5-sms-notify read)
 //   POST /api/sms-delete     {"id": N}
 //   POST /api/sms-send       {"number": "...", "text": "...", "card": 0|1} -> {ok, error} (e5-linux's e5-sms)
-//   GET  /api/traffic        today's, this month's and the last days' traffic (vnstat)
+//   GET  /api/traffic        shared SIM traffic ledger (?slot=0|1; default data SIM)
 //   POST /api/at             {"cmd": "AT+...", "timeout": s} -> {ok, reply|error}
 //   GET  /api/at/presets     the screen's list of AT reads
 //   GET  /api/advanced       device, baseband and SIM details, band and cell locks
@@ -38,6 +38,7 @@
 import { readfile, writefile, popen, open, stat, glob, lsdir, lstat } from 'fs';
 import { connect } from 'ubus';
 import { cursor } from 'uci';
+import * as hotspot from '/usr/libexec/unisoc-modem/hotspot.uc';
 
 const WLAN_DEV = 'wlan0';
 const USB_HOST_MAC = '02:50:00:00:e5:02';   // the gadget's host_addr
@@ -334,25 +335,12 @@ function wan_status() {
 }
 
 function wifi_config() {
-	let c = cursor();
-	let encryption = c.get('wireless', 'default_radio0', 'encryption');
-	return {
-		ssid: c.get('wireless', 'default_radio0', 'ssid'),
-		key: c.get('wireless', 'default_radio0', 'key'),
-		encryption,
-		secured: encryption != null && encryption != 'none',
-		hidden: c.get('wireless', 'default_radio0', 'hidden') == '1',
-		qr_revision: stat('/etc/config/wireless')?.mtime ?? 0,
-		enabled: c.get('wireless', 'radio0', 'disabled') != '1' &&
-			c.get('wireless', 'default_radio0', 'disabled') != '1',
-		channel: c.get('wireless', 'radio0', 'channel'),
-		band: c.get('wireless', 'radio0', 'band')
-	};
+	return hotspot.config(cursor());
 }
 
 function wifi_status() {
 	let cfg = wifi_config();
-	let st = ubus_call('network.wireless', 'status')?.radio0;
+	let st = ubus_call('network.wireless', 'status')?.[cfg.radio];
 	let up = (st?.up ?? false) && length(st?.interfaces ?? []) > 0;
 	let request = state_get('wifi-request');
 	let wanted_pending = !!st?.pending || !!(request?.on && time() - request.at < 30);
@@ -654,10 +642,11 @@ const SMS_TOOL = '/usr/libexec/e5-sms';
 const SMS_RECEIVE = '/usr/libexec/e5-sms-receive';
 
 function sms_unread() {
-	let ids = [];
+	let ids = [], hidden=[];
+	try {hidden=json(readfile('/etc/unisoc-modem/hidden-sms.json') ?? '[]');} catch(e) {}
 	for (let line in split(readfile(SMS_UNREAD) ?? '', '\n')) {
 		let m = match(line, /\/SMS\/([0-9]+)$/);
-		if (m)
+		if (m && index(hidden,+m[1])<0)
 			push(ids, +m[1]);
 	}
 	return ids;
@@ -715,21 +704,9 @@ function sms_list() {
 }
 
 function sms_delete(id) {
-	id = int(id);
-	if (id < 0 || `${id}` == 'NaN')
-		return false;
-	if (id >= 1000000000 && stat(SMS_RECEIVE))
-		return sh_json(`${SMS_TOOL} delete ${id} 2>/dev/null`)?.ok ?? false;
-	let ok = system(`mmcli -m any --timeout=10 --messaging-delete-sms=${SMS_PATH}${id} >/dev/null 2>&1`) == 0;
-	if (ok) {
-		let cache = state_get('sms') ?? {};
-		delete cache[id];
-		state_put('sms', cache);
-		// and out of the unread list
-		let rest = filter(split(readfile(SMS_UNREAD) ?? '', '\n'), (l) => l != '' && l != `${SMS_PATH}${id}`);
-		writefile(SMS_UNREAD, length(rest) ? join('\n', rest) + '\n' : '');
-	}
-	return ok;
+    if (!match(`${id}`,/^[0-9]+$/)) return false;
+    // Same local-pool deletion as LuCI; SIM deletion remains an explicit web action.
+    return ubus_call('mu300dash','sms_delete',{id:`${id}`,sim:'0'})?.ok ?? false;
 }
 
 // e5-linux's /usr/libexec/e5-sms: the text in a file, not on a command line
@@ -756,63 +733,24 @@ function sms_send(number, text, card) {
 
 /* ---------- traffic ---------- */
 
-// vnstat's day and month counters (bytes): wan = the modem's interface,
-// lan = the bridge of the USB port and the hotspot
-function traffic_iface(dev) {
-	let v = sh_json(`vnstat --json -i ${dev} 2>/dev/null`);
-	let tr = v?.interfaces?.[0]?.traffic;
-	if (!tr)
-		return { available: false };
-	let lt = localtime();
-	let pick = (list, match_fn) => {
-		for (let e in (list ?? []))
-			if (match_fn(e.date))
-				return { rx: e.rx, tx: e.tx };
-		return { rx: 0, tx: 0 };
-	};
-	let days = [];
-	for (let e in slice(tr.day ?? [], -7))
-		push(days, { date: sprintf('%02d-%02d', e.date.month, e.date.day), rx: e.rx, tx: e.tx });
-	return {
-		available: true,
-		// when counting began: a month (or a day) that started earlier is partial
-		since: v.interfaces[0].created?.timestamp,
-		today: pick(tr.day, (d) => d.year == lt.year && d.month == lt.mon && d.day == lt.mday),
-		month: pick(tr.month, (d) => d.year == lt.year && d.month == lt.mon),
-		total: { rx: tr.total?.rx ?? 0, tx: tr.total?.tx ?? 0 },
-		days
-	};
-}
-
-function traffic_usage() {
-	let wan = traffic_iface(wan_dev());
-	// (the WAN's fields at the top level too, as in the first version)
-	return { ...wan, wan, lan: traffic_iface('br-lan') };
+function traffic_usage(slot) {
+	if (slot != null && slot != '' && slot != '0' && slot != '1')
+		return {available:false,error:'invalid_slot',source:'unisoc.traffic'};
+	slot = slot == null || slot == '' ? sim_card() : int(slot);
+	let data = ubus_call('unisoc.traffic', 'get', {slot:`${slot}`});
+	let s = data?.status;
+	// History remains readable when a SIM's network interface is absent.
+	let wan = s ? {
+		...s, available:!!s.clock_ok, interface_available:!!s.available,
+		slot, since:s.started_at, total:s.period, source:'unisoc.traffic',
+		days:map(reverse(slice(data.days ?? [],0,7)),d=>({date:substr(d.date,5),rx:d.rx,tx:d.tx}))
+	} : {available:false,slot,source:'unisoc.traffic',error:'traffic_unavailable'};
+	let net = `/sys/class/net/${slot == 1 ? 'sipa_eth8' : 'sipa_eth0'}/statistics/`;
+	wan.session = {rx:read_num(net + 'rx_bytes'),tx:read_num(net + 'tx_bytes')};
+	return { ...wan, wan, lan: { available:false } };
 }
 
 /* ---------- advanced ---------- */
-
-// mmcli prints  response: '<reply>'  and the reply has line breaks in it
-// (a chained command answers once per part): taken between the first
-// "response: '" and the last quote -- ucode's regex has no dot-all
-function at_reply(out) {
-	let i = index(out ?? '', "response: '");
-	let j = rindex(out ?? '', "'");
-	if (i < 0 || j <= i + 11)
-		return (i >= 0) ? '' : null;
-	return trim(replace(substr(out, i + 11, j - i - 11), /\r/g, ''));
-}
-
-// an AT command through ModemManager (the AT channel has one owner); the
-// reply without the final OK, or null.  The command is single-quoted for the
-// shell: a ' in it cannot end the quoting.
-function at(cmd, timeout) {
-	let q = replace(`${cmd}`, /'/g, "'\\''");
-	let t = int(timeout ?? 10);
-	if (t < 1 || t > 60) t = 10;
-	return at_reply(sh(`mmcli -m any --timeout=${t} --command='${q}' 2>&1`));
-}
-
 
 // warned about, not refused (e5-linux's e5-at warns the same way): the
 // commands after which the CP's AT server (ATZ, AT&F, AT+CPMS=) or the SIM
@@ -831,22 +769,25 @@ function at_warning(cmd) {
 
 // /api/at: the reply, or the modem's error text; `warning` marks a command
 // that can leave the modem's AT server or SIM dead until a reboot
-function at_console(cmd, timeout) {
-	let q = replace(`${cmd}`, /'/g, "'\\''");
-	let t = int(timeout ?? 10);
-	if (t < 1 || t > 60) t = 10;
-	let out = sh(`mmcli -m any --timeout=${t} --command='${q}' 2>&1`) ?? '';
-	let reply = at_reply(out);
-	let r = null;
-	if (reply != null)
-		r = { ok: true, reply };
-	else {
-		let i = index(out, 'error: ');
-		r = { ok: false, error: trim((i >= 0) ? substr(out, i + 7) : out) };
-	}
+function at_console(cmd, timeout, slot) {
+	slot ??= `${sim_card()}`;
+	if (slot != '0' && slot != '1') return {ok:false,error:'Invalid SIM slot'};
+	let r = ubus_call('mu300dash','at',{cmd,slot:`${slot}`}) ?? {ok:false,error:'AT service unavailable'};
 	if (at_warning(cmd))
 		r.warning = true;
 	return r;
+}
+
+// Internal queries use the same scoped owner, without filling user AT history.
+function at(cmd, timeout, slot) {
+    slot ??= sim_card();
+    if (slot != 0 && slot != 1) return null;
+    let q=replace(`${cmd}`, /'/g, "'\\''"), t=int(timeout ?? 8);
+    if (t<1 || t>60) t=8;
+    let p=popen(`MU300_SIM_SLOT=${slot} /usr/libexec/unisoc-modem/at -t ${t} '${q}' 2>/dev/null`);
+    if (!p) return null;
+    let text=trim(p.read('all') ?? ''), rc=p.close();
+    return rc==0 && match(text,/(^|\n)OK$/) ? trim(replace(text,/(^|\n)OK$/,'')) : null;
 }
 
 // useful reads for the screen's AT page; nothing here changes the modem
@@ -1325,14 +1266,16 @@ function sms_config() {
 function qos_status(m) {
 	if (!m?.present)
 		return null;
-	let c = state_get('qos', 60);
+	let slot = sim_card(), key = 'qos-' + slot;
+	let c = state_get(key, 60);
 	if (c)
 		return c.v;
 	let nr = (m.tech == '5gnr');
-	let f = payload_ints(at(nr ? 'AT+C5GQOSRDP=1' : 'AT+CGEQOSRDP=1', 5));
+	let f = payload_ints(at(nr ? 'AT+C5GQOSRDP=1' : 'AT+CGEQOSRDP=1', 5, slot));
+	if (sim_card() != slot) return null;
 	let v = (length(f) >= 8 && f[0] == 1 && (f[6] > 0 || f[7] > 0))
 		? { qci: f[1], dl_kbps: f[6], ul_kbps: f[7], nr } : null;
-	state_put('qos', { v });
+	state_put(key, { v });
 	return v;
 }
 
@@ -1354,7 +1297,8 @@ function status() {
 		usb: usb_status(),
 		system: system_status(),
 		screen: screen_config(),
-		sms: { unread: sms_unread(), ...sms_config() },
+		sms: { unread: sms_unread(),
+            hidden_revision: `${stat('/etc/unisoc-modem/hidden-sms.json')?.mtime ?? 0}:${stat('/etc/unisoc-modem/hidden-sms.json')?.size ?? 0}`, ...sms_config() },
 		notifications: app_notifications()
 	};
 }
@@ -1379,14 +1323,10 @@ function wifi_qr() {
 }
 
 function set_wifi(on) {
-	let c = cursor();
-	c.set('wireless', 'radio0', 'disabled', on ? '0' : '1');
-	c.set('wireless', 'default_radio0', 'disabled', on ? '0' : '1');
-	c.commit('wireless');
+	let r=hotspot.set(cursor(),on);
+	if (!r.ok) return false;
 	state_put('wifi-request', { on, at: time() });
 	state_put('wifi-start', null);
-	// hostapd takes seconds to come up or go
-	system('(wifi reload) >/dev/null 2>&1 &');
 	return true;
 }
 
@@ -1564,7 +1504,13 @@ global.handle_request = function(env) {
 			return reply_json(r.ok ? 200 : 400, r);
 		}
 		if (!post && path == '/settings')
-			return reply_json(200, { categories: map(settings(), (c) => ({ id: c.id, label: c.label, view: c.view, plugin: c.plugin })) });
+			return reply_json(200, { categories: map(settings(), (c) => ({ id: c.id, label: c.label, view: c.view, plugin: c.plugin, parent: c.parent })) });
+		if (!post && path == '/network-job') {
+			let a=query_args(env.QUERY_STRING ?? '');
+			if ((a.slot != '0' && a.slot != '1') || !match(a.id ?? '',/^[0-9a-f]{32}$/))
+				return reply_json(400,{ok:false,error:'Invalid network job'});
+			return reply_json(200,ubus_call('mu300dash','lock_status',a) ?? {ok:false,state:'error',error:'Network service unavailable'});
+		}
 		let sm = match(path, /^\/settings\/([a-z0-9:_-]+)$/);
 		if (sm) {
 			let c = category(sm[1]);
@@ -1573,7 +1519,9 @@ global.handle_request = function(env) {
 			if (!post)
 				return reply_json(200, { id: c.id, label: c.label, items: settings_items(c) });
 			let b = read_body(env);
-			let err = c.set(b.id, b.value);
+			let err = c.set(b.id, b.value, b.slot);
+			if (type(err) == 'object' && err.job)
+				return reply_json(200,{ok:true,pending:true,job:err.job,slot:err.slot});
 			let item = null;
 			for (let i in settings_items(c))
 				if (i.id == b.id) item = i;
@@ -1612,12 +1560,12 @@ global.handle_request = function(env) {
 			return plugin_request(env, pm[1], pm[2] ?? '', post ? read_body(env) : null);
 		if (post && path == '/at') {
 			let b = read_body(env);
-			return reply_json(200, at_console(b.cmd ?? '', b.timeout));
+			return reply_json(200, at_console(b.cmd ?? '', b.timeout, b.slot));
 		}
 		if (!post && path == '/at/presets')
 			return reply_json(200, { presets: map(AT_PRESETS, (p) => ({ cmd: p[0], label: { zh: p[1], en: p[2] } })) });
 		if (!post && path == '/traffic')
-			return reply_json(200, traffic_usage());
+			return reply_json(200, traffic_usage(query_args(env.QUERY_STRING ?? '').slot));
 		if (!post && path == '/advanced')
 			return reply_json(200, advanced());
 		if (!post && path == '/identity')

@@ -210,8 +210,8 @@ WSHOW=$(t3 uci -q show wireless 2>/dev/null)
 IFKEY=
 while IFS= read -r line; do
     case "$line" in
-        wireless.*=wifi-iface)
-            IFKEY=${line#wireless.}; IFKEY=${IFKEY%%=*}
+        wireless.*.mode=\'ap\')
+            IFKEY=${line#wireless.}; IFKEY=${IFKEY%%.mode=*}
             case "$IFKEY" in *.*) IFKEY= ;; *) break ;; esac
             ;;
     esac
@@ -219,21 +219,28 @@ done <<EOF_WIFI
 $WSHOW
 EOF_WIFI
 IFKEY=${IFKEY:-x}
-W_SSID= W_CH= W_BAND= W_HW= W_HT= W_COUNTRY= W_ENC= W_HIDDEN= W_DIS=
+RADIO=radio0
+while IFS= read -r line; do
+    case "$line" in "wireless.$IFKEY.device="*) RADIO=${line#*=}; RADIO=${RADIO#\'}; RADIO=${RADIO%\'}; break ;; esac
+done <<EOF_RADIO
+$WSHOW
+EOF_RADIO
+W_SSID= W_CH= W_BAND= W_HW= W_HT= W_COUNTRY= W_ENC= W_HIDDEN= W_DIS= W_IFDIS=
 while IFS= read -r line; do
     key=${line%%=*}; [ "$key" != "$line" ] || continue
     val=${line#*=}
     case "$val" in \'*\') val=${val#\'}; val=${val%\'} ;; *) continue ;; esac
     case "$key" in
         "wireless.$IFKEY.ssid") W_SSID=$val ;;
-        wireless.radio0.channel) W_CH=$val ;;
-        wireless.radio0.band) W_BAND=$val ;;
-        wireless.radio0.hwmode) W_HW=$val ;;
-        wireless.radio0.htmode) W_HT=$val ;;
-        wireless.radio0.country) W_COUNTRY=$val ;;
+        "wireless.$RADIO.channel") W_CH=$val ;;
+        "wireless.$RADIO.band") W_BAND=$val ;;
+        "wireless.$RADIO.hwmode") W_HW=$val ;;
+        "wireless.$RADIO.htmode") W_HT=$val ;;
+        "wireless.$RADIO.country") W_COUNTRY=$val ;;
         "wireless.$IFKEY.encryption") W_ENC=$val ;;
         "wireless.$IFKEY.hidden") W_HIDDEN=$val ;;
-        wireless.radio0.disabled) W_DIS=$val ;;
+        "wireless.$IFKEY.disabled") W_IFDIS=$val ;;
+        "wireless.$RADIO.disabled") W_DIS=$val ;;
     esac
 done <<EOF_WIFI
 $WSHOW
@@ -251,6 +258,7 @@ W_HOSTAPD=0
 HAPD=$(t3 ubus call "hostapd.$WIFI_DEVICE" get_status 2>/dev/null)
 printf '%s' "$HAPD" | grep -q '"status": *"ENABLED"' && W_HOSTAPD=1
 [ "$W_DIS" = "1" ] && W_UP=0 || W_UP=1
+[ "$W_IFDIS" = "1" ] && W_UP=0
 [ -d "/sys/class/net/$WIFI_DEVICE" ] || W_UP=0
 [ "$W_HOSTAPD" = 1 ] || W_UP=0
 # SC2355 may report only associated MACs, with no station metrics. Count the

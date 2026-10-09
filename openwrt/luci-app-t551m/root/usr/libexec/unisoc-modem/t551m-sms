@@ -97,6 +97,7 @@ def main(op, args):
             if value == 'all':
                 raise ValueError('Bulk SIM deletion is not supported')
             run([TOOL, 'delete', str(ids[0])])
+            hide(ids)
         else:
             hide(ids)
         return dict(ok=1)

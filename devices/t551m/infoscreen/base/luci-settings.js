@@ -3,6 +3,7 @@
 'require form';
 'require rpc';
 'require ui';
+'require mu300.common as M';
 
 var resetUsb = rpc.declare({ object: 'e5-infoscreen', method: 'usb_reset', expect: {} });
 var checkNetwork = rpc.declare({ object: 'e5-infoscreen', method: 'network_check', expect: {} });
@@ -24,7 +25,7 @@ return view.extend({
 		o.default = '1'; o.rmempty = false;
 		o = s.option(form.ListValue, 'lang', '语言');
 		o.value('zh', '中文'); o.value('en', 'English'); o.default = 'zh'; o.rmempty = false;
-		o = s.option(form.Value, 'update_url', '更新 JSON 地址', '留空使用 Pages 的 latest.json；旧设备也可以保留 GitHub Release 地址。');
+		o = s.option(form.Value, 'update_url', M.translate('更新 JSON 地址'), M.translate('设备适配更新源需声明 adaptation=e5-device-ui-v1，更新包也须包含对应 ADAPTATION 标记；未适配的上游包不能覆盖当前界面。'));
 		o.placeholder = 'https://enceka.github.io/infoscreen/latest.json'; o.rmempty = true;
 		o = s.option(form.Value, 'store_url', '应用商店 JSON 地址', '留空使用官方应用商店。');
 		o.placeholder = 'https://enceka.github.io/infoscreen-plugins/index.json'; o.rmempty = true;

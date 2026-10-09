@@ -16,7 +16,7 @@ class Scope(unittest.TestCase):
                 path=root/name;path.write_text('#!/bin/sh\n'+text+'\n');path.chmod(0o755)
             env={**os.environ,'PATH':str(root)+':'+os.environ['PATH'],'TEST_ADAPTER':str(root/'adapter')}
             for slot in ['0','1']:
-                for command in ['AT+COPS?','at+cesq','AT+CGDCONT=1,"IP","MixedCaseAPN"']:
+                for command in ['AT+COPS?','AT+SPACTCARD?','at+cesq','AT+CGDCONT=1,"IP","MixedCaseAPN"']:
                     result=subprocess.check_output(['sh',str(SOURCE),command],env={**env,'MU300_SIM_SLOT':slot},text=True)
                     self.assertEqual(result.strip(),'AT+SPACTCARD='+slot+';'+command[2:])
                 for command in ['AT+SPACTCARD=0','at+spswdata=1','AT+COPS?;+SpAcTcArD=0']:

@@ -58,11 +58,56 @@ with tempfile.TemporaryDirectory(prefix='dual-traffic-') as directory:
         assert rpc('set',{'slot':'1','payload':'{"device":"sipa_eth0"}'})['ok']==0
         card.write_text('1');rpc('flush');assert rpc('get')['slot']==1
         assert json.loads((root/'run/view.json').read_text())['slot']==1
-    finally:proc.terminate();proc.wait(timeout=5)
+    finally:
+        proc.terminate();proc.wait(timeout=5)
+        errors=proc.stderr.read().decode()
+        if errors:print(errors,flush=True)
     proc=start()
     try:
         assert rpc('get',{'slot':'0'})['days']==a['days']
         assert rpc('get',{'slot':'1'})['days']==b['days']
         assert rpc('get',{'slot':'1'})['config']['plan_name']=='second'
+        for args in [{},{'slot':'2','confirm':True},{'slot':'0'},{'slot':'all','confirm':False}]:
+            assert rpc('clear',args)['ok']==0,args
+        # Calibrated usage is part of history, while plan settings survive clear.
+        conf=rpc('get',{'slot':'0'})['config']
+        assert rpc('set',{'slot':'0','payload':json.dumps({**conf,'used_gb':0.5})})['ok']==1
+        assert rpc('clear',{'slot':'0','confirm':True})['ok']==1
+        cleared=rpc('get',{'slot':'0'})
+        assert cleared['config']==conf
+        assert cleared['status']['today_used']==cleared['status']['month_used']==cleared['status']['cycle_used']==0
+        assert rpc('get',{'slot':'1'})['days']==b['days']
+        assert json.loads((root/'run/view-sim0.json').read_text())['today_used']==0
+        counters(0,1170,229);rpc('flush')
+        after=rpc('get',{'slot':'0'})
+        assert after['status']['today']=={'rx':70,'tx':9},after
+        # Failed persistence must not clear the live record or acknowledgement.
+        (root/'data').rename(root/'saved-data')
+        try:
+            assert rpc('clear',{'slot':'0','confirm':True})=={'ok':0,'error':'storage_failed'}
+            assert rpc('get',{'slot':'0'})['days']==after['days']
+        finally:(root/'saved-data').rename(root/'data')
+        stale=(root/'run/state.json').read_text()
+        assert rpc('clear',{'slot':'all','confirm':True})['ok']==1
+        for slot in ['0','1']:
+            assert rpc('get',{'slot':slot})['status']['today_used']==0
+        assert rpc('get',{'slot':'1'})['config']['plan_name']=='second'
+    finally:
+        proc.terminate();proc.wait(timeout=5)
+        errors=proc.stderr.read().decode()
+        if errors:print(errors,flush=True)
+    # Simulate a crash between the durable commit and runtime checkpoint.
+    (root/'run/state.json').write_text(stale)
+    proc=start()
+    try:
+        for slot in ['0','1']:assert rpc('get',{'slot':slot})['status']['cycle_used']==0
+        counters(1,3310,442);rpc('flush')
+        assert rpc('get',{'slot':'1'})['status']['today']=={'rx':10,'tx':2}
     finally:proc.terminate();proc.wait(timeout=5)
-print('PASS: isolated SIM counters, legacy migration, settings, data-SIM switch and restart')
+    (root/'run/state.json').unlink()
+    proc=start()
+    try:
+        assert rpc('get',{'slot':'0'})['status']['cycle_used']==0
+        assert rpc('get',{'slot':'1'})['status']['today']=={'rx':10,'tx':2}
+    finally:proc.terminate();proc.wait(timeout=5)
+print('PASS: isolated SIM counters/migration, explicit clear scopes, preserved plans, calibration reset, live counter baselines, write-failure rollback, warm/cold restart')

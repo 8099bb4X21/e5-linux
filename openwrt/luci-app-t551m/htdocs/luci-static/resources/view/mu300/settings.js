@@ -27,12 +27,8 @@ return view.extend({
 		o.description = t('可执行文件依次接收超时秒数和完整 AT 命令。它必须与平台拨号程序共享串口锁。');
 		o.depends('at_backend', 'custom');
 
-		o = s.option(form.Value, 'sms_command', t('短信适配器'));
-		o.placeholder = '/usr/bin/mu300-sms';
-		o.description = t('实现 list、show、send、delete、sync 子命令；留空时自动查找 mu300-sms。');
-
-		o = s.option(form.Value, 'sms_pool', t('短信池目录'));
-		o.placeholder = '/etc/unisoc-modem/sms';
+		o = s.option(form.DummyValue, '_sms_backend', t('短信池'));
+		o.cfgvalue = function() { return t('与屏幕共用系统双卡短信池'); };
 
 		o = s.option(form.Value, 'data_interface', t('蜂窝逻辑接口'));
 		o.placeholder = 'wan';

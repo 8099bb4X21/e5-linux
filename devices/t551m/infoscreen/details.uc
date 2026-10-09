@@ -11,7 +11,7 @@ function advanced() {
 		r.baseband.lte_cell_lock = v.lte_cell ? cell_locks(v.lte_cell) : null;
 		r.baseband.nr_cell_lock = v.nr_cell ? cell_locks(v.nr_cell) : null;
 	}
-	if (r.sim) r.sim.active_slot = v.card ? payload_ints(v.card)[0] + 1 : null;
+	if (r.sim) r.sim.active_slot = sim_card() + 1;
 	r.radio_pending = radio?.pending ?? true;
 	r.radio_error = radio?.error ?? false;
 	return r;

@@ -14,9 +14,9 @@ class DetailsTests(unittest.TestCase):
     def test_success_ignores_echo_and_unsolicited_lines(self):
         result = subprocess.CompletedProcess([], 0, 'AT+SPLBAND=0\r\n+IMSREG: 1\r\n+SPLBAND: 0,0,0,0,0\r\nOK\r\n', '')
         with patch.object(details.subprocess, 'run', return_value=result) as run:
-            data = details.collect(6, [('lte', details.QUERIES['lte'])])
+            data = details.collect(6, [('lte', details.QUERIES['lte'])], 1)
         self.assertEqual(data, {'lte': '+SPLBAND: 0,0,0,0,0'})
-        self.assertEqual(run.call_args.args[0], ['/opt/e5/t551m-at', '--channel', '6', '-t', '2', 'AT+SPLBAND=0'])
+        self.assertEqual(run.call_args.args[0], ['/opt/e5/t551m-at', '--channel', '6', '-t', '2', 'AT+SPACTCARD=1;+SPLBAND=0'])
 
     def test_error_and_missing_payload_are_unknown(self):
         for output in ['ERROR\r\n', '+CME ERROR: 3\r\n', 'OK\r\n', '+SPLBAND: 1,2,3\r\nERROR\r\n']:

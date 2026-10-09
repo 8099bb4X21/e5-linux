@@ -92,6 +92,13 @@ export function advance(db, sample, now) {
     else add(db, now, rx, tx);
     prune(db.days, 93); prune(db.months, 24);
 };
+export function clear_records(db, sample, now) {
+    let next = fresh(now);
+    next.config = config(db.config);
+    // Baseline live counters now, so the next poll cannot reimport old usage.
+    advance(next, sample, now);
+    return next;
+};
 export function counted(pair, mode) {
     return mode == 'rx' ? pair.rx : mode == 'tx' ? pair.tx : pair.rx + pair.tx;
 };
@@ -124,9 +131,9 @@ export function update_config(db, input, now) {
     let next = config(input);
     if (input.used_gb != null && ((type(input.used_gb) != 'int' && type(input.used_gb) != 'double') ||
         !(input.used_gb >= 0 && input.used_gb <= 100000))) die('invalid_config');
-    let changed_device = next.device != db.config.device;
     db.config = next;
-    if (changed_device) db.last = null;
+    // Interface ownership is fixed by SIM in the daemon, not by this display
+    // field. Saving a plan must not discard a live accounting baseline.
     if (input.used_gb != null) {
         let view = status(db, now);
         db.adjustment = { start: view.cycle_start, reset_day: next.reset_day, mode: next.count_mode,

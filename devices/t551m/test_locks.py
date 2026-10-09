@@ -70,6 +70,22 @@ class LocksTest(unittest.TestCase):
         self.assertEqual(self.tm,[134,128,1])
         self.assertEqual(locks.snapshot()['mode']['label'],'sa')
 
+    def test_screen_default_bands_share_persistence_and_restart_once(self):
+        locks.apply('bands_default','')
+        self.assertEqual(self.restarts,1)
+        self.assertEqual((locks.STATE/'lte').read_text(),','.join(map(str,locks.LTE)))
+        self.assertEqual((locks.STATE/'nr').read_text(),'')
+        self.assertEqual(locks.snapshot()['nr']['locked'],'')
+
+    def test_nr_access_saves_one_combined_mode_for_replay(self):
+        self.tm=[131,134,0]
+        locks.apply('gran','sa')
+        self.assertEqual((locks.STATE/'mode').read_text(),'5g4g')
+        self.assertEqual(locks.snapshot()['mode']['label'],'5g4g')
+        locks.apply('gran','nsa')
+        self.assertEqual((locks.STATE/'mode').read_text(),'nsa')
+        self.assertFalse((locks.STATE/'gran').exists())
+
     def test_scoped_state_migration_and_mode_preserve_data_card(self):
         base,run,marker=locks.STATE,locks.RUN,locks.MARKER
         (base/'lte').write_text('1,3');(base/'auto_apply').write_text('0')

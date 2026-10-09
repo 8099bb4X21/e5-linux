@@ -24,67 +24,13 @@ return function(ctx) {
 
 const L = (zh, en) => ({ zh, en });
 
-/* ---------- network ---------- */
-
-// Share the dashboard's platform LTE list and live NR capability parser.
-function band_caps(modem) {
-	let caps = ctx.sh_json('/usr/libexec/unisoc-modem/lock caps' + (modem ? '' : ' lte'));
-	let bands = (text) => filter(map(split(text ?? '', ','), (b) => int(b)), (b) => b > 0);
-	return { lte: bands(caps?.lte), nr: bands(caps?.nr) };
+/* ---------- network: same verified jobs and per-SIM replay as LuCI ---------- */
+function control_slot() {
+    let slot = ctx.uci().get('e5-infoscreen','main','control_slot');
+    return slot == '0' || slot == '1' ? slot : `${ctx.sim_card()}`;
 }
-
-// AT+SPTESTMODE=<card 1>,<card 2>,<primary SIM>: the work mode of each card
-// (the values UFI-TOOLS uses on this CP generation, uficode's
-// UniSocCellularUtils.kt NetworkMode); the read form answers the same three
-// first.  5G without 4G is SA: "5G only" is SA only.
-const NET_MODES = [
-	[ '134', L('5G/4G/3G 自动', '5G/4G/3G auto') ],
-	[ '131', L('5G/4G', '5G/4G') ],
-	[ '128', L('仅 5G (SA)', '5G only (SA)') ],
-	[ '3', L('仅 4G', '4G only') ]
-];
-
-function testmode() {
-	let w = ctx.payload_ints(ctx.at('AT+SPTESTMODE?'));
-	return (length(w) >= 3) ? { card1: w[0], card2: w[1], primary: w[2] } : null;
-}
-
-// AT+SPLBAND=1,<49-64>,<33-48>,<17-32>,<1-16>,<65-80>  (unisoc-cpd lte_band_lock_command)
-function lte_lock_cmd(bands) {
-	// (ucode object keys are strings)
-	let g = { '1': 0, '17': 0, '33': 0, '49': 0, '65': 0 };
-	for (let b in bands) {
-		for (let base in [ 1, 17, 33, 49, 65 ])
-			if (b >= base && b < base + 16)
-				g[`${base}`] |= 1 << (b - base);
-	}
-	return `AT+SPLBAND=1,${g['49']},${g['33']},${g['17']},${g['1']},${g['65']}`;
-}
-
-// AT+SPLBAND=2,<value1>,0,<value3>,<super>  (nr_band_lock_command)
-function nr_lock_cmd(bands) {
-	let v1 = 0, v3 = 0, sup = 0;
-	for (let b in bands) {
-		let i = index(ctx.NR_V1, b);
-		if (i >= 0) { v1 |= 1 << i; continue; }
-		i = index(ctx.NR_V3, b);
-		if (i >= 0) { v3 |= 1 << i; continue; }
-		i = index(ctx.NR_SUPER, b);
-		if (i >= 0) sup |= 1 << i;
-	}
-	return `AT+SPLBAND=2,${v1},0,${v3},${sup}`;
-}
-
-function same_set(a, b) {
-	a = sort([ ...a ]); b = sort([ ...b ]);
-	if (length(a) != length(b))
-		return false;
-	for (let i = 0; i < length(a); i++)
-		if (a[i] != b[i])
-			return false;
-	return true;
-}
-
+function lock_call(method,args) { return ctx.ubus('mu300dash',method,args) ?? {error:'Network service unavailable'}; }
+function band_list(text) { return filter(map(split(text ?? '',','),b=>int(b)),b=>b>0); }
 function apn_options() {
 	// e5-linux's e5-apn-auto: the APN from the SIM's operator
 	let seen = {}, out = [ { value: 'auto', label: L('自动（按 SIM 卡）', 'Automatic (from the SIM)') } ];
@@ -107,176 +53,101 @@ function apn_options() {
 	return out;
 }
 
-// the cells to lock to: the serving one and its neighbours, of its technology
-function cell_options(cells) {
-	let out = [ { value: 'none', label: L('不锁定', 'Not locked') } ];
-	for (let c in cells) {
-		if (c.pci == null || c.arfcn == null || (c.type != '5gnr' && c.type != 'lte'))
-			continue;
-		let rat = (c.type == '5gnr') ? 'nr' : 'lte';
-		let what = c.serving ? L('当前小区', 'serving') : L('邻区', 'neighbour');
-		push(out, {
-			value: `${rat}:${c.arfcn}:${c.pci}`,
-			label: L(`${what.zh} ${rat == 'nr' ? 'NR' : 'LTE'} PCI ${c.pci} · ${c.arfcn}${c.rsrp != null ? ' · ' + c.rsrp + ' dBm' : ''}`,
-				`${what.en} ${rat == 'nr' ? 'NR' : 'LTE'} PCI ${c.pci} · ${c.arfcn}${c.rsrp != null ? ' · ' + c.rsrp + ' dBm' : ''}`)
-		});
-	}
-	return out;
-}
-
-function cell_lock_value() {
-	let nr = ctx.cell_locks(ctx.at('AT+SPFORCEFRQ=16,3'));
-	if (length(nr)) return `nr:${nr[0].arfcn}:${nr[0].pci}`;
-	let lte = ctx.cell_locks(ctx.at('AT+SPFORCEFRQ=12,3'));
-	if (length(lte)) return `lte:${lte[0].arfcn}:${lte[0].pci}`;
-	return 'none';
-}
 
 const network = {
-	id: 'network', label: L('网络', 'Network'),
-	items: function() {
-		let modem = ctx.modem_present();
-		let caps = band_caps(modem);
-		let cells = modem ? ctx.cells() : [];
-		let cur_cell = modem ? cell_lock_value() : 'none';
-		let tm = modem ? testmode() : null;
-		let opts = cell_options(cells);
-		// a lock on a cell that is not in view any more is still shown
-		if (cur_cell != 'none' && !length(filter(opts, (o) => o.value == cur_cell))) {
-			let p = split(cur_cell, ':');
-			push(opts, { value: cur_cell, label: L(`已锁定 ${uc(p[0])} PCI ${p[2]} · ${p[1]}`, `locked ${uc(p[0])} PCI ${p[2]} · ${p[1]}`) });
-		}
-		return [
-			{ id: 'sim_card', type: 'choice', label: L('SIM 卡', 'SIM card'), confirm: true,
-			  value: ctx.uci().get('e5-sim', 'main', 'card') ?? `${ctx.sim_card()}`,
-			  options: [ { value: '0', label: L('卡 1', 'SIM 1') }, { value: '1', label: L('卡 2', 'SIM 2') } ],
-			  note: L('上网用的卡；切换时会重新连接网络', 'The card that carries data; the connection restarts on a change') },
-			{ id: 'apn', type: 'choice', label: L('APN', 'APN'),
-			  value: (ctx.uci().get('network', 'wan', 'apn_auto') == '1') ? 'auto' : ctx.uci().get('network', 'wan', 'apn'),
-			  options: apn_options(), confirm: true,
-			  note: L('切换后会重新连接网络', 'The connection restarts on a change') },
-			{ id: 'net_mode', type: 'choice', label: L('网络模式', 'Network mode'), confirm: true,
-			  value: (modem && tm) ? `${tm.card1}` : null,
-			  options: map(NET_MODES, (m) => ({ value: m[0], label: m[1] })),
-			  note: L('切换时会重新注册网络', 'The modem registers again on a change') },
-			{ id: 'nr_mode', type: 'choice', label: L('5G 组网', '5G access'), confirm: true,
-			  value: modem ? ((ctx.payload_ints(ctx.at('AT+SP5GRAN?'))[0] == 1) ? 'sa' : 'nsa') : null,
-			  options: [ { value: 'sa', label: L('SA + NSA', 'SA + NSA') },
-			             { value: 'nsa', label: L('仅 NSA', 'NSA only') } ] },
-			{ id: 'lte_bands', type: 'multi', label: L('LTE 频段锁定', 'LTE band lock'), confirm: true,
-			  value: modem ? ctx.lte_bands(ctx.at('AT+SPLBAND=0')) : [],
-			  options: map(caps.lte, (b) => ({ value: b, label: `B${b}` })),
-			  note: L('都不选 = 不锁定', 'None chosen = no lock') },
-			{ id: 'nr_bands', type: 'multi', label: L('NR 频段锁定', 'NR band lock'), confirm: true,
-			  value: modem ? ctx.nr_bands(ctx.at('AT+SPLBAND=3')) : [],
-			  options: map(caps.nr, (b) => ({ value: b, label: `n${b}` })),
-			  note: length(caps.nr) ? L('都不选 = 不锁定', 'None chosen = no lock')
-			    : L('未获取到基带 NR 能力，请稍后重新进入', 'NR capabilities unavailable; reopen this page later') },
-			{ id: 'bands_default', type: 'action', label: L('恢复默认频段', 'Default bands'), confirm: true,
-			  note: L('LTE 恢复全部候选频段，NR 不锁定', 'LTE back to all supported bands, NR unlocked') },
-			{ id: 'cell_lock', type: 'choice', label: L('锁定小区', 'Cell lock'), value: cur_cell,
-			  options: opts, confirm: true,
-			  note: L('锁到某个小区后只连这个小区（实验）', 'Only that cell once locked (experimental)') },
-			{ id: 'reconnect', type: 'action', label: L('重新连接网络', 'Reconnect'), confirm: true }
-		];
-	},
-	set: function(id, value) {
-		if (id == 'sim_card') {
-			if (value != '0' && value != '1') return 'unknown card';
-			// e5-linux's e5-sim: the modem's port to that card, then wan again
-			// (tens of seconds; the page sees the new card come up).  The
-			// choice reads back at once: e5-sim keeps it in the same option.
-			let c = ctx.uci();
-			c.set('e5-sim', 'main', 'card', value);
-			c.commit('e5-sim');
-			ctx.forget('modem');
-			ctx.run(`(/usr/sbin/e5-sim ${value}) >/dev/null 2>&1 &`);
-			return null;
-		}
-		if (id == 'apn') {
-			let ok = false;
-			for (let o in apn_options())
-				if (o.value == value) ok = true;
-			if (!ok) return 'unknown APN';
-			let c = ctx.uci();
-			if (value == 'auto') {
-				c.set('network', 'wan', 'apn_auto', '1');
-				c.commit('network');
-				// (sets the APN and reconnects when it differs)
-				ctx.run('(/usr/libexec/e5-apn-auto) >/dev/null 2>&1 &');
-				return null;
-			}
-			c.set('network', 'wan', 'apn', value);
-			c.set('network', 'wan', 'apn_auto', '0');
-			c.commit('network');
-			ctx.run('(ifup wan) >/dev/null 2>&1 &');
-			return null;
-		}
-		if (id == 'net_mode') {
-			let ok = false;
-			for (let m in NET_MODES) if (m[0] == `${value}`) ok = true;
-			let tm = testmode();
-			if (!ok || !tm) return ok ? 'cannot read the current mode' : 'unknown mode';
-			// card 2's mode and the primary SIM stay as the modem has them
-			ctx.at(`AT+SPTESTMODE=${int(value)},${tm.card2},${tm.primary}`);
-			ctx.forget('modem');
-			// the CP applies it a moment after the OK: read back for up to 3 s
-			for (let i = 0; i < 6; i++) {
-				let now = testmode();
-				if (now && now.card1 == int(value)) return null;
-				sleep(500);
-			}
-			return 'the modem did not take it';
-		}
-		if (id == 'nr_mode') {
-			if (value != 'sa' && value != 'nsa') return 'unknown';
-			let v = (value == 'sa') ? 1 : 0;
-			ctx.at(`AT+SP5GRAN=${v}`);
-			return (ctx.payload_ints(ctx.at('AT+SP5GRAN?'))[0] == v) ? null : 'the modem did not take it';
-		}
-		if (id == 'lte_bands' || id == 'nr_bands' || id == 'bands_default') {
-			let caps = band_caps(ctx.modem_present());
-			if (id == 'bands_default' && !length(caps.lte)) return 'LTE capabilities unavailable';
-			if (id != 'bands_default' && type(value) != 'array') return 'Invalid band list';
-			let lte = (id == 'bands_default') ? caps.lte : (id == 'lte_bands') ? value : null;
-			let nr = (id == 'bands_default') ? [] : (id == 'nr_bands') ? value : null;
-			if (lte != null) {
-				lte = map(lte, (b) => +b);
-				if (length(filter(lte, (b) => index(caps.lte, b) < 0))) return 'Unsupported LTE band';
-				ctx.at(lte_lock_cmd(lte));
-				// (a lock that did not take must not look like one)
-				if (!same_set(ctx.lte_bands(ctx.at('AT+SPLBAND=0')), lte))
-					return 'LTE: the modem read back other bands';
-			}
-			if (nr != null) {
-				nr = map(nr, (b) => +b);
-				if (length(filter(nr, (b) => index(caps.nr, b) < 0))) return 'Unsupported or unavailable NR band';
-				ctx.at(nr_lock_cmd(nr));
-				if (!same_set(ctx.nr_bands(ctx.at('AT+SPLBAND=3')), nr))
-					return 'NR: the modem read back other bands';
-			}
-			return null;
-		}
-		if (id == 'cell_lock') {
-			if (value == 'none') {
-				ctx.at('AT+SPFORCEFRQ=16,4');
-				ctx.at('AT+SPFORCEFRQ=12,4');
-				return (cell_lock_value() == 'none') ? null : 'still locked';
-			}
-			let p = split(value ?? '', ':');
-			if (length(p) != 3 || (p[0] != 'nr' && p[0] != 'lte'))
-				return 'bad cell';
-			let arfcn = int(p[1]), pci = int(p[2]);
-			ctx.at(`AT+SPFORCEFRQ=${p[0] == 'nr' ? 16 : 12},6,${arfcn},${pci}`);
-			return (cell_lock_value() == `${p[0]}:${arfcn}:${pci}`) ? null : 'the modem did not take the lock';
-		}
-		if (id == 'reconnect') {
-			ctx.forget('modem');
-			ctx.run('(ifup wan) >/dev/null 2>&1 &');
-			return null;
-		}
-		return 'no such setting';
-	}
+    id:'network',label:L('网络','Network'),
+    items:function() {
+        let slot = control_slot(), data = lock_call('lock_get',{slot}), caps = data.caps ?? {};
+        // Missing caches stay unknown; never manufacture an unlocked state.
+        let state = data.mode != null && !data.error;
+        let c = ctx.uci(), cells = data.cells ?? [];
+        let opts = [{value:'off',label:L('解除所有小区锁定','Unlock all cells')},
+                    {value:'auto',label:L('锁定当前服务小区','Lock serving cell')}];
+        for (let cell in cells) push(opts,{value:cell,label:cell});
+        let radio = lock_call('cells',{slot}).cell ?? {};
+        let candidates = [...(radio.neigh ?? [])];
+        for (let rat in ['lte','nr']) if (radio[rat])
+            push(candidates,{...radio[rat],rat,arfcn:radio[rat].arfcn ?? radio[rat].earfcn});
+        for (let cell in candidates) {
+            if (cell.arfcn == null || cell.pci == null || index(['lte','nr'],cell.rat)<0) continue;
+            let value=cell.rat+':'+cell.arfcn+','+cell.pci;
+            if (!length(filter(opts,o=>o.value==value))) push(opts,{value,label:uc(cell.rat)+' PCI '+cell.pci+' · '+cell.arfcn});
+        }
+        let items = [
+            {id:'control_slot',type:'choice',label:L('查看 / 控制卡槽','View / control SIM'),
+             value:c.get('e5-infoscreen','main','control_slot') ?? 'data',reload:true,
+             options:[{value:'data',label:L('跟随数据卡','Follow data SIM')},{value:'0',label:'SIM 1'},{value:'1',label:'SIM 2'}],
+             note:L('仅选择设置对象，不切换上网卡','Selects the control target without switching the data SIM')},
+            {id:'sim_card',type:'choice',label:L('上网 SIM 卡','Data SIM'),confirm:true,
+             value:c.get('e5-sim','main','card') ?? `${ctx.sim_card()}`,
+             options:[{value:'0',label:'SIM 1'},{value:'1',label:'SIM 2'}],
+             note:L('切换后重新连接网络','Reconnects after switching')},
+            {id:'apn',type:'choice',label:'APN',confirm:true,
+             value:c.get('network','wan','apn_auto') == '1' ? 'auto' : c.get('network','wan','apn'),options:apn_options(),
+             note:L('当前上网卡的 APN','APN for the current data SIM')},
+            {id:'lock_state',type:'info',label:L('锁定状态','Lock status'),value:'SIM '+(int(slot)+1),
+             note:data.error ?? L('与网页共用设置和开机回放','Shares settings and boot replay with the web dashboard')},
+            {id:'lock_refresh',type:'action',label:L('刷新锁定状态','Refresh lock state')},
+            {id:'net_mode',type:state ? 'choice':'info',label:L('网络模式','Network mode'),confirm:true,slot,
+             value:data.mode?.label ?? '--',options:map([['auto',L('自动','Auto')],['5g4g','5G/4G'],['4g',L('仅 4G','4G only')],['sa','5G SA'],['nsa','5G NSA']],m=>({value:m[0],label:m[1]}))},
+            {id:'nr_mode',type:state?'choice':'info',label:L('5G 组网','5G access'),confirm:true,slot,
+             value:state?(data.mode.gran=='1'?'sa':'nsa'):'--',options:[{value:'sa',label:'SA + NSA'},{value:'nsa',label:L('仅 NSA','NSA only')}]},
+            {id:'endc',type:state ? 'toggle':'info',label:'EN-DC',confirm:true,slot,value:state ? data.endc == '1' : '--'},
+            {id:'auto_apply',type:'toggle',label:L('开机自动应用','Apply on boot'),slot,value:!!data.auto_apply,
+             note:L('AT 就绪、首次拨号前应用，与网页共用一份设置','Apply after AT is ready, before initial dialing; shared with the web')},
+            {id:'lte_bands',type:state ? 'multi':'info',label:L('LTE 频段锁定','LTE band lock'),confirm:true,slot,
+             value:state ? band_list(data.lte?.locked) : null,options:map(band_list(caps.lte),b=>({value:b,label:'B'+b})),
+             note:L('都不选 = 不锁定','None selected = unlocked')},
+            {id:'nr_bands',type:state ? 'multi':'info',label:L('NR 频段锁定','NR band lock'),confirm:true,slot,
+             value:state ? band_list(data.nr?.locked) : null,options:map(band_list(caps.nr),b=>({value:b,label:'n'+b})),
+             note:length(band_list(caps.nr)) ? L('都不选 = 不锁定','None selected = unlocked') : L('未获取到 NR 能力，请刷新；仍可解除锁定','NR capabilities unavailable; refresh or clear the lock')},
+            {id:'bands_default',type:'action',label:L('恢复默认频段','Default bands'),confirm:true,slot},
+            {id:'cell_lock',type:state ? 'choice':'info',label:L('锁定小区','Cell lock'),confirm:true,slot,
+             value:state ? (cells[0] ?? 'off') : '--',options:opts,
+             note:length(cells) ? join(' · ',cells) : L('候选与网页共用；尚未加载时可刷新','Candidates are shared with the web; refresh if still loading')},
+            {id:'reconnect',type:'action',label:L('重新连接网络','Reconnect'),confirm:true}
+        ];
+        return items;
+    },
+    set:function(id,value,slot) {
+        if (id == 'control_slot') {
+            if (index(['data','0','1'],value)<0) return 'Invalid SIM slot';
+            let c=ctx.uci();c.set('e5-infoscreen','main','control_slot',value);
+            return c.commit('e5-infoscreen') ? null : 'Cannot save SIM selection';
+        }
+        if (id == 'sim_card') {
+            if (value != '0' && value != '1') return 'unknown card';
+            ctx.forget('modem');
+            return ctx.run(`(/usr/sbin/e5-sim ${value}) >/dev/null 2>&1 &`) == 0 ? null : 'Cannot start SIM switch';
+        }
+        if (id == 'apn') {
+            if (!length(filter(apn_options(),o=>o.value==value))) return 'unknown APN';
+            let c=ctx.uci();
+            if (value != 'auto') c.set('network','wan','apn',value);
+            c.set('network','wan','apn_auto',value == 'auto' ? '1':'0');
+            if (!c.commit('network')) return 'Cannot save APN';
+            ctx.run(value == 'auto' ? '(/usr/libexec/e5-apn-auto) >/dev/null 2>&1 &' : '(ifup wan) >/dev/null 2>&1 &');
+            return null;
+        }
+        if (id == 'reconnect') {ctx.forget('modem');ctx.run('(ifup wan) >/dev/null 2>&1 &');return null;}
+        slot ??= control_slot();
+        if (slot != '0' && slot != '1') return 'Invalid SIM slot';
+        if (id == 'lock_refresh') {
+            let r=lock_call('lock_get',{slot,fresh:'1'});return r.error ?? null;
+        }
+        let kind, val;
+        if (id == 'net_mode' && index(['auto','4g','sa','nsa','5g4g'],value)>=0) {kind='mode';val=value;}
+        else if (id == 'nr_mode' && index(['sa','nsa'],value)>=0) {kind='gran';val=value;}
+        else if (index(['endc','auto_apply'],id)>=0 && type(value)=='bool') {kind=id;val=value?'on':'off';}
+        else if (id == 'lte_bands' || id == 'nr_bands') {
+            if (type(value)!='array' || length(filter(value,b=>type(b)!='int' || b<1 || b>256))) return 'Invalid band list';
+            kind=id=='lte_bands'?'lte':'nr';val=join(',',value);
+        } else if (id == 'bands_default') {kind='bands_default';val='';}
+        else if (id == 'cell_lock' && type(value)=='string') {kind='cell';val=value;}
+        else return 'Invalid network setting';
+        let r=lock_call('lock_set',{slot,kind,val});
+        return r.ok && r.started && r.id ? {job:r.id,slot} : r.error ?? 'Cannot start network operation';
+    }
 };
 
 /* ---------- charging, notifications, screen: uci-backed ---------- */
@@ -312,9 +183,13 @@ function uci_set(def, value) {
 		v = `${value}`;
 	}
 	let c = ctx.uci();
-	c.set(u[0], u[1], u[2], v);
-	c.commit(u[0]);
-	if (def.apply) ctx.run(def.apply);
+	if (u[0] == 'e5-charge' && index(['start','stop'],u[2]) >= 0) {
+		let start=u[2]=='start' ? +v : +(c.get('e5-charge','main','start') ?? 70);
+		let stop=u[2]=='stop' ? +v : +(c.get('e5-charge','main','stop') ?? 80);
+		if (start>=stop) return 'Charge start must be lower than stop';
+	}
+	if (!c.set(u[0], u[1], u[2], v) || !c.commit(u[0])) return 'Cannot save setting';
+	if (def.apply && ctx.run(def.apply) != 0) return 'Setting saved but apply failed';
 	return null;
 }
 
@@ -469,6 +344,7 @@ function default_boot() {
 	return ctx.read_trim('/etc/e5linux/default-boot') == 'linux' ? 'linux' : 'android';
 }
 function trial_image() {
+	if (ctx.read_trim('/etc/e5/t551m-persistent') != null && ctx.read_trim('/etc/e5/device-profile') == 't551m') return false;
 	return match(ctx.read_trim('/proc/cmdline') ?? '', /(^| )e5\.openwrt=/) != null;
 }
 
@@ -480,12 +356,30 @@ function update_state() {
 	let note;
 	if (s.busy) note = L('正在更新，完成后屏幕会重新载入', 'Updating; the screen reloads when it is done');
 	else if (s.checking) note = L('正在检查更新', 'Checking for updates');
+	else if (s.incompatible) note = L('上游版本尚未包含设备适配，请使用适配固件或更新包','Upstream release lacks device integration; use a compatible firmware or update package');
 	else if (s.available) note = L(`有新版本 ${s.latest.version}`, `${s.latest.version} is out`);
 	else if (s.error) note = L(`检查失败：${s.error}`, `The check failed: ${s.error}`);
 	else if (s.checked_at) note = L('已是最新版本', 'Up to date');
 	else note = L('从 GitHub 获取最新的信息屏版本', 'Asks GitHub for the latest info screen');
 	return { ...s, cur: s.current, note, newer: s.available && !s.busy && !s.checking };
 }
+
+const traffic_records = {
+	id:'traffic_clear',parent:'system',label:L('清空流量记录','Clear traffic records'),
+	items:function() {
+		return map(['0','1','all'],slot=>({
+			id:'clear_' + slot,type:'action',confirm:true,reload:true,
+			label:slot == 'all' ? L('清空两张卡记录','Clear both SIMs') : L(`清空 SIM ${int(slot)+1} 记录`,`Clear SIM ${int(slot)+1}`),
+			note:L('今日、本月、历史和周期校准清零；保留套餐设置。不可撤销。','Clear daily, monthly, historical usage and cycle adjustments; keep plan settings. Cannot be undone.')
+		}));
+	},
+	set:function(id) {
+		let slot = id == 'clear_0' ? '0' : id == 'clear_1' ? '1' : id == 'clear_all' ? 'all' : null;
+		if (slot == null) return 'invalid_slot';
+		let r = ctx.ubus('unisoc.traffic','clear',{slot,confirm:true});
+		return r?.ok ? null : r?.error ?? 'traffic_unavailable';
+	}
+};
 
 const system_cat = {
 	id: 'system', label: L('系统', 'System'),
@@ -510,8 +404,8 @@ const system_cat = {
 			u.backup && !u.busy ? { id: 'update_rollback', type: 'action', confirm: true,
 			  label: L('回退信息屏', 'Roll the screen back'),
 			  note: L('回到上一次更新之前的版本', 'Back to the version before the last update') } : null,
-			{ id: 'traffic_clear', type: 'action', label: L('清空流量记录', 'Clear traffic records'), confirm: true,
-			  note: L('今日、本月和每日的统计都从零开始', 'Today, this month and the days start from zero') },
+			{ id: 'traffic_clear', type: 'category', category:'traffic_clear', label: L('清空流量记录', 'Clear traffic records'),
+			  note: L('选择 SIM 卡，与网页共用流量记录','Choose a SIM; history is shared with the web dashboard') },
 			{ id: 'next_boot', type: 'info', label: L('下次重启进入', 'Next reboot boots'),
 			  value: next ? next.label : '--' },
 			trial_image()
@@ -526,8 +420,8 @@ const system_cat = {
 			  note: next ? L(`重启后进入 ${next.label.zh}`, `Boots ${next.label.en}`) : null },
 			{ id: 'poweroff', type: 'action', label: L('关机', 'Power off'), confirm: true,
 			  note: L('插着 USB 时可能会进入充电模式', 'With USB plugged in it may start in charging mode') },
-			{ id: 'android_once', type: 'action', label: L('下次启动 Android', 'Boot Android once'), confirm: true,
-			  note: L('重启进 Android 一次', 'One boot of Android') }
+			{ id: 'android_once', type: 'action', label: L('切换到 Android', 'Switch to Android'), confirm: true,
+			  note: L('设为默认启动系统并重启','Set as default and reboot') }
 		], (i) => i != null);
 	},
 	set: function(id, value) {
@@ -552,9 +446,7 @@ const system_cat = {
 			return null;
 		}
 		if (id == 'traffic_clear') {
-			// a new, empty database: vnstat adds the configured interfaces again
-			ctx.run('/etc/init.d/vnstat stop >/dev/null 2>&1; rm -f /etc/vnstat/vnstat.db; /etc/init.d/vnstat start >/dev/null 2>&1');
-			return null;
+			return 'Choose a SIM in Clear traffic records';
 		}
 		if (id == 'default_boot') {
 			if (value != 'linux' && value != 'android') return 'linux or android';
@@ -570,7 +462,10 @@ const system_cat = {
 		if (id == 'reboot') { ctx.run('(sleep 2; reboot) >/dev/null 2>&1 &'); return null; }
 		if (id == 'poweroff') { ctx.run('(sleep 2; poweroff) >/dev/null 2>&1 &'); return null; }
 		// (booting Debian is e5-os on the command line: e5-os debian --once)
-		if (id == 'android_once') { ctx.run('(e5-next-boot android && sleep 2 && reboot) >/dev/null 2>&1 &'); return null; }
+		if (id == 'android_once') {
+            if (ctx.run('e5-next-boot android >/dev/null 2>&1') != 0) return 'Cannot select Android';
+            ctx.run('(sleep 2; reboot) >/dev/null 2>&1 &');return null;
+        }
 		return 'no such setting';
 	}
 };
@@ -650,7 +545,7 @@ const usb_cat = {
 			let scope = id == 'usb_net_scope' ? value : s.net_scope;
 			if (index(['ncm','ecm','rndis'], mode) < 0 || index(['once','permanent'], scope) < 0 ||
 			    (id == 'usb_net_auto' && type(value) != 'bool')) return 'Invalid USB setting';
-			args = `set-net ${mode} ${scope} ${id == 'usb_net_auto' && !value ? '0' : '1'}`;
+			args = `set-net ${mode} ${scope} ${(id == 'usb_net_auto' ? value : s.net_auto) ? '1' : '0'}`;
 		} else return 'Invalid USB setting';
 		let result = ctx.sh_json('/usr/libexec/unisoc-modem/device-usb ' + args);
 		return result?.ok ? null : result?.error ?? 'USB operation failed';
@@ -687,6 +582,6 @@ return [ network, { id: 'at', label: L('AT 指令', 'AT commands'), view: 'at' }
          { id: 'appmgr', label: L('应用管理', 'Apps'), view: 'apps' },
          ...(ctx.run('command -v bluetoothctl >/dev/null 2>&1') == 0
              ? [ { id: 'bluetooth', label: L('蓝牙', 'Bluetooth'), view: 'bluetooth' } ] : []),
-         charge, notify, ...(has_sound ? [ sound ] : []), screen, usb_cat, system_cat, about ];
+         charge, notify, ...(has_sound ? [ sound ] : []), screen, usb_cat, system_cat, traffic_records, about ];
 
 };

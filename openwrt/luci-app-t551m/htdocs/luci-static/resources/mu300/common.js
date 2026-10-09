@@ -56,6 +56,9 @@ var callRates = scopedRpc('rates', [], true);
 var callCells = scopedRpc('cells', [], true);
 var callSignal = scopedRpc('signal', [], true);
 var callSysinfo = rpc.declare({ object: 'mu300dash', method: 'sysinfo', expect: { '': {} } });
+var callSimGet = rpc.declare({object:'mu300dash',method:'sim_get',expect:{'':{}},nobatch:true});
+var callSimSet = rpc.declare({object:'mu300dash',method:'sim_set',params:['slot','current','confirm'],expect:{'':{}},nobatch:true});
+var callSimStatus = rpc.declare({object:'mu300dash',method:'sim_status',params:['id'],expect:{'':{}},nobatch:true});
 var callAct = scopedRpc('act',['op','arg']);
 var callAt = scopedRpc('at',['cmd']);
 var callAtHist = scopedRpc('at_history');
@@ -96,6 +99,7 @@ var callForwardSet = rpc.declare({ object: 'mu300dash', method: 'forward_set', p
 var callForwardTest = rpc.declare({ object: 'mu300dash', method: 'forward_test', expect: { '': {} } });
 var callTrafficGet = scopedRpc('traffic_get');
 var callTrafficSet = scopedRpc('traffic_set',['payload']);
+var callTrafficClear = rpc.declare({object:'mu300dash',method:'traffic_clear',params:['slot','confirm'],expect:{'':{}}});
 var callUsbGet = rpc.declare({ object: 'mu300dash', method: 'usb_get', expect: { '': {} } });
 var callUsbSet = rpc.declare({ object: 'mu300dash', method: 'usb_set', params: [ 'kind', 'value', 'scope', 'auto' ], expect: { '': {} } });
 var callUsbNetList = rpc.declare({ object: 'mu300dash', method: 'usb_net_list', expect: { '': {} } });
@@ -104,7 +108,568 @@ var callUsbNetAdd = rpc.declare({ object: 'mu300dash', method: 'usb_net_add', pa
 /* Dashboard translations deliberately ship as a tiny runtime catalog: a
  * standalone package works in any OpenWrt buildroot without po2lmo or extra
  * language packages. Chinese remains the source/fallback language. */
+/* BEGIN SHARED PLATFORM MESSAGES: stage.py also embeds these in the screen. */
+const PLATFORM_ERRORS = [
+  [
+    "CPU unavailable",
+    "CPU 状态暂不可用",
+    "CPU durumu kullanılamıyor"
+  ],
+  [
+    "CPU control unavailable",
+    "CPU 控制服务暂不可用",
+    "CPU denetim hizmeti kullanılamıyor"
+  ],
+  [
+    "Failed",
+    "操作失败",
+    "İşlem başarısız"
+  ],
+  [
+    "Invalid voltage profile",
+    "电压配置无效",
+    "Geçersiz voltaj profili"
+  ],
+  [
+    "Expected three voltage domains",
+    "电压配置必须包含三个供电域",
+    "Voltaj profili üç güç alanını içermelidir"
+  ],
+  [
+    "Voltage offset must be -50000..25000 uV in 3125 uV steps",
+    "电压偏移须在 -50 至 +25 mV 内，步进为 3.125 mV",
+    "Voltaj ofseti -50 ile +25 mV arasında, 3,125 mV adımlarla olmalıdır"
+  ],
+  [
+    "Unclean shutdown with custom voltage; restored factory voltage",
+    "自定义电压下出现异常关机，已恢复原厂电压",
+    "Özel voltajla beklenmeyen kapanma oldu; fabrika voltajı geri yüklendi"
+  ],
+  [
+    "Secure firmware voltage ABI is not verified",
+    "固件电压接口尚未验证",
+    "Güvenli ürün yazılımının voltaj arayüzü doğrulanmadı"
+  ],
+  [
+    "CPU driver failed to initialize; reboot to restore default voltage",
+    "CPU 驱动初始化失败，请重启恢复原厂电压",
+    "CPU sürücüsü başlatılamadı; fabrika voltajını geri yüklemek için yeniden başlatın"
+  ],
+  [
+    "Kernel did not accept ",
+    "内核未接受设置：",
+    "Çekirdek ayarı kabul etmedi: "
+  ],
+  [
+    "Expected an integer",
+    "请输入整数",
+    "Bir tam sayı girin"
+  ],
+  [
+    "Unknown CPU setting",
+    "未知的 CPU 设置",
+    "Bilinmeyen CPU ayarı"
+  ],
+  [
+    "Invalid persistence flag",
+    "开机应用选项无效",
+    "Geçersiz açılışta uygulama seçeneği"
+  ],
+  [
+    "Invalid CPU policy",
+    "CPU 调频域配置无效",
+    "Geçersiz CPU frekans alanı ayarı"
+  ],
+  [
+    "CPU policy missing or repeated",
+    "CPU 调频域缺失或重复",
+    "CPU frekans alanı eksik veya yinelenmiş"
+  ],
+  [
+    "Boot voltage adjustment unavailable for this kernel/firmware",
+    "当前内核或固件不支持开机电压调整",
+    "Bu çekirdek veya ürün yazılımında açılış voltajı ayarlanamıyor"
+  ],
+  [
+    "CPU topology changed; reset saved settings",
+    "CPU 拓扑已变化，请恢复默认设置",
+    "CPU topolojisi değişti; kayıtlı ayarları sıfırlayın"
+  ],
+  [
+    "Choose supported frequencies with minimum <= maximum",
+    "请选择支持的频率，最低频率不能高于最高频率",
+    "Desteklenen frekansları seçin; en düşük değer en yüksek değeri aşamaz"
+  ],
+  [
+    "Governor unavailable",
+    "所选调速器不可用",
+    "Seçilen frekans yöneticisi kullanılamıyor"
+  ],
+  [
+    "Invalid thermal setting",
+    "温控设置无效",
+    "Geçersiz sıcaklık ayarı"
+  ],
+  [
+    "CPU thermal zone unavailable or ambiguous",
+    "CPU 温区不可用或无法唯一确定",
+    "CPU sıcaklık bölgesi kullanılamıyor veya belirsiz"
+  ],
+  [
+    "Only writable passive CPU trips may be changed",
+    "只能修改可写的 CPU 被动温控阈值",
+    "Yalnızca yazılabilir pasif CPU sıcaklık eşikleri değiştirilebilir"
+  ],
+  [
+    "Temperature must use 1 C steps within the protected range",
+    "温度须在允许范围内按 1 °C 步进设置",
+    "Sıcaklık korunan aralıkta 1 °C adımlarla ayarlanmalıdır"
+  ],
+  [
+    "Passive trip temperatures must increase by at least 1 C",
+    "被动温控阈值须逐级至少升高 1 °C",
+    "Pasif sıcaklık eşikleri en az 1 °C artan sırada olmalıdır"
+  ],
+  [
+    "rollback failed: ",
+    "回退失败：",
+    "geri alma başarısız: "
+  ],
+  [
+    "Invalid frequency",
+    "频率无效",
+    "Geçersiz frekans"
+  ],
+  [
+    "Thermal zone unavailable",
+    "温区不可用",
+    "Sıcaklık bölgesi kullanılamıyor"
+  ],
+  [
+    "Unsupported CPU setting",
+    "不支持的 CPU 设置",
+    "Desteklenmeyen CPU ayarı"
+  ],
+  [
+    "Unknown operation",
+    "未知操作",
+    "Bilinmeyen işlem"
+  ],
+  [
+    "Cannot read the current data SIM",
+    "无法读取当前上网卡",
+    "Etkin internet SIM kartı okunamıyor"
+  ],
+  [
+    "Invalid SIM switch job",
+    "切卡任务无效",
+    "Geçersiz SIM değiştirme görevi"
+  ],
+  [
+    "SIM switch interrupted; check the current data SIM",
+    "切卡任务已中断，请检查当前上网卡",
+    "SIM değiştirme kesildi; etkin internet SIM kartını kontrol edin"
+  ],
+  [
+    "Data SIM changed; refresh before switching",
+    "上网卡已变化，请刷新后再切换",
+    "İnternet SIM kartı değişti; geçişten önce yenileyin"
+  ],
+  [
+    "System SIM switch failed",
+    "系统切卡失败",
+    "Sistemin SIM değiştirme işlemi başarısız"
+  ],
+  [
+    "Data SIM did not match the saved selection; refresh actual state",
+    "实际卡槽与保存值不一致，请刷新检查",
+    "Etkin SIM kayıtlı seçimle eşleşmiyor; mevcut durumu yenileyin"
+  ],
+  [
+    "Invalid SIM switch request",
+    "切卡请求无效",
+    "Geçersiz SIM değiştirme isteği"
+  ],
+  [
+    "Select a valid SIM slot",
+    "请选择有效的 SIM 卡槽",
+    "Geçerli bir SIM yuvası seçin"
+  ],
+  [
+    "Confirm the data SIM switch",
+    "请确认切换上网卡",
+    "İnternet SIM kartı değişikliğini onaylayın"
+  ],
+  [
+    "A data SIM switch is already running",
+    "正在切换上网卡，请稍后再试",
+    "İnternet SIM kartı zaten değiştiriliyor; lütfen bekleyin"
+  ],
+  [
+    "Invalid data SIM operation",
+    "上网卡操作无效",
+    "Geçersiz internet SIM işlemi"
+  ],
+  [
+    "Modem is busy; try again shortly",
+    "基带正忙，请稍后重试",
+    "Modem meşgul; biraz sonra yeniden deneyin"
+  ],
+  [
+    "Network service unavailable",
+    "网络控制服务暂不可用",
+    "Ağ denetim hizmeti kullanılamıyor"
+  ],
+  [
+    "Invalid SIM slot",
+    "SIM 卡槽无效",
+    "Geçersiz SIM yuvası"
+  ],
+  [
+    "Cannot save SIM selection",
+    "无法保存卡槽选择",
+    "SIM seçimi kaydedilemiyor"
+  ],
+  [
+    "Cannot start SIM switch",
+    "无法启动切卡任务",
+    "SIM değiştirme başlatılamıyor"
+  ],
+  [
+    "Cannot save APN",
+    "无法保存 APN",
+    "APN kaydedilemiyor"
+  ],
+  [
+    "Invalid band list",
+    "频段列表无效",
+    "Geçersiz bant listesi"
+  ],
+  [
+    "Invalid network setting",
+    "网络设置无效",
+    "Geçersiz ağ ayarı"
+  ],
+  [
+    "Cannot start network operation",
+    "无法启动网络设置任务",
+    "Ağ ayarı görevi başlatılamıyor"
+  ],
+  [
+    "Charge start must be lower than stop",
+    "充电启动阈值必须低于停止阈值",
+    "Şarj başlatma eşiği durdurma eşiğinden düşük olmalıdır"
+  ],
+  [
+    "Cannot save setting",
+    "无法保存设置",
+    "Ayar kaydedilemiyor"
+  ],
+  [
+    "Setting saved but apply failed",
+    "设置已保存，但应用失败",
+    "Ayar kaydedildi ancak uygulanamadı"
+  ],
+  [
+    "Cannot select Android",
+    "无法选择 Android 启动",
+    "Android açılışı seçilemiyor"
+  ],
+  [
+    "Current network mode cannot be combined with this NR setting",
+    "当前网络模式不支持该 5G 组网选项",
+    "Geçerli ağ modu bu NR ayarıyla birleştirilemiyor"
+  ],
+  [
+    "Default LTE bands did not survive reconnect",
+    "重连后 LTE 默认频段未保持，请刷新检查",
+    "Yeniden bağlantıdan sonra varsayılan LTE bantları korunmadı; yenileyin"
+  ],
+  [
+    "AT service unavailable",
+    "AT 服务暂不可用",
+    "AT hizmeti kullanılamıyor"
+  ],
+  [
+    "Invalid network job",
+    "网络设置任务无效",
+    "Geçersiz ağ ayarı görevi"
+  ],
+  [
+    "Invalid hotspot state",
+    "热点状态无效",
+    "Geçersiz erişim noktası durumu"
+  ],
+  [
+    "No hotspot configured",
+    "尚未配置热点",
+    "Erişim noktası yapılandırılmamış"
+  ],
+  [
+    "Cannot save hotspot setting",
+    "无法保存热点设置",
+    "Erişim noktası ayarı kaydedilemiyor"
+  ],
+  [
+    "An update task is already running",
+    "已有更新任务正在执行",
+    "Bir güncelleme görevi zaten çalışıyor"
+  ],
+  [
+    "Unknown update action",
+    "未知更新操作",
+    "Bilinmeyen güncelleme işlemi"
+  ],
+  [
+    "The release has changed; check again",
+    "更新版本已变化，请重新检查",
+    "Sürüm değişti; yeniden kontrol edin"
+  ],
+  [
+    "No update backup",
+    "没有可回退的更新备份",
+    "Geri dönülecek güncelleme yedeği yok"
+  ],
+  [
+    "Cannot start the update task",
+    "无法启动更新任务",
+    "Güncelleme görevi başlatılamıyor"
+  ],
+  [
+    "This package does not include the device UI integration; use a compatible firmware/update package",
+    "此更新包未包含设备界面适配，请使用兼容的固件或更新包",
+    "Bu paket cihaz arayüzü uyarlamasını içermiyor; uyumlu ürün yazılımı veya güncelleme paketi kullanın"
+  ],
+  [
+    "This app requires its device-integrated update; the generic package would replace platform features",
+    "此应用需要设备适配版本，通用包会覆盖平台功能",
+    "Bu uygulama cihaza uyarlanmış güncelleme gerektirir; genel paket platform özelliklerinin üzerine yazar"
+  ],
+  [
+    "Confirmation is required",
+    "需要确认此操作",
+    "Bu işlem için onay gerekiyor"
+  ],
+  [
+    "Could not save traffic records",
+    "流量记录保存失败",
+    "Veri kullanım kayıtları kaydedilemedi"
+  ],
+  [
+    "Traffic service unavailable",
+    "流量统计服务暂不可用",
+    "Veri kullanım hizmeti kullanılamıyor"
+  ],
+  [
+    "System clock is not synchronized",
+    "系统时间尚未同步",
+    "Sistem saati eşitlenmedi"
+  ],
+  [
+    "Invalid data SIM",
+    "上网卡无效",
+    "Geçersiz internet SIM kartı"
+  ],
+  [
+    "AT request timed out",
+    "AT 请求超时",
+    "AT isteği zaman aşımına uğradı"
+  ],
+  [
+    "expected response field missing",
+    "响应缺少预期字段",
+    "Yanıtta beklenen alan eksik"
+  ],
+  [
+    "invalid numeric response",
+    "响应数值无效",
+    "Yanıttaki sayısal değer geçersiz"
+  ],
+  [
+    "Unknown active SIM",
+    "无法确定当前 SIM 卡",
+    "Etkin SIM kartı belirlenemiyor"
+  ],
+  [
+    "Incomplete network mode response",
+    "网络模式响应不完整",
+    "Ağ modu yanıtı eksik"
+  ],
+  [
+    "Incomplete band mask response",
+    "频段掩码响应不完整",
+    "Bant maskesi yanıtı eksik"
+  ],
+  [
+    "Incomplete cell lock response",
+    "小区锁定响应不完整",
+    "Hücre kilidi yanıtı eksik"
+  ],
+  [
+    "Active SIM changed while reading; refresh again",
+    "读取时上网卡已变化，请重新刷新",
+    "Okuma sırasında etkin SIM değişti; yeniden yenileyin"
+  ],
+  [
+    "Requested NR band has no supported SPLBAND encoding",
+    "所选 NR 频段没有受支持的 SPLBAND 编码",
+    "Seçilen NR bandı için desteklenen SPLBAND kodlaması yok"
+  ],
+  [
+    "Unsupported band requested",
+    "请求的频段不受支持",
+    "İstenen bant desteklenmiyor"
+  ],
+  [
+    "Unacknowledged setting failed readback: ",
+    "设置未确认且回读失败：",
+    "Onaylanmayan ayar geri okunamadı: "
+  ],
+  [
+    "Modem readback does not match requested setting",
+    "基带回读与请求设置不一致",
+    "Modemden okunan değer istenen ayarla eşleşmiyor"
+  ],
+  [
+    "Active SIM changed during operation",
+    "操作期间上网卡已变化",
+    "İşlem sırasında etkin SIM değişti"
+  ],
+  [
+    "Setting accepted, but reconnect failed: ",
+    "设置已接受，但重连失败：",
+    "Ayar kabul edildi ancak yeniden bağlantı başarısız: "
+  ],
+  [
+    "Setting did not survive reconnect",
+    "重连后设置未保持",
+    "Ayar yeniden bağlantıdan sonra korunmadı"
+  ],
+  [
+    "Another network operation is still running",
+    "另一个网络操作仍在执行",
+    "Başka bir ağ işlemi hâlâ çalışıyor"
+  ],
+  [
+    "Invalid job ID",
+    "任务编号无效",
+    "Geçersiz görev kimliği"
+  ],
+  [
+    "Saved settings do not match modem readback: ",
+    "已保存设置与基带回读不一致：",
+    "Kayıtlı ayarlar modemden okunan değerlerle eşleşmiyor: "
+  ],
+  [
+    "Boot replay is only allowed before initial radio activation",
+    "开机回放只能在首次射频激活前执行",
+    "Açılış ayarları yalnızca ilk radyo etkinleştirmesinden önce uygulanabilir"
+  ],
+  [
+    "Unknown lock operation",
+    "未知锁定操作",
+    "Bilinmeyen kilitleme işlemi"
+  ],
+  [
+    "unknown card",
+    "未知 SIM 卡",
+    "Bilinmeyen SIM kartı"
+  ],
+  [
+    "unknown APN",
+    "未知 APN",
+    "Bilinmeyen APN"
+  ],
+  [
+    "Choose a SIM in Clear traffic records",
+    "请在“清空流量记录”中选择卡槽",
+    "Veri geçmişini temizle bölümünde bir SIM seçin"
+  ],
+  [
+    "Invalid USB setting",
+    "USB 设置无效",
+    "Geçersiz USB ayarı"
+  ],
+  [
+    "USB operation failed",
+    "USB 操作失败",
+    "USB işlemi başarısız"
+  ],
+  [
+    "no such setting",
+    "没有此设置项",
+    "Böyle bir ayar yok"
+  ]
+];
+const PLATFORM_CODES = {
+    invalid_slot:'Select a valid SIM slot', confirmation_required:'Confirmation is required',
+    storage_failed:'Could not save traffic records', traffic_unavailable:'Traffic service unavailable',
+    clock_unsynced:'System clock is not synchronized'
+};
+const PLATFORM_PATTERN = new RegExp(PLATFORM_ERRORS.map(row=>row[0]).sort((a,b)=>b.length-a.length).map(key=>key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'g');
+function errorText(value, language) {
+    let text = String(value ?? '');
+    text = PLATFORM_CODES[text] || text;
+    const column = language === 'zh' ? 1 : language === 'tr' ? 2 : 0;
+    return text.replace(PLATFORM_PATTERN, key=>PLATFORM_ERRORS.find(row=>row[0]===key)[column]);
+}
+/* END SHARED PLATFORM MESSAGES */
+
 var DASH_I18N = {
+	"当前有效范围：": ["Effective range: ", "Etkin aralık: "],
+	"原厂电压（0 mV）": ["Factory voltage (0 mV)", "Fabrika voltajı (0 mV)"],
+	"当前偏移：": ["Active offset: ", "Etkin ofset: "],
+	" · 实测 ": [" · Measured ", " · Ölçülen "],
+	"CPU 设置": ["CPU settings", "CPU ayarları"],
+	"频率 · 电压 · 温控": ["Frequency · Voltage · Thermal", "Frekans · Voltaj · Sıcaklık"],
+	"CPU 调频驱动尚未就绪": ["The CPU frequency driver is not ready", "CPU frekans sürücüsü henüz hazır değil"],
+	"调速器": ["Governor", "Frekans yöneticisi"],
+	"最低频率": ["Minimum frequency", "En düşük frekans"],
+	"最高频率": ["Maximum frequency", "En yüksek frekans"],
+	"schedutil 按负载调频；powersave 请求最低频率。上下限相同可固定频率，温控仍可降频。": ["schedutil follows load; powersave requests the minimum. Equal limits fix the requested frequency; thermal limits still apply.", "schedutil yüke göre frekansı ayarlar; powersave en düşük frekansı ister. Eşit sınırlar istenen frekansı sabitler; sıcaklık koruması frekansı yine düşürebilir."],
+	"下次启动电压偏移": ["Voltage offset on next boot", "Sonraki açılışta voltaj ofseti"],
+	"保存后重启生效，CPU 与 SRAM 由固件同步调整。降压可能不稳定，建议每次只调一档；异常断电或崩溃后，下次启动自动恢复原厂电压。": ["Saved separately and applied after reboot. Firmware adjusts CPU and SRAM together. Undervolting can be unstable: change one step at a time. An unclean shutdown restores factory voltage on the next boot.", "Ayrı kaydedilir ve yeniden başlatmada uygulanır. Ürün yazılımı CPU ve SRAM voltajını birlikte ayarlar. Düşük voltaj kararsızlığa neden olabilir; her seferinde tek kademe değiştirin. Beklenmeyen kapanma veya çökme sonrasında fabrika voltajı geri yüklenir."],
+	"查看频率与电压表": ["Frequency and voltage table", "Frekans ve voltaj tablosu"],
+	"此表为当前生效的固件电压表。偏移作用于整个供电域，不能逐频点单独改压，也不新增超频档位。": ["The active firmware voltage table. Offsets apply to the whole domain; individual frequency edits and extra overclock states are unavailable.", "Bu, ürün yazılımının etkin voltaj tablosudur. Ofset tüm güç alanına uygulanır; her frekans için ayrı voltaj ayarlanamaz ve yeni hız aşırtma kademeleri eklenmez."],
+	"温控": ["Thermal", "Sıcaklık denetimi"],
+	"被动温控起点": ["Passive monitoring threshold", "Pasif izleme eşiği"],
+	"降频触发温度": ["CPU throttling threshold", "CPU frekans düşürme eşiği"],
+	"过热关机保护": ["Critical shutdown", "Aşırı ısınmada kapatma koruması"],
+	"被动温控起点用于更频繁地检测温度，达到降频触发温度才限制 CPU。阈值按顺序递增，原厂回差与过热关机保护保持生效。": ["Passive monitoring increases temperature checks; CPU throttling starts at the bound trip. Trips must increase in order. Factory hysteresis and critical shutdown remain active.", "Pasif izleme eşiği sıcaklığı daha sık kontrol ettirir; CPU frekansı bağlı eşikte sınırlanır. Eşikler artan sırada olmalıdır. Fabrika histerezisi ve aşırı ısınmada kapatma koruması etkin kalır."],
+	"开机应用调频与温控": ["Apply frequency and thermal settings at boot", "Frekans ve sıcaklık ayarlarını açılışta uygula"],
+	"应用设置": ["Apply settings", "Ayarları uygula"],
+	"恢复默认": ["Restore defaults", "Varsayılanları geri yükle"],
+	"调频与温控可即时应用；电压设置独立保存，重启后生效。恢复默认后，电压也需要重启才能还原。关机充电始终使用原厂电压。": ["Frequency and thermal settings apply immediately; voltage settings are saved separately and need a reboot, including when restoring defaults. Charger-only boot uses factory voltage.", "Frekans ve sıcaklık ayarları hemen uygulanır. Voltaj ayrı kaydedilir ve varsayılanlara dönüş dahil yeniden başlatma gerektirir. Kapalıyken şarj modu her zaman fabrika voltajını kullanır."],
+	"上次开机配置未应用：": ["The boot profile was rejected: ", "Açılış profili uygulanamadı: "],
+	"电压配置已回退：": ["Voltage profile reverted: ", "Voltaj profili geri alındı: "],
+	"电压配置已保存，重启后生效": ["Voltage settings saved; reboot to apply", "Voltaj ayarları kaydedildi; uygulamak için yeniden başlatın"],
+	"最低频率不能大于最高频率": ["Minimum frequency must not exceed maximum", "En düşük frekans en yüksek frekansı aşamaz"],
+	"请填写有效的温度阈值": ["Enter a valid temperature threshold", "Geçerli bir sıcaklık eşiği girin"],
+	"调频与温控已应用；电压配置已保存，重启后生效": ["Frequency and thermal settings applied; reboot to apply saved voltage settings", "Frekans ve sıcaklık ayarları uygulandı; kaydedilen voltaj için yeniden başlatın"],
+	"已应用，并读取确认当前设置": ["Applied and confirmed by kernel readback", "Uygulandı ve çekirdekten okunarak doğrulandı"],
+	"设备适配更新源需声明 adaptation=e5-device-ui-v1，更新包也须包含对应 ADAPTATION 标记；未适配的上游包不能覆盖当前界面。": ["The device update feed must declare adaptation=e5-device-ui-v1 and the package must contain the matching ADAPTATION marker. Generic upstream packages cannot replace this interface.", "Cihaz güncelleme kaynağı adaptation=e5-device-ui-v1 bildirmeli, paket de eşleşen ADAPTATION işaretini içermelidir. Uyarlanmamış üst kaynak paketleri bu arayüzün üzerine kurulamaz."],
+	"更新 JSON 地址": ["Update JSON URL", "Güncelleme JSON adresi"],
+	'上网 SIM 卡': ['Data SIM', 'İnternet SIM kartı'],
+	'当前上网卡': ['Current data SIM', 'Etkin internet SIM kartı'],
+	'切换上网卡': ['Switch data SIM', 'İnternet SIM kartını değiştir'],
+	'切换会重新连接蜂窝网络，并保存为开机使用的卡槽。': ['Switching reconnects cellular data and saves the SIM selection for boot.', 'Değiştirme mobil veriyi yeniden bağlar ve SIM seçimini sonraki açılış için kaydeder.'],
+	'正在切换上网卡…': ['Switching data SIM…', 'İnternet SIM kartı değiştiriliyor…'],
+	'上网卡已切换，正在刷新连接状态。': ['Data SIM switched; refreshing connection status.', 'İnternet SIM kartı değiştirildi; bağlantı durumu yenileniyor.'],
+	'切换等待超时，请刷新实际状态': ['Switch timed out; refresh the actual state', 'Değiştirme zaman aşımına uğradı; mevcut durumu yenileyin'],
+	'无法读取切换结果': ['Cannot read the switch result', 'Değiştirme sonucu okunamıyor'],
+	'SIM 卡管理': ['SIM management', 'SIM yönetimi'],
+	'开机使用': ['SIM at boot', 'Açılışta SIM'],
+	'选择承载移动数据的 SIM 卡；查看信号、锁定与 AT 卡槽仍在各自页面选择。': ['Choose the SIM that carries mobile data; signal, lock and AT views keep their own SIM selection.', 'Mobil veri SIM kartını seçin; sinyal, kilit ve AT sayfaları kendi SIM seçimini korur.'],
+	'提交失败': ['Submission failed', 'Gönderim başarısız'],
+	'与屏幕共用系统双卡短信池': ['Shared system inbox for both SIMs and the screen', 'Ekran ile ortak çift SIM mesaj kutusu'],
+	'清空当前卡记录': ['Clear this SIM history', 'Bu SIM geçmişini temizle'],
+	'清空流量记录': ['Clear traffic history', 'Veri geçmişini temizle'],
+	'清空': ['Clear', 'Temizle'],
+	'今日、本月、历史和周期校准将清零，套餐额度与计量设置保留。此操作无法撤销。': ['Daily, monthly and historical usage and cycle adjustments will be cleared. Plan settings are kept. This cannot be undone.', 'Günlük, aylık ve geçmiş kullanım ile dönem düzeltmeleri silinir. Paket ayarları korunur. Geri alınamaz.'],
+	'正在清空流量记录…': ['Clearing traffic history…', 'Veri geçmişi temizleniyor…'],
+	'流量记录已清空': ['Traffic history cleared', 'Veri geçmişi temizlendi'],
+	'请选择有效的 SIM 卡槽': ['Select a valid SIM slot', 'Geçerli bir SIM yuvası seçin'],
+	'需要确认清空': ['Confirm before clearing', 'Temizlemeyi onaylayın'],
 	'正在读取服务小区…': ['Loading serving cell…', 'Hizmet hücresi yükleniyor…'],
 	'正在读取锁定设置…': ['Loading lock settings…', 'Kilit ayarları yükleniyor…'],
 	'正在读取邻小区…': ['Loading neighboring cells…', 'Komşu hücreler yükleniyor…'],
@@ -611,6 +1176,7 @@ function uiLanguage() {
 }
 function translate(text) {
 	var lang = uiLanguage();
+	text = errorText(text,lang);
 	if (lang === 'zh' || text == null) return String(text == null ? '' : text);
 	var column = lang === 'tr' ? 1 : 0;
 	return String(text).replace(DASH_PATTERN, function(key) { return DASH_I18N[key][column]; });
@@ -638,7 +1204,7 @@ function localizeMenu() {
 	if (!root || !root.querySelectorAll) return;
 	var update = function() {
 		if (uiLanguage() === 'zh') return;
-		Array.prototype.forEach.call(root.querySelectorAll('a[href*="/admin/home"], a[href*="/admin/modem"]'), localize);
+		Array.prototype.forEach.call(root.querySelectorAll('a[href*="/admin/home"], a[href*="/admin/modem"], a[href*="/admin/system/cpu"]'), localize);
 		Array.prototype.forEach.call(root.children, function(li) {
 			var a = li.querySelector('a');
 			if (a && a.textContent.trim() === '蜂窝') localize(a);
@@ -793,6 +1359,11 @@ html.mud-bootstrap-theme{--surface:var(--background-color-high);--surface-sunken
 .mud-sim-options{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:0 12px 12px}
 .mud-sim-options select{width:auto;min-width:100px;max-width:100%;margin:0}
 .mud-sim-options small{flex:1;min-width:min(100%,190px);color:var(--text-muted,#787d85);font-size:.72rem;line-height:1.5}
+.mud-data-sim{display:grid;gap:7px;margin:0 0 18px;padding:12px;border:1px solid var(--hairline,var(--border-color,#ddd));border-radius:10px}
+.mud-data-sim-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
+.mud-data-sim-controls label{flex:1;min-width:110px;font-weight:600;margin:0}
+.mud-data-sim-controls select{width:auto;min-width:90px;max-width:100%;margin:0}
+.mud-data-sim [data-result]:empty{display:none}
 @media(prefers-reduced-motion:reduce){.mud-sim-panel,.mud-sim-toggle svg{transition:none}}
 .mud-card>h3{margin:0 0 8px;font-size:.7rem;font-weight:600;color:var(--text-muted,var(--text-light,#787d85));letter-spacing:.08em}
 .mud-card>h3::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--brand,var(--primary,#2f7bf6));margin-right:7px;vertical-align:1px}
@@ -1249,13 +1820,14 @@ function choiceBox(title, message, choices, opts) {
 /* LuCI 的 require 把模块当类工厂：必须返回 baseclass 派生的类，加载后拿到的是它的实例 */
 return baseclass.extend({
 	simSlot: simSlot, simSelector: simSelector,
+	callSimGet: callSimGet, callSimSet: callSimSet, callSimStatus: callSimStatus,
 	callStatus: callStatus, callRates: callRates, callCells: callCells, callSignal: callSignal, callSysinfo: callSysinfo, callAct: callAct, callAt: callAt, callAtHist: callAtHist,
 	callLockGet: callLockGet, callLockFresh: callLockFresh, callLockSet: callLockSet, callLockStatus: callLockStatus, waitLockJob: waitLockJob,
 	callSmsList: callSmsList, callSmsShow: callSmsShow, callSmsSend: callSmsSend,
 	callSmsDel: callSmsDel, callSmsSync: callSmsSync,
 	callForwardGet: callForwardGet, callForwardStatus: callForwardStatus,
 	callForwardSet: callForwardSet, callForwardTest: callForwardTest,
-	callTrafficGet: callTrafficGet, callTrafficSet: callTrafficSet,
+	callTrafficGet: callTrafficGet, callTrafficSet: callTrafficSet, callTrafficClear: callTrafficClear,
 	callUsbGet: callUsbGet, callUsbSet: callUsbSet,
 	callUsbNetList: callUsbNetList, callUsbNetAdd: callUsbNetAdd,
 	carrierName: carrierName, qLabel: qLabel, qCol: qCol, qScore: qScore,

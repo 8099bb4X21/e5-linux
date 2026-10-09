@@ -5,7 +5,8 @@
 
 function formatUsage(n) { return M.fmtTrafficBytes(n); }
 var ERRORS = { invalid_config: '配置无效', traffic_unavailable: '流量统计服务暂不可用',
-	storage_failed: '统计数据保存失败', clock_unsynced: '系统时间尚未同步' };
+	storage_failed: '统计数据保存失败', clock_unsynced: '系统时间尚未同步',
+	invalid_slot:'请选择有效的 SIM 卡槽', confirmation_required:'需要确认清空' };
 
 return view.extend({
 	load: function() { return L.resolveDefault(M.callTrafficGet(), {}); },
@@ -55,7 +56,7 @@ return view.extend({
   <div class="mud-tr-field"><label for="mud-tr-device">当前卡槽统计网卡</label><input id="mud-tr-device" readonly aria-readonly="true"></div>
   <div class="mud-tr-field"><label for="mud-tr-used_gb">校准本周期已用（GB，可选）</label><input id="mud-tr-used_gb" type="number" min="0" max="100000" step="0.001" placeholder="留空保持现有统计"></div>
   <div class="mud-note">校准只调整当前套餐周期，不修改每日和自然月历史；下个周期自动恢复实际统计。</div>
-  <div class="mud-tr-actions"><button class="mud-btn on" id="mud-tr-save">保存设置</button><button class="mud-btn" id="mud-tr-refresh">刷新状态</button></div>
+  <div class="mud-tr-actions"><button class="mud-btn on" id="mud-tr-save">保存设置</button><button class="mud-btn" id="mud-tr-refresh">刷新状态</button><button class="mud-btn" id="mud-tr-clear">清空当前卡记录</button></div>
  </section>
  <section class="mud-card">
   <h3>最近每日用量</h3>
@@ -120,6 +121,25 @@ return view.extend({
 	wire: function() {
 		var self = this;
 		this.q('refresh').onclick = function() { self.refresh(); };
+		this.q('clear').onclick = function() {
+			if (self.clearing) return;
+			const slot = String(self.data.slot ?? M.simSlot());
+			if (!['0','1'].includes(slot)) return;
+			self.clearing = true;
+			M.confirmBox(M.translate('清空流量记录')+' · SIM '+(+slot+1),
+				'今日、本月、历史和周期校准将清零，套餐额度与计量设置保留。此操作无法撤销。', {okText:'清空'}).then(async function(yes) {
+				if (!yes) return;
+				M.busy(self.q('clear'),true);
+				const toast = M.toast('正在清空流量记录…',{type:'busy',timeout:0});
+				try {
+					const r = await M.callTrafficClear(slot,true);
+					if (!r.ok) throw new Error(ERRORS[r.error] || r.error || '保存失败');
+					toast.update('流量记录已清空','success');
+					await self.refresh();
+				} catch(e) { toast.update(M.translate(e.message),'error'); }
+				finally { M.busy(self.q('clear'),false); setTimeout(()=>toast.close(),3000); }
+			}).finally(function(){self.clearing=false;});
+		};
 		this.q('save').onclick = function() {
 			var p = { plan_name:self.q('plan_name').value.trim(), device:self.q('device').value.trim(), count_mode:self.q('count_mode').value,
 				monthly_gb:Number(self.q('monthly_gb').value), daily_gb:Number(self.q('daily_gb').value), reset_day:Number(self.q('reset_day').value) };

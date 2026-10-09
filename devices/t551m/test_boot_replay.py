@@ -52,6 +52,23 @@ class BootReplay(unittest.TestCase):
         self.assertEqual(self.run_boot('early').returncode,0)
         self.assertIn('lock:replay early',self.trace.read_text())
 
+    def test_empty_unlock_is_still_a_saved_setting(self):
+        (self.state/'mode').unlink()
+        (self.state/'sim1').mkdir()
+        (self.state/'sim1/nr').write_text('')
+        self.assertEqual(self.run_boot('early').returncode,0)
+        self.assertIn('lock:replay early',self.trace.read_text())
+
+    def test_migrated_legacy_settings_do_not_override_disabled_slots(self):
+        (self.state/'.per-sim-migrated').touch()
+        for slot in ('sim0','sim1'):
+            (self.state/slot).mkdir()
+            (self.state/slot/'mode').write_text('4g')
+            (self.state/slot/'auto_apply').write_text('off')
+        self.assertEqual(self.run_boot('early').returncode,0)
+        self.assertEqual(self.run_boot('verify').returncode,0)
+        self.assertFalse(self.trace.exists())
+
     def test_failed_early_replay_is_not_retried_late(self):
         self.script('lock', 'echo "lock:$*" >> "$TRACE"; exit 1')
         self.assertEqual(self.run_boot('early').returncode,1)

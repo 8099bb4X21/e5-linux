@@ -2,7 +2,6 @@
 import * as fs from 'fs';
 import * as uloop from 'uloop';
 import * as ubus from 'ubus';
-import * as uci from 'uci';
 import * as core from './traffic-core.uc';
 
 const BASE = getenv('MU300_TRAFFIC_DIR') || '/etc/unisoc-modem/traffic';
@@ -25,7 +24,10 @@ function atomic(path, value) {
     return fs.rename(tmp, path);
 }
 function active_slot() { return trim(fs.readfile(CARD) || '') == '1' ? 1 : 0; }
-let ledger = read_json(RUN + '/state.json') ?? read_json(BASE + '/state.json');
+let cached = read_json(RUN + '/state.json'), durable = read_json(BASE + '/state.json');
+// A crash after committing a clear/config change but before refreshing RAM
+// must never resurrect an older cached ledger on service restart.
+let ledger = durable && (!cached || (durable.revision ?? 0) > (cached.revision ?? 0)) ? durable : cached ?? durable;
 if (ledger?.version == 1) {
     // Preserve the original ledger once; never clone totals into both cards.
     if (fs.stat(BASE + '/state-v1.json') == null && !atomic(BASE + '/state-v1.json', ledger))
@@ -35,6 +37,7 @@ if (ledger?.version == 1) {
     ledger = {version:2, legacy_owner:owner, slots};
 }
 ledger ??= {version:2, slots:[core.fresh(time()),core.fresh(time())]};
+ledger.revision ??= 0;
 if (ledger.version != 2 || length(ledger.slots ?? []) != 2) die('Unsupported traffic database\n');
 for (let db in ledger.slots) {
     if (db.version != 1 || type(db.days) != 'object' || type(db.months) != 'object') die('Unsupported SIM traffic database\n');
@@ -97,6 +100,29 @@ function selected(req) {
 }
 const obj = bus.publish(BUS, {
     get: { args:{slot:''}, call: function(req) { let slot=selected(req);return slot == null ? {error:'invalid_slot'} : get_data(slot); } },
+    clear: { args:{slot:'',confirm:false}, call:function(req) {
+        // Destructive requests always name their scope; never infer active SIM.
+        let slot = req.args?.slot;
+        if (slot != '0' && slot != '1' && slot != 'all') return {ok:0,error:'invalid_slot'};
+        if (req.args?.confirm !== true) return {ok:0,error:'confirmation_required'};
+        sample(false);
+        let previous = ledger.slots, revision = ledger.revision, now = time();
+        let next = [previous[0],previous[1]];
+        for (let id in slot == 'all' ? [0,1] : [int(slot)])
+            next[id] = core.clear_records(previous[id], snapshot(id), now);
+        ledger.slots = next;
+        ledger.revision++;
+        if (!atomic(BASE + '/state.json', ledger)) {
+            ledger.slots = previous;
+            ledger.revision = revision;
+            storage_error = true;
+            return {ok:0,error:'storage_failed'};
+        }
+        saved_at = now;
+        storage_error = false;
+        checkpoint(false);
+        return {ok:1,slot};
+    } },
     set: { args: { payload: '', slot:'' }, call: function(req) {
         let slot = selected(req);
         if (slot == null) return {ok:0,error:'invalid_slot'};
@@ -110,12 +136,14 @@ const obj = bus.publish(BUS, {
             if (input.used_gb != null && time() < 1704067200) return { ok: 0, error: 'clock_unsynced' };
         } catch (e) { return { ok: 0, error: 'invalid_config' }; }
         sample(false);
-        let previous = db.config, adjustment = db.adjustment, last = db.last;
+        let previous = db.config, adjustment = db.adjustment, last = db.last, revision = ledger.revision;
         try { core.update_config(db, input, time()); }
         catch (e) { return { ok: 0, error: 'invalid_config' }; }
         // Persist the full transaction before acknowledging changed settings.
+        ledger.revision++;
         if (!atomic(BASE + '/state.json', ledger)) {
             db.config = previous; db.adjustment = adjustment; db.last = last;
+            ledger.revision = revision;
             storage_error = true;
             return { ok: 0, error: 'storage_failed' };
         }

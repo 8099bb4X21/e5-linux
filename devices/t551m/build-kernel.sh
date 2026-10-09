@@ -12,7 +12,8 @@ python3 "$HERE/prepare-kernel.py" "$K"
 python3 - "$TOP/upstream/e5-mainline.config" "$O/t551m.config" <<'PY'
 import pathlib, sys
 s = pathlib.Path(sys.argv[1]).read_text()
-s = s.replace('CONFIG_LOCALVERSION="-e5"', 'CONFIG_LOCALVERSION="-t551m-usb7"')
+s = s.replace('CONFIG_LOCALVERSION="-e5"', 'CONFIG_LOCALVERSION="-t551m-cpu5"')
+s += '\n' + (pathlib.Path(sys.argv[1]).parents[1] / 'devices/t551m/cpufreq/config').read_text()
 s += '\n# T551M ships 32-bit ARM Android modem executables.\nCONFIG_COMPAT=y\nCONFIG_COMPAT_32BIT_TIME=y\n'
 s += '\n# USB host storage and common removable-disk formats.\nCONFIG_SCSI=m\nCONFIG_BLK_DEV_SD=m\nCONFIG_USB_STORAGE=m\nCONFIG_USB_UAS=m\nCONFIG_EXFAT_FS=m\nCONFIG_NTFS3_FS=m\nCONFIG_NLS_UTF8=m\n'
 s += '\n# Host-side USB Ethernet (Realtek, ASIX, CDC and RNDIS).\nCONFIG_USB_USBNET=m\nCONFIG_USB_RTL8152=m\nCONFIG_USB_NET_AX8817X=m\nCONFIG_USB_NET_AX88179_178A=m\nCONFIG_USB_NET_CDCETHER=m\nCONFIG_USB_NET_CDC_NCM=m\nCONFIG_USB_NET_RNDIS_HOST=m\nCONFIG_USB_NET_SMSC75XX=m\nCONFIG_USB_NET_SMSC95XX=m\n'

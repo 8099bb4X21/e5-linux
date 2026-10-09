@@ -6,7 +6,7 @@
 /* Network settings use verified asynchronous jobs. Each operation reports its
  * own completion/error; modem readback, not cache timestamps, proves success. */
 
-var MODES = [ [ 'auto', '自动' ], [ '4g', '仅 4G' ], [ 'sa', '5G SA' ], [ 'nsa', '5G NSA' ] ];
+var MODES = [ [ 'auto', '自动' ], [ '5g4g', '5G/4G' ], [ '4g', '仅 4G' ], [ 'sa', '5G SA' ], [ 'nsa', '5G NSA' ] ];
 var NR_CAND = [], LTE_CAND = []; /* 读取后端能力后再显示，避免短暂展示错误频段。 */
 
 return view.extend({
@@ -36,7 +36,7 @@ return view.extend({
 <div class="mud-sec">
   <h3>网络模式 · EN-DC</h3>
   <div class="mud-loadline" id="mud-lock-loading" role="status"></div>
-  <div class="mud-ctl" id="mud-lock-modes" style="grid-template-columns:repeat(4,1fr);max-width:520px"></div>
+  <div class="mud-ctl" id="mud-lock-modes" style="grid-template-columns:repeat(auto-fit,minmax(76px,1fr));max-width:520px"></div>
   <div class="mud-ctl" style="margin-top:7px;grid-template-columns:1fr 1fr;max-width:340px">
     <button class="mud-btn" id="mud-lock-endc">EN-DC</button>
     <button class="mud-btn" id="mud-lock-refresh">刷新锁定状态</button>

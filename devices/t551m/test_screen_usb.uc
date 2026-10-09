@@ -20,6 +20,10 @@ check(index(calls,'/usr/libexec/unisoc-modem/device-usb set-role host 0')>=0,'Ro
 check(index(calls,'/usr/libexec/unisoc-modem/device-usb set-role host 1')>=0,'Persistent host setting lost');
 check(index(calls,'/usr/libexec/unisoc-modem/device-usb set-net ecm once 1')>=0,'Protocol setting lost');
 check(index(calls,'/usr/libexec/unisoc-modem/device-usb set-net rndis once 0')>=0,'Disable protocol ignored');
+state.net_auto=0;calls=[];
+usb.set('usb_net_mode','ecm');usb.set('usb_net_scope','permanent');
+check(index(calls,'/usr/libexec/unisoc-modem/device-usb set-net ecm once 0')>=0,'Changing mode unexpectedly re-enabled auto apply');
+check(index(calls,'/usr/libexec/unisoc-modem/device-usb set-net rndis permanent 0')>=0,'Changing scope unexpectedly re-enabled auto apply');
 for (let pair in [['usb_role','host; reboot'],['usb_net_mode','rndis; reboot'],['usb_net_scope','forever'],['usb_host_boot','1']]) {
     calls=[];check(usb.set(pair[0],pair[1])!=null,'Invalid input accepted');
     check(length(calls)==1,'Invalid input reached mutation command');
