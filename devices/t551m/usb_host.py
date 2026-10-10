@@ -3,6 +3,52 @@ from pathlib import Path
 
 
 def apply(kernel):
+    # SPRD owns HCD registration in its role worker. Registering here too
+    # leaks the probe-time root hub and lets two hubs suspend the same core.
+    core = kernel / 'drivers/usb/musb/musb_core.c'
+    text = core.read_text()
+    old = ('\tcase MUSB_OTG:\n'
+           '\t\tstatus = musb_host_setup(musb, plat->power);\n'
+           '\t\tif (status < 0)\n\t\t\tgoto fail3;')
+    new = ('\tcase MUSB_OTG:\n'
+           '\t\t/* SPRD registers the HCD when its role worker enters host. */\n'
+           '\t\tif (!(musb->ops->quirks & MUSB_DMA_SPRD)) {\n'
+           '\t\t\tstatus = musb_host_setup(musb, plat->power);\n'
+           '\t\t\tif (status < 0)\n\t\t\t\tgoto fail3;\n\t\t}')
+    if new not in text:
+        assert text.count(old) == 1, 'Unexpected OTG probe registration'
+        text = text.replace(old, new, 1)
+    core.write_text(text)
+
+    # DRD does not run musb_start() from the root hub's POWER request:
+    # musb_has_gadget() only accepts a host-only port. The vendor host_start
+    # callback was not ported, so SESSION alone left gadget/suspend register
+    # state behind and could never reliably enumerate a newly attached NIC.
+    glue = kernel / 'drivers/usb/musb/musb_sprd.c'
+    text = glue.read_text()
+    start = text.index('static int musb_sprd_otg_start_host(')
+    end = text.index('\nstatic ', start + 10)
+    body = text[start:end]
+    if 'musb_start(musb);' not in body:
+        a = body.index('\t\tMUSB_HST_MODE(musb);')
+        b = body.index('\n\t} else {', a)
+        body = body[:a] + '''\t\tmusb_reset_all_fifo_2_default(musb);
+
+\t\tglue->dr_mode = USB_DR_MODE_HOST;
+\t\t/* Restore POWER and IRQ masks on every role transition. The DRD
+\t\t * root hub does not start the core for us; SESSION/HOST_FORCE_EN
+\t\t * alone retains stale peripheral suspend state.
+\t\t */
+\t\tspin_lock_irq(&musb->lock);
+\t\tMUSB_HST_MODE(musb);
+\t\tmusb->softconnect = 0;
+\t\tmusb_set_state(musb, OTG_STATE_A_WAIT_BCON);
+\t\tmusb_start(musb);
+\t\tspin_unlock_irq(&musb->lock);
+\t\tmusb_host_resume_root_hub(musb);''' + body[b:]
+        text = text[:start] + body + text[end:]
+        glue.write_text(text)
+
     path = kernel / 'drivers/usb/musb/musb_host.c'
     text = path.read_text()
     text = text.replace('/* SPRD host DMA is not wired into this host scheduler. */\n\t', '')
@@ -69,6 +115,40 @@ def apply(kernel):
             '\t * and stay NULL, so every caller has to test for that.',
             'RX/TX DMA and completion are wired up here. hops.host_start\n'
             '\t * remains optional; the platform initializes the host controller.')
+    text = text.replace('RX/TX DMA and completion are wired up here. hops.host_start\n'
+                        '\t * remains optional; the platform initializes the host controller.',
+                        'RX/TX DMA and completion are wired up here. The platform\n'
+                        '\t * starts the core explicitly on every host role transition.')
+    cleanup = ('\tif (musb->port_mode == MUSB_PERIPHERAL)\n\t\treturn;\n'
+               '\tusb_remove_hcd(musb->hcd);')
+    guarded = ('\tif (musb->port_mode == MUSB_PERIPHERAL ||\n'
+               '\t    !musb->hcd->rh_registered)\n\t\treturn;\n'
+               '\tusb_remove_hcd(musb->hcd);')
+    if guarded not in text:
+        assert text.count(cleanup) == 1, 'Unexpected HCD cleanup'
+        text = text.replace(cleanup, guarded, 1)
+    start = text.index('int musb_host_setup(')
+    end = text.index('\nEXPORT_SYMBOL_GPL(musb_host_setup);', start)
+    body = text[start:end]
+    if 'if (hcd->rh_registered)' not in body:
+        marker = '\tstruct usb_hcd *hcd = musb->hcd;\n'
+        assert body.count(marker) == 1
+        body = body.replace(marker, marker +
+            '\n\t/* A repeated role notification must not register a second hub. */\n'
+            '\tif (hcd->rh_registered)\n\t\treturn 0;\n', 1)
+    # SPRD keeps a runtime-PM reference for the entire host session. Its
+    # glue cannot autosuspend the root while waiting for attachment: the
+    # generic bus_suspend sets SUSPENDM then returns EBUSY, and the hub's
+    # zero autosuspend delay immediately retries. Keep only this root awake;
+    # downstream device PM is unchanged and detach removes the root hub.
+    marker = '\n\tdevice_wakeup_enable(hcd->self.controller);'
+    if 'usb_disable_autosuspend(hcd->self.root_hub)' not in body:
+        assert body.count(marker) == 1, 'Unexpected HCD PM initialization'
+        body = body.replace(marker,
+            '\n\t/* SPRD owns host-session PM; do not suspend the root during attach. */\n'
+            '\tif (musb->ops->quirks & MUSB_DMA_SPRD)\n'
+            '\t\tusb_disable_autosuspend(hcd->self.root_hub);\n' + marker, 1)
+    text = text[:start] + body + text[end:]
     path.write_text(text)
     (path.parent / 'board-musb-sprd-host.h').write_bytes(
         Path(__file__).with_name('musb-sprd-host.h').read_bytes())

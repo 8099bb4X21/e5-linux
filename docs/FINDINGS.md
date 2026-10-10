@@ -5395,3 +5395,70 @@ and SHA-256 manifest.
 The UFI-TOOLS main repository has separate commits removing both TG group and
 TG channel links and replacing the external donation QR with the user-provided
 `donate.jpg` byte-for-byte. The mirrored Debian overlay carries the same assets.
+
+## 62. T551M 自动工作模式固定采用原厂 152 (2026-10-10)
+
+用户确认当前方案保持设备适配配置：**T551M 的自动模式默认固定为 152，
+E5 继续使用 134**。暂不增加运行时能力探测或自动选择工作模式的机制；
+不能因为 SoC 相同，就把此默认值推广到其他设备。
+
+原厂依据：T551M Android 属性中的基带能力/配置为
+`NR_TL_LF_W,NR_TL_LF_W`，历史工作模式快照为 `152,134`、主卡索引 0。
+本机原厂 `libimpl-ril.so` 的 `getMultiMode` 反汇编确认
+`NR_TL_LF_W`（NR/LTE/WCDMA）映射 152，`NR_TL_LF_W_G`
+（另含 GSM）映射 134。E5 原厂配置包含 `_G`，因此保留其 134 默认值。
+这些数值是原厂工作模式编码，不是速率、射频功率或 NV 校准参数。
+
+T551M 双卡 5G SA + LTE 的固定 IP 对照中，152 连续三分钟 180 包全部
+收到，平均 62.96 ms；恢复 134 的两轮平均分别为 180.59 / 135.16 ms。
+但 134 也出现过平均 65.04 ms 的正常一轮；切模式会重拨，部分轮次的小区
+或网络路径不同，不能据此断言 GSM 搜网或某个双卡调度机制就是根因。
+持久部署后普通重启读回 `152,3,0,20,3,1`，两卡注册正常，90 包全部收到，
+三轮平均 85.25 / 72.10 / 65.72 ms，仍有偶发尖峰。该调整有兼容性依据
+和实测改善，但不代表消除了所有蜂窝延迟波动。
+
+实现提交：`4c02751`。T551M 构建/安装通过
+`unisoc_modem.main.auto_work_mode=152` 指定默认值，显式配置仍保留；
+共用 `lock-control` 支持 134/152，未配置或非法值回退 134，并将两者识别
+为“自动”。网页和屏幕共用后端，继续使用 AT 就绪、拨号前的原有开机回放。
+此决定不强制两张卡都设为 152：实机保存的 SIM1 自动、SIM2 4G 分别映射
+为 152、3；手动 4G、SA、NSA 等选择及频段/小区锁定不变。
+
+源码、T551M 实机及离线 rootfs 已同步，42 项相关测试通过，重启后配置
+验证及原始 NV 只读一致性检查通过；未改物理 NV、CPU 设置或 TF 启动。
+需要回退时，将 `unisoc_modem.main.auto_work_mode` 显式设为 134 并提交
+UCI，再对主卡应用“自动”或重启即可。
+
+完整测试过程、限制及数据见
+[蜂窝延迟调查记录](CELLULAR-LATENCY-20261010.zh-CN.md)。
+
+## 63. OTG 主机初始化、重复注册与根集线器休眠冲突 (2026-10-10)
+
+T551M 实物插拔确认 Type-C/OTG 供电已切到主机，但外设不能完成枚举；
+控制器同时出现每秒约三万次 `trying to suspend as a_idle while active`。
+不能把屏幕不提示、网卡无 DHCP 直接当作界面或 LAN 热插拔配置的问题。
+
+共用移植代码的 `hops.host_start` 为空；注册 HCD 后仅开启 SESSION/HOST 位，
+没有恢复核心 POWER 和中断。双角色配置的 root hub POWER 路径也不会代为
+调用 `musb_start()`。现补齐主机模式下的核心初始化，并唤醒 root hub；
+不通过关闭全局 USB 省电来规避。但 OTG8 实物复测仅偶尔成功，不能视为修复。
+进一步发现 probe 和角色 worker 重复注册同一个 HCD，旧 root hub 泄漏；
+实机 `usb1` 的 BUSNUM 却变成 2。OTG9 / E5 mobile3 将 SPRD 双角色的 HCD
+注册统一交给角色 worker，并防止重复注册/清理；生命周期回归测试通过，
+OTG9 实物复测仍失败：重复注册已消失，但等待连接时的挂起重试和 hub 枚举
+失败仍存在。随后临时禁用 USB autosuspend 做对照，用户反馈正常，日志中
+三轮均识别 hub/r8152 并建立链路，且有电脑 DHCPACK。已恢复全局默认参数。
+
+OTG10 / E5 mobile4 将该修正收敛到 SPRD 根集线器：HCD 注册成功后仅禁止
+root hub 自动挂起，避免默认零延迟重试和提前写入 SUSPENDM；下游设备 PM
+保持不变。原有角色 worker 仍在 host 期间持有控制器 PM 引用，拔出时注销
+HCD、关供电并释放引用。两种构建、生命周期及充电转换测试通过。T551M
+OTG10 已正常启动，全局 autosuspend=2；三轮实物插拔均完成网卡枚举、carrier
+及电脑 DHCPACK，用户确认正常，挂起风暴计数为 0。根 hub 为 on，外接 hub
+仍为 auto；返回电脑后不残留主机总线，NCM / WAN 正常。正式 T551M 镜像、
+匹配模块及离线 rootfs 已同步。E5 mobile4 已构建，但尚未部署和实测。
+
+此次重启另暴露 userdata F2FS 的 SIT/节点计数损坏，离线修复及只读复查
+通过；内部 OpenWrt ext4 五阶段检查正常，无需修复。原始 NV 未修改，
+九分区及隔离工作设备验证通过。F2FS 反复损坏的根因仍未解决。
+详见 [OTG 调查和恢复记录](USB-OTG-20261010.zh-CN.md)。

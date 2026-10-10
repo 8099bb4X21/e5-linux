@@ -14,7 +14,7 @@ from pathlib import Path
 import sys
 top, output = map(Path, sys.argv[1:])
 text = (top / 'upstream/e5-mainline.config').read_text()
-text = text.replace('CONFIG_LOCALVERSION="-e5"', 'CONFIG_LOCALVERSION="-e5-mobile1"')
+text = text.replace('CONFIG_LOCALVERSION="-e5"', 'CONFIG_LOCALVERSION="-e5-mobile4"')
 text = text.replace(' e5.openwrt=openwrt-mainline.ext4', '')
 text += '\n' + (top / 'devices/t551m/cpufreq/config').read_text()
 for key in ('SCSI', 'BLK_DEV_SD', 'USB_STORAGE', 'USB_UAS', 'EXFAT_FS', 'NTFS3_FS',
