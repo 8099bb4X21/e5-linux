@@ -11,13 +11,20 @@ def patch_root(root, profile='t551m'):
     config = root / 'etc/config/unisoc_modem'
     if config.exists() and profile == 't551m':
         text = config.read_text()
+        anchor = "config core 'main'\n"
+        additions = ''
+        # Match the stock RIL's NR_TL_LF_W capability; 134 additionally
+        # includes GSM. Preserve an explicitly configured compatibility mode.
+        if 'option auto_work_mode ' not in text:
+            additions += "\toption auto_work_mode '152'\n"
+        # This firmware drops B38 from SPLBAND readback; the imported
+        # dashboard's larger fallback list is not a capability query.
         if 'option lte_supported_bands ' not in text:
-            anchor = "config core 'main'\n"
+            additions += "\toption lte_supported_bands '1,3,5,8,34,39,40,41'\n"
+        if additions:
             if text.count(anchor) != 1:
                 raise ValueError('Unexpected modem dashboard configuration')
-            # This firmware drops B38 from SPLBAND readback; the imported
-            # dashboard's larger fallback list is not a capability query.
-            config.write_text(text.replace(anchor, anchor + "\toption lte_supported_bands '1,3,5,8,34,39,40,41'\n"))
+            config.write_text(text.replace(anchor, anchor + additions))
 
     wrapper = root / 'usr/sbin/ModemManager-wrapper'
     if wrapper.exists():

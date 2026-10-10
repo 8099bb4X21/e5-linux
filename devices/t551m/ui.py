@@ -59,6 +59,9 @@ def stage(root, profile='t551m'):
                 target.write_bytes(target.read_bytes().replace(b"'1,3,5,8,34,39,40,41'", b"'1,3,5,8,34,38,39,40,41'"))
             executable = srcdir == 'root' and any(part in src.parts for part in ('init.d', 'hotplug.d', 'libexec'))
             target.chmod(0o755 if executable else 0o644)
+    # Fresh archive roots only receive the modem config in the loop above.
+    # Apply the profile defaults there too, not only to existing installations.
+    runpy.run_path(str(Path(__file__).with_name('network-startup.py')))['patch_root'](root, profile)
     cache = Path(os.environ.get('E5_UI_CACHE', str(TOP / 'work/t551m/aurora')))
     packages = root / 'opt/e5/ui-packages'
     packages.mkdir(parents=True, exist_ok=True)

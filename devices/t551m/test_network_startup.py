@@ -121,6 +121,22 @@ run_modes() {
         with self.assertRaisesRegex(ValueError, 'Unexpected ModemManager'):
             patch_root(self.root)
 
+    def test_modem_auto_mode_profile_boundary_and_explicit_override(self):
+        path = self.root / 'etc/config/unisoc_modem'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        original = "config core 'main'\n\toption device '/dev/ttyUSB0'\n"
+        path.write_text(original)
+        patch_root(self.root, 'e5')
+        self.assertEqual(path.read_text(), original)
+        patch_root(self.root, 't551m')
+        configured = path.read_text()
+        self.assertIn("option auto_work_mode '152'", configured)
+        patch_root(self.root, 't551m')
+        self.assertEqual(path.read_text(), configured)
+        path.write_text(configured.replace("auto_work_mode '152'", "auto_work_mode '134'"))
+        patch_root(self.root, 't551m')
+        self.assertIn("option auto_work_mode '134'", path.read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

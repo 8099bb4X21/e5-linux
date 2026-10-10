@@ -34,6 +34,30 @@ class LocksTest(unittest.TestCase):
         p.start();self.addCleanup(p.stop)
         p = patch.object(locks.time, 'sleep');p.start();self.addCleanup(p.stop)
 
+    def test_auto_mode_configuration_keeps_legacy_and_explicit_modes(self):
+        legacy = locks.mode_table('134')
+        native = locks.mode_table('152')
+        self.assertEqual(native['auto'], (152, 1))
+        self.assertEqual(native['auto-nsa'], (152, 0))
+        for key in ('4g', 'sa', 'nsa', '5g4g', '4g-nsa', 'sa-nsa'):
+            self.assertEqual(native[key], legacy[key])
+        for value in ('', 'unsupported', '0', '153'):
+            self.assertEqual(locks.mode_table(value), legacy)
+
+    def test_native_auto_preserves_other_sim_and_primary(self):
+        with patch.object(locks, 'MODES', locks.mode_table('152')):
+            self.tm = [134, 3, 1]
+            locks.TARGET = 0
+            locks.apply('mode', 'auto')
+            self.assertEqual(self.tm, [152, 3, 1])
+            self.assertEqual(locks.snapshot()['mode']['label'], 'auto')
+            self.assertEqual((locks.STATE / 'mode').read_text().strip(), 'auto')
+            self.assertTrue(locks.matches_saved('mode', 'auto', locks.snapshot()))
+
+    def test_native_auto_readback_is_not_unknown_on_legacy_config(self):
+        self.tm = [152, 3, 0]
+        self.assertEqual(locks.snapshot()['mode']['label'], 'auto')
+
     def run_command(self, argv, **kwargs):
         if argv[0] == locks.RESTART:
             self.restarts += 1
