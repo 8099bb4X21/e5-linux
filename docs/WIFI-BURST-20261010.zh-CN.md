@@ -120,3 +120,67 @@ build-id：`abf9bbe05d566213af34402d63db8899ad469773`。
 正式产物 `out/t551m/kernel`、`openwrt-persistent-boot.img`、
 `openwrt-t551m-persistent.ext4.gz` 及校验清单已同步；旧产物保留于
 `out/t551m/before-wifi4-20261010`，未加入源码提交。没有新增开机诊断服务。
+
+## Android 原版 BA 清理对比
+
+2026-10-10 从本机 `super` 的 `vendor_dlkm_a` extent 只读提取
+`lib/modules/sprd_wlan_combo.ko`，未切换 Android，也未卸载正在运行的驱动。
+模块保存于本地 `work/t551m/stock-sprd_wlan_combo.ko`，大小 39,199,704 字节，
+SHA-256 为 `89c2f8f983c9e87f2ff7b3308293d2104a9e83876c110c2f23f68a80228ff8ba`。
+其 vermagic 为 `5.15.123-android13-8-g2054f18da766-ab10`；模块保留 DWARF、
+符号表和 BTF，可以结合反汇编核对，结论不依赖原厂发布源码。最初采集的系统
+属性记录 Android 版本 `551MCM08`、构建日期 2024-10-31，不能把它当成未知的
+“最新版驱动”。
+
+对比的是本机实际使用的 **SC2355 SDIO** 路径，未把同一组合模块内的 PCIe、
+SC2332 或其他 `sprdwl_*` 实现当成本机实现。
+
+| 处理 | Android 原版 ko | 当前 OpenWrt 源码 |
+| --- | --- | --- |
+| 固件 DELTXBA 事件（type 6） | 按 LUT/TID 原子清除 `ba_tx_done_map` 对应位 | 同样处理 |
+| ADDBA 返回拒绝/失败状态 | 清对应位，允许后续重新协商 | 同样处理，并有 LUT/TID 范围检查 |
+| 客户端删除/更新 | 清理接收重排序节点；删除/加入时清发送 BA bitmap | 同样处理，另有分片恢复清理 |
+| 再建发送 BA | HT、报文计数超过 9、对应位未置位，重试间隔约 3 秒 | 相同主要条件；时间表示方式不同 |
+| DELBA_ALL（type 5） | BA 事件跳转表指向 default | 头文件定义该编号，事件分派没有对应 case |
+| 两三台客户端触发统一清 BA | 已检查的 BA、STA LUT 路径未发现 | 对应路径也未发现 |
+
+原版二进制定位（ELF `.text` 相对地址，不是运行中的内核地址）：
+
+- `sc2355_wlan_ba_session_event`：`0x2b470`。其 `.rodata+0x1bdb8`
+  跳转表中 type 5 落到 `0x2b850` 的 default，type 6 落到 `0x2b5b4`。
+  后者计算指定 peer/TID 的 bitmap 地址，在 `0x2bc18` 的 LL/SC 分支或
+  `0x2b5ec` 的 LSE 分支完成原子清位。并非只有日志字符串而没有执行代码。
+- `sdio_tx_ba_mgmt`：`0x41ad0`。确认 ADDBA 命令、命令返回成功且固件状态
+  非成功后，`0x41bec` / `0x41c5c` 两条原子分支清对应 bitmap 位。
+  传输本身报错时不会走这条清位路径；当前实现也有这个边界，不能据此认定
+  存在仅原版具有的异常恢复修复。
+- `sc2355_event_sta_lut`：`0x41754`；`tx_prepare_addba`：`0x303a8`。
+  已核对新增、更新、删除客户端及再建 BA 的条件，没有以客户端数 2 或 3
+  为阈值的清 BA 分支。
+
+当前源码对应 `sc2355/reorder.c` 的 `SPRD_DELTXBA_EVENT`、`sc2355/tx.c`
+的 `sc2355_tx_prepare_addba()` / `sc2355_tx_ba_mgmt()`，以及 `sc2355/sdio.c`
+的 `sc2355_event_sta_lut()`。公开基线可参见
+[BA 事件处理](https://github.com/Enceka/linux-lts-e5/blob/2984a23816213abe9001fa944203bb0ea3f56fdd/drivers/unisoc_platform/sprd_wlan_combo/sc2355/reorder.c)。
+
+因此，**常规清 BA 的功能原版和当前版本都有；尚无证据表明原版 ko 里有一个
+被本次适配漏掉的多客户端专用修复**。这不等于证明用户提到的新版本不存在
+该修复，也不等于本次三轮单客户端压力测试已经覆盖多客户端问题。
+
+固件也是需要单独区分的部分：当前 `/lib/firmware/wcnmodem.bin` 与从本机
+Android 提取的版本 SHA-256 一致，均为
+`ac8f2d97278cfff1aa5dce29ba5a0c3366767f7d0bcf3e9f03b194c361aa4f5a`，运行版本
+为 `MARLIN3_20A_RLS2_W24.13.3`。仅比较 Linux ko，不能排除新版本的多客户端
+BA 资源管理或带宽选择修复位于闭源 WCN 固件内。
+
+同时发现现有速率上报的限制：`sprd_cfg80211_get_station()` 没有使用传入的
+客户端 MAC，字节/包计数取整个 netdev，`sc2355_get_station()` 发送的
+`CMD_GET_STATION` 不携带客户端 MAC。现场两个客户端的计数和速率读数确实
+相同，发送速率还会返回全零；此时源码默认填写 20 MHz 带宽。因此，不能
+仅凭 AP 侧这份显示确认所有客户端真实退到 VHT20。`iwinfo` 的 VHT80 也只
+能辅助说明配置，不能证明每个客户端每次发包的实际带宽。确认多客户端降级
+仍需客户端侧协商信息或空口证据，并区分 BA 聚合状态与 20/40/80 MHz 带宽。
+
+本轮只做读取、反汇编和文档记录，没有加入定时清 BA、强制重协商或切换带宽
+的实验行为。证据文件保留在 `work/t551m/stock-wifi-*` 和
+`logs/t551m/wifi-ba-*`，没有将原厂二进制加入 Git。
