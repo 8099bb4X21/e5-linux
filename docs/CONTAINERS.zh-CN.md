@@ -11,14 +11,16 @@ TF 卡选择、Android 切换、基带启动和 NV 处理没有在此功能中�
 打包到 `root-modules.tar`，保留音频、基带服务使用的路径。OpenWrt 的 kmodloader
 只扫描版本目录里的 `.ko`，因此模块放在该目录，原硬件子目录使用符号链接。
 
-构建 OpenWrt 时增加：
+默认只提供内核容器支持和安装后的适配工具，**不预装 Docker、containerd 或
+runc**。构建 OpenWrt 时使用匹配的模块：
 
 ```sh
-E5_DOCKER=1 E5_ROOT_MODULES=/path/to/root-modules.tar openwrt/build-rootfs.sh
+E5_DOCKER=0 E5_ROOT_MODULES=/path/to/root-modules.tar openwrt/build-rootfs.sh
 ```
 
-其余固件、独立镜像、信息屏等构建参数沿用原流程。镜像默认扩为 2048 MiB，
-也可用 `E5_IMAGE_MB` 指定。原厂 5.15 内核不适用本构建选项。
+其余固件、独立镜像、信息屏等构建参数沿用原流程。只有明确需要预装时才设置
+`E5_DOCKER=1`，此时镜像默认扩为 2048 MiB；也可用 `E5_IMAGE_MB` 指定。
+原厂 5.15 内核不适用本构建选项。
 Docker 使用 OpenWrt 官方仓库的 docker、dockerd、containerd、runc 和
 iptables-nft 软件包；APK 依赖附带的 armsr 内核模块不能替代本仓库匹配内核的模块。
 
@@ -27,7 +29,20 @@ iptables、fw4、Docker 日志大小和 cgroup 启动包装器，并禁用自动
 升级 dockerd 软件包后重新运行 `/usr/libexec/e5-container-setup`，以恢复启动钩子。
 该命令会禁用开机自启；需要自启时再执行下方 enable 命令。
 
-## 使用
+## 自行安装与使用
+
+需要 Docker 时，在设备上执行：
+
+```sh
+apk update
+apk add --no-scripts docker dockerd iptables-nft ip6tables-nft
+/usr/libexec/e5-container-setup
+/etc/init.d/firewall reload
+```
+
+内核及匹配模块已随镜像提供，不需要重新刷内核。适配工具在安装后才配置
+Docker 的 cgroup 启动钩子、数据目录和防火墙；未安装时不创建 Docker 网络。
+不要用官方 armsr 的内核或模块替换本机内核及其版本目录。
 
 ```sh
 /etc/init.d/dockerd start       # 本次启动

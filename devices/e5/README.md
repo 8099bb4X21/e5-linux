@@ -73,10 +73,14 @@ python3 upstream/stage-root-modules.py out/e5/kernel --root /path/to/offline-e5-
 例如完成既有 BlueZ/ModemManager 构建及基础依赖后：
 
 ```sh
-E5_FEATURES=1 E5_DOCKER=1 E5_INFOSCREEN=/path/to/e5-infoscreen \
+E5_FEATURES=1 E5_DOCKER=0 E5_INFOSCREEN=/path/to/e5-infoscreen \
 E5_ROOT_MODULES="$PWD/out/e5/kernel/root-modules.tar" E5_ROOT_MODULES_ONLY=1 \
 E5_STANDALONE=1 E5_DEVICE_FILES=0 bash openwrt/build-rootfs.sh
 ```
+
+默认仅保留内核的容器支持，不预装 Docker/containerd/runc。用户可在刷入后
+按 [容器说明](../../docs/CONTAINERS.zh-CN.md) 自行安装；只有明确需要预装时
+才将 `E5_DOCKER` 设为 `1`。
 
 实机更新使用本机原 rootfs 制作并逐文件校验的私有差异包，配合本机 boot 头构建的新
 boot_b；不是可公开分发的通用镜像。本次没有完整执行通用镜像发布流水线。

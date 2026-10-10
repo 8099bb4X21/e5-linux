@@ -62,7 +62,9 @@
 # for the mainline kernel) next to the 5.15 ones; the image then runs on either kernel.
 # E5_ROOT_MODULES_ONLY=1 uses only that archive, without a local 5.15 build.
 #
-# E5_DOCKER=1 installs Docker for a mainline KVM/container kernel. The service
+# Docker is NOT preinstalled by default; matching kernel/container modules and
+# the post-install setup helpers are retained for users to install it later.
+# E5_DOCKER=1 explicitly preinstalls Docker for a mainline KVM/container kernel. The service
 # starts on demand; the image defaults to 2048 MiB to leave room for containers.
 # E5_IMAGE_MB sets the image's size (default 1024, or 2048 with Docker). Needs Docker with arm64
 # (native on Apple silicon).
