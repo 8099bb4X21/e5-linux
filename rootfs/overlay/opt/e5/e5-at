@@ -60,7 +60,17 @@ if [ "$profile" = t551m ] || [ "$profile" = e5 ]; then
         # E5SMS is a virtual command implemented by MM, not modem firmware.
         # Existing per-SIM SMS operations must retain MM's port-local charset,
         # PDU mode, storage selection and multi-step transaction ownership.
-        AT+E5SMS*|AT+SPACTCARD=*) ;;
+        AT+E5SMS*) ;;
+        AT+SPACTCARD=*)
+            # Addressing a SIM does not make a command an SMS transaction.
+            # Keep dashboard collectors/controls on their selected nr2/6/7
+            # owner; otherwise every scoped request queues on MM's dial port.
+            # SMS operations still need that port's charset/storage context.
+            case "$norm" in
+                *+E5SMS*|*+CMGS*|*+CMGC*|*+CMGW*|*+CMSS*|*+CMGR*|*+CMGL*|*+CMGD*|*+CMGF*|*+CPMS*|*+CNMI*|*+CNMA*|*+CSCS=*|*+CSCA*|*+CSMP*|*+CSMS*|*+CSCB*|*+CSDH*) ;;
+                *) exec /opt/e5/t551m-at -t "$T" "$CMD" ;;
+            esac
+            ;;
         *) exec /opt/e5/t551m-at -t "$T" "$CMD" ;;
     esac
 fi
