@@ -41,6 +41,10 @@ def main():
                 if fail_tone[0]:return self.reply({'ok':False,'error':'simulated failure'},502)
                 time.sleep(.06)
             if self.path.endswith('/answer'):model['calls']=[{**model['calls'][0],'state':'active'}]
+            if self.path.endswith('/call'):
+                model['calls']=[{'id':'12','state':'dialing','number':body['number'],
+                                 'sim':'SIM1','card':0,'direction':'outgoing'}]
+                return self.reply({'ok':True,'id':'12'})
             if self.path.endswith('/hangup'):model['calls']=[]
             if self.path.endswith('/audio'):
                 model['audio'].update(body)
@@ -102,6 +106,19 @@ def main():
         assert frame.locator('#call-card').is_visible()
         model.pop('error');model['calls']=[];page.wait_for_timeout(500)
         assert frame.locator('#dtmf-panel').is_hidden()
+        # Repeated taps send one dial/hangup; after hangup, wait for CP settlement.
+        frame.locator('#dial').evaluate("e=>{setNumber('10010');e.click();e.click();}")
+        frame.locator('#call-card').wait_for(state='visible')
+        assert len([p for p,b in posts if p.endswith('/call')])==1
+        frame.locator('#hangup').evaluate('e=>{e.click();e.click();}')
+        frame.locator('#dialer').wait_for(state='visible')
+        assert frame.locator('#dial').is_disabled()
+        frame.locator('#dial').evaluate("e=>{e.click();perform('call',{number:'10010',card:0});}")
+        page.wait_for_timeout(300)
+        assert len([p for p,b in posts if p.endswith('/call')])==1
+        assert len([p for p,b in posts if p.endswith('/hangup')])==1
+        page.wait_for_timeout(2200)
+        assert frame.locator('#dial').is_enabled()
         page.evaluate('closeApp()')
         fixtures['/api/status']['screen']['lock_enabled']=True
         page.evaluate('last.screen.lock_enabled=true;T551M.status(last);setBlank(true)')

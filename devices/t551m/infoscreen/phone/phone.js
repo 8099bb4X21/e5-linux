@@ -20,6 +20,7 @@ const words = {
  invalid:['请输入至少 3 位有效号码','Enter a valid number (at least 3 digits)'],
  timedOut:['请求超时，通话结果尚未确认。请查看通话状态，不要重复拨号。','Request timed out; call result is unknown. Check its state before dialing again.'],
  noState:['拨号请求已发送，暂未收到通话状态。','Call requested; waiting for modem state.'],
+ settling:['请稍候…','Please wait…'],
  saved:['联系人已保存','Contact saved'], saveNumber:['保存联系人','Save contact'], backspace:['退格','Delete digit'],
  confirm:['请先用方向键选择按钮，再按确认。','Choose a button with the arrows, then confirm.']
 };
@@ -28,6 +29,7 @@ const LIVE = new Set(['dialing','ringing-out','ringing-in','active','held','wait
 let number='', contacts=[], calls=[], pending=null, reading=false, feedback=null;
 let contactsSignature='', deleteNumber=null, activeId=null, activeSince=null, zeroTimer=null, zeroHeld=false;
 let awaitingId=null, awaitingSince=0;
+let dialAfter=0;
 let selectedCard=0, simPicked=false, selectedCall=null;
 let audio={available:false,active:false,speaker:false,muted:false}, audioFeedback=false;
 let dtmfOpen=false, toneCall=null, toneDigits='', tones=[], sendingTone=false;
@@ -125,8 +127,8 @@ function render() {
  }else{activeId=null;activeSince=null;}
  $('call-duration').textContent=activeSince?duration(Date.now()-activeSince):'';
  document.querySelectorAll('[data-sim]').forEach(button=>{button.setAttribute('aria-pressed',String(+button.dataset.sim===selectedCard));button.disabled=!!pending;});
- $('dial').disabled=!!pending;
- $('dial').querySelector('span').textContent=pending==='call'?t('dialing'):t('dial');
+ $('dial').disabled=!!pending||Date.now()<dialAfter||!!awaitingId;
+ $('dial').querySelector('span').textContent=pending==='call'?t('dialing'):(Date.now()<dialAfter||awaitingId)?t('settling'):t('dial');
  $('hangup').disabled=!!pending; $('accept').disabled=!!pending;
  const differentAudio=audio.active && audio.sim && c?.sim && audio.sim!==c.sim;
  $('speaker').disabled=!!pending||!audio.available||differentAudio; $('mute').disabled=!!pending||!audio.available||differentAudio;
@@ -184,6 +186,7 @@ async function read(){
 }
 async function perform(action,body){
  if(pending)return;
+ if(action==='call'&&(Date.now()<dialAfter||awaitingId))return;
  if(action==='hangup')tones=[];
  pending=action;showFeedback(null);render();
  try{
@@ -191,10 +194,10 @@ async function perform(action,body){
   if(action==='call'){awaitingId=String(r.id);awaitingSince=Date.now();}
   await read();
  }catch(e){showFeedback(e.message);}
- finally{pending=null;render();}
+ finally{if(action==='call'||action==='hangup')dialAfter=Date.now()+2000;pending=null;render();}
 }
 function dial(){
- if(pending||current())return;
+ if(pending||current()||Date.now()<dialAfter||awaitingId)return;
  if(!/^\+?[0-9*#]{3,32}$/.test(number)){showFeedback(t('invalid'));return;}
  perform('call',{number,card:selectedCard});
 }

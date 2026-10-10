@@ -4,7 +4,7 @@
 #   openwrt/build-modemmanager.sh        -> out/openwrt/modemmanager-*.apk
 #
 # OpenWrt 25.12 ships ModemManager 1.24.0, the version rootfs/deb-patches/
-# modemmanager-0[1-6]-*.patch are written against, so the Debian image and the
+# modemmanager source patches are written against, so the Debian image and the
 # OpenWrt one run the same plugin (docs/FINDINGS.md 37).  The patches go into
 # the feed package's patches/ after OpenWrt's own (0001-0004, which they stack
 # on cleanly), and patches/modemmanager-package-*.patch adjusts the package's
@@ -44,7 +44,10 @@ set -euo pipefail
 # 8: native per-call SIM slot and dual-card voice tracking.
 # 9: discard snapshots taken before a dial completed; retain undecodable calls.
 # 10: skip absent SIM power-up and restore the selected AT context.
-E5REV=10
+# 11: consume IMS PDN unsolicited reports instead of failing an outgoing call.
+# 12: confirm transient empty call lists and adopt existing outgoing CP calls.
+# 13: serialize hangup, settle before redial and ignore pre-hangup CLCC snapshots.
+E5REV=13
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"
@@ -61,8 +64,10 @@ done
 rm -rf "$WORK/patches" && mkdir -p "$WORK/patches/src" "$WORK/patches/pkg"
 cp "$HERE/tests/voice-identity.py" "$WORK/voice-identity.py"
 cp "$HERE/tests/sim-power.py" "$WORK/sim-power.py"
+cp "$HERE/tests/voice-urc.py" "$WORK/voice-urc.py"
+cp "$HERE/tests/voice-recovery.py" "$WORK/voice-recovery.py"
 n=900
-for p in "$TOP"/rootfs/deb-patches/modemmanager-0*.patch; do
+for p in "$TOP"/rootfs/deb-patches/modemmanager-[0-9][0-9]-*.patch; do
     cp "$p" "$WORK/patches/src/$n-e5-$(basename "$p" | sed 's/^modemmanager-//')"
     n=$((n + 1))
 done
@@ -81,7 +86,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends build-essential ca-certificates clang file flex bison \
     gawk gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync swig unzip wget \
-    xz-utils zlib1g-dev zstd >/dev/null
+    xz-utils zlib1g-dev zstd libglib2.0-dev >/dev/null
 # the buildroot refuses to run as root unless told otherwise; it lives in the
 # volume, which is case-sensitive (a macOS bind mount is not)
 export FORCE_UNSAFE_CONFIGURE=1
@@ -144,6 +149,8 @@ voice_source=$(find build_dir -path "*/modemmanager-*/src/mm-iface-modem-voice.c
 [ -n "$voice_source" ] || { echo "missing patched voice source" >&2; exit 1; }
 python3 /work/voice-identity.py "$(dirname "$voice_source")"
 python3 /work/sim-power.py "$(dirname "$voice_source")"
+python3 /work/voice-urc.py "$(dirname "$voice_source")"
+python3 /work/voice-recovery.py "$(dirname "$voice_source")"
 rm -f /out/modemmanager*.apk
 find bin/packages -name "modemmanager*-r$((rel + 900 + E5REV)).apk" -exec cp {} /out/ \;
 ls -la /out/modemmanager*.apk

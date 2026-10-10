@@ -16,8 +16,9 @@ def checksum(path):
 
 def sources(version):
     files = [TOP / 'openwrt/build-modemmanager.sh', TOP / 'openwrt/tests/voice-identity.py',
-             TOP / 'openwrt/tests/sim-power.py', Path(__file__).resolve()]
-    files += sorted((TOP / 'rootfs/deb-patches').glob('modemmanager-0*.patch'))
+             TOP / 'openwrt/tests/sim-power.py', TOP / 'openwrt/tests/voice-urc.py',
+             TOP / 'openwrt/tests/voice-recovery.py', Path(__file__).resolve()]
+    files += sorted((TOP / 'rootfs/deb-patches').glob('modemmanager-[0-9][0-9]-*.patch'))
     files += sorted((TOP / 'openwrt/patches').glob('modemmanager-package-*.patch'))
     return {'openwrt': version, 'files': {str(p.relative_to(TOP)): checksum(p) for p in files}}
 
