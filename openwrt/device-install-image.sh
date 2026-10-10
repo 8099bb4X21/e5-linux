@@ -38,8 +38,14 @@ case "$MODE" in ''|--try|--switch) ;; *) echo "unknown option $MODE" >&2; exit 2
 # passwords, SSH keys, /etc/e5, the traffic records, the info screen's apps),
 # the new image's own version files kept.
 keep_config() {
-    local from=$1 N=$2 f p
+    local from=$1 N=$2 f p phone
     echo "== keeping the configuration of $from"
+    # Keep installed apps and their data, but retain this image's bundled phone
+    # code. Otherwise an update silently restores the previous voice fixes/UI.
+    phone=$(mktemp -d /tmp/e5-img.phone.XXXXXX)
+    if [ -f "$N/etc/e5-infoscreen/plugins/phone/manifest.json" ]; then
+        cp -a "$N/etc/e5-infoscreen/plugins/phone/." "$phone/"
+    fi
     for f in image-version image-form build-time; do
         cp "$N/etc/e5/$f" "/tmp/e5-img.$f" 2>/dev/null || rm -f "/tmp/e5-img.$f"
     done
@@ -57,6 +63,11 @@ keep_config() {
         rm -f "$N/etc/e5/$f"
         [ -f "/tmp/e5-img.$f" ] && mv "/tmp/e5-img.$f" "$N/etc/e5/$f"
     done
+    if [ -f "$phone/manifest.json" ]; then
+        mkdir -p "$N/etc/e5-infoscreen/plugins/phone"
+        cp -a "$phone/." "$N/etc/e5-infoscreen/plugins/phone/"
+    fi
+    rm -rf "$phone"
 }
 
 # The device's own files (firmware, the Android vendor subset) as a tar on
