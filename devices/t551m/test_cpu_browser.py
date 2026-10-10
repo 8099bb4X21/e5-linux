@@ -48,18 +48,37 @@ def main():
             const poll={add:f=>window.tick=f};
             window.L={env:{lang:'zh'}};
             const M=new Function('rpc','baseclass',common)(rpc,{extend:x=>x});
-            M.injectCss=()=>{};
+            M.localizeMenu=()=>{};
             window.cpuView=new Function('view','rpc','poll','M',source)({extend:x=>x},rpc,poll,M);
             document.body.append(cpuView.render(fixture));
         }''',[SOURCE,COMMON])
         assert page.locator('[data-setting$="_governor"]').count()==3
         assert page.locator('.cpu-thermal input').count()==2
         assert page.locator('[data-setting$="_voltage_next"]').count()==3
+        # Firmware tables use the shared themed dialog without expanding cards.
+        table_button = page.locator('.mud-cpu-table button').first
+        before_height = page.locator('.mud-cpu').bounding_box()['height']
+        page.evaluate('()=>{fixture.policies[0].voltages=Array.from({length:31},(_,i)=>({khz:600000+i*10000,uv:650000+i*3125}));return tick();}')
+        table_button.click()
+        assert page.get_by_role('dialog').count()==1
+        assert page.locator('.mud-cpu-voltage-table tbody tr').count()==31
+        assert page.locator('.mud-cpu-voltage-table tbody tr').first.inner_text()=='600\t650'
+        assert page.locator('.mud-cpu').bounding_box()['height']==before_height
+        assert page.locator('.mud-cpu-voltage-scroll').evaluate('(el)=>el.scrollHeight>el.clientHeight')
+        page.evaluate("document.querySelector('.mud-cpu-table button').click()")
+        assert page.get_by_role('dialog').count()==1
+        page.keyboard.press('Escape')
+        page.wait_for_function('!cpuView.tableOpen')
+        assert table_button.evaluate('(el)=>document.activeElement===el')
+        table_button.click()
+        page.get_by_role('dialog').get_by_role('button',name='确定',exact=True).click()
+        page.wait_for_function('!cpuView.tableOpen')
+        assert page.get_by_role('dialog').count()==0
         page.locator('[data-setting="policy0_voltage_next"]').select_option('-3125')
         page.locator('[data-setting="policy0_max"]').select_option('1200000')
         page.evaluate('()=>{fixture.policies[0].current=900000;return tick();}')
         assert page.locator('[data-setting="policy0_max"]').input_value()=='1200000'
-        assert page.locator('[data-current="policy0"]').inner_text()=='900 MHz'
+        assert page.locator('[data-current="policy0"]').inner_text()=='900'
         page.locator('.cpu-persist input').check()
         page.get_by_role('button',name='应用设置').click()
         page.wait_for_function('calls.some(c=>c.method==="apply")&&!cpuView.busy')

@@ -18,6 +18,73 @@ window.T551M = (() => {
     };
     const svg = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icons[name] || icons.apps}"/></svg>`;
     const el = id => document.getElementById(id);
+    let trafficPicker = null;
+    function closeTrafficPicker(restoreFocus = false) {
+        if (!trafficPicker || trafficPicker.list.hidden) return;
+        trafficPicker.list.hidden = true;
+        trafficPicker.button.setAttribute('aria-expanded', 'false');
+        if (restoreFocus) trafficPicker.button.focus({preventScroll:true});
+    }
+    function syncTrafficPicker() {
+        if (!trafficPicker) return;
+        const {select, button, list} = trafficPicker;
+        button.textContent = select.selectedOptions[0]?.textContent || '';
+        for (const [i, option] of [...select.options].entries()) {
+            const row = list.children[i];
+            row.querySelector('span').textContent = option.textContent;
+            row.setAttribute('aria-selected', String(option.selected));
+            row.tabIndex = option.selected ? 0 : -1;
+        }
+    }
+    function bootTrafficPicker() {
+        const select = el('tf-slot'), wrap = select?.parentElement;
+        if (!wrap) return;
+        // Keep the existing value/change API, but never open WebKit's native
+        // popup, which cannot inherit this shell's theme or touch geometry.
+        select.hidden = true;
+        const button = document.createElement('button'), list = document.createElement('div');
+        button.id = 'tf-slot-button'; button.type = 'button'; button.className = 'traffic-trigger';
+        button.setAttribute('aria-haspopup', 'listbox'); button.setAttribute('aria-expanded', 'false');
+        button.setAttribute('aria-controls', 'tf-slot-options');
+        list.id = 'tf-slot-options'; list.className = 'traffic-options'; list.hidden = true;
+        list.setAttribute('role', 'listbox'); list.setAttribute('aria-labelledby', 'tf-slot-label');
+        const label = document.querySelector('label[for="tf-slot"]');
+        label.id = 'tf-slot-label'; label.htmlFor = button.id;
+        for (const option of select.options) {
+            const row = document.createElement('button');
+            row.type = 'button'; row.dataset.value = option.value; row.setAttribute('role', 'option');
+            row.innerHTML = '<span></span>' + svg('check');
+            row.onclick = () => {
+                const changed = select.value !== option.value;
+                select.value = option.value; syncTrafficPicker(); closeTrafficPicker(true);
+                if (changed) select.dispatchEvent(new Event('change', {bubbles:true}));
+            };
+            list.appendChild(row);
+        }
+        wrap.append(button, list); trafficPicker = {select, button, list};
+        select.addEventListener('change', syncTrafficPicker);
+        button.onclick = () => {
+            if (!list.hidden) { closeTrafficPicker(true); return; }
+            syncTrafficPicker(); list.hidden = false; button.setAttribute('aria-expanded', 'true');
+            list.querySelector('[aria-selected="true"]').focus({preventScroll:true});
+        };
+        document.addEventListener('pointerdown', event => {
+            if (!wrap.contains(event.target)) closeTrafficPicker();
+        }, true);
+        window.addEventListener('keydown', event => {
+            if (list.hidden) return;
+            if (event.key === 'Tab') { closeTrafficPicker(true); return; }
+            if (!['Escape','ArrowUp','ArrowDown','Home','End','Enter',' '].includes(event.key)) return;
+            event.preventDefault(); event.stopImmediatePropagation();
+            if (event.key === 'Escape') { closeTrafficPicker(true); return; }
+            const rows = [...list.children], index = rows.indexOf(document.activeElement);
+            if (event.key === 'Enter' || event.key === ' ') { rows[Math.max(0,index)].click(); return; }
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length-1
+                : (index + (event.key === 'ArrowUp' ? -1 : 1) + rows.length) % rows.length;
+            rows[next].focus({preventScroll:true});
+        }, true);
+        syncTrafficPicker();
+    }
     const words = (zh, en) => document.documentElement.lang == 'en' ? en : zh;
     const titles = [['概览','Home'],['信号','Signal'],['流量','Usage'],['短信','Messages'],['热点','Hotspot'],['设备','Device'],['详细信息','Details'],['设置','Settings'],['应用','Apps']];
     const pageIcons = ['home','signal','traffic','sms','wifi','device','info','settings','apps'];
@@ -95,6 +162,7 @@ window.T551M = (() => {
     }
     function pageChanged(index) {
         if (!mounted) return;
+        if (index !== P.traffic) closeTrafficPicker();
         el('mobile-title').textContent = appOpen ? lbl(appOpen.name) || appOpen.id : label(index);
         const button = el('mobile-back'), icon = index === P.overview && !appOpen ? 'home' : 'back';
         if (button.dataset.icon !== icon) {
@@ -161,6 +229,7 @@ window.T551M = (() => {
 <div id="lock-rates"><div><span>↓ <span id="lock-rx-label">下载</span></span><strong id="lock-rx">—</strong></div><div><span>↑ <span id="lock-tx-label">上传</span></span><strong id="lock-tx">—</strong></div></div>
 </div><div id="lock-swipe">${svg('up')}<span id="lock-hint">从下方向上滑动解锁</span><i></i></div></section>`);
         mounted = true;
+        bootTrafficPicker();
         T551MPower.boot();
         el('bar-bat').insertAdjacentHTML('beforeend', '<svg class="battery-bolt" viewBox="0 0 12 16" aria-hidden="true"><path d="M7 1 2 9h4l-1 6 7-9H7z"/></svg>');
         el('bar-bars').insertAdjacentHTML('afterend', '<span id="bar-dual" role="img" hidden>'+[0,1].map(slot=>`<span class="dual-row" id="bar-signal-${slot}"><i></i><i></i><i></i><i></i></span>`).join('')+'</span>');
@@ -252,6 +321,7 @@ window.T551M = (() => {
     }
     function status(data) {
         if (!mounted) return;
+        syncTrafficPicker();
         const first = !Object.keys(config).length;
         const lockWasEnabled = config.lock_enabled !== false;
         config = data.screen || {};
@@ -374,6 +444,7 @@ window.T551M = (() => {
         animation = setTimeout(() => { animation = null; finishUnlock(); }, ms);
     }
     function power(on) {
+        closeTrafficPicker();
         dark = on;
         lock();
         if (!on && config.lock_enabled === false) finishUnlock();

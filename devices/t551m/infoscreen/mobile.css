@@ -174,12 +174,22 @@ body.no-motion #pages,body.no-motion #mobile-lockscreen,body.no-motion #mobile-m
 .traffic-scope { display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
 .traffic-scope label { flex:1 0 auto; color:var(--dim); }
 .traffic-select { position:relative; flex:1 1 calc(150px * var(--ui-scale)); min-width:0; color:var(--dim); }
-.traffic-select::after { content:""; position:absolute; right:15px; top:50%; width:7px; height:7px; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:translateY(-70%) rotate(45deg); pointer-events:none; }
+.traffic-trigger::after { content:""; position:absolute; right:15px; top:50%; width:7px; height:7px; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:translateY(-70%) rotate(45deg); pointer-events:none; }
 .traffic-select:focus-within { color:var(--accent); }
-.traffic-scope select { appearance:none; -webkit-appearance:none; display:block; width:100%; min-width:0; min-height:44px; padding:9px 36px 9px 12px; border:1px solid var(--line); border-radius:11px; color:var(--text); background:rgba(var(--button-rgb),var(--surface-alpha)); font:inherit; line-height:1.4; color-scheme:dark; }
-.traffic-scope select:focus { outline:2px solid var(--accent); outline-offset:-2px; }
-.traffic-scope select option { color:var(--text); background:rgb(var(--surface-rgb)); }
-body[data-theme=light] .traffic-scope select { color-scheme:light; }
+.traffic-scope select[hidden] { display:none; }
+.traffic-trigger { position:relative; display:block; text-align:left; width:100%; min-width:0; min-height:44px; padding:9px 36px 9px 12px; border:1px solid var(--line); border-radius:11px; color:var(--text); background:rgba(var(--button-rgb),var(--surface-alpha)); font:inherit; line-height:1.4; }
+.traffic-trigger:focus-visible,.traffic-options button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.traffic-options { position:absolute; z-index:30; top:calc(100% + 6px); left:0; right:0; padding:5px; border:1px solid var(--line); border-radius:14px; background:rgb(var(--surface-rgb)); color:var(--text); box-shadow:0 8px 24px #0003; animation:traffic-options-in .16s ease-out; }
+.traffic-options[hidden] { display:none; }
+.traffic-options button { display:flex; align-items:center; gap:8px; width:100%; min-height:44px; padding:10px; text-align:left; border:0; border-radius:9px; background:transparent; color:inherit; font:inherit; line-height:1.4; }
+.traffic-options button span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.traffic-options button svg { width:18px; height:18px; flex:none; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; visibility:hidden; }
+.traffic-options button[aria-selected=true] { background:rgba(var(--active-rgb),.2); color:var(--accent); }
+.traffic-options button[aria-selected=true] svg { visibility:visible; }
+.traffic-options button:active { background:rgba(var(--active-rgb),.3); }
+@keyframes traffic-options-in { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
+body.no-motion .traffic-options { animation:none; }
+@media(prefers-reduced-motion:reduce) { .traffic-options { animation:none; } }
 .traffic-scope .sub { width:100%;overflow-wrap:anywhere; }
 [data-title="traffic"] .mid { font-size:12px; font-weight:400; }
 #toast { z-index:70; bottom:calc(var(--nav-h) + 8px); }

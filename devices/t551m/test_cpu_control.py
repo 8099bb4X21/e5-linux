@@ -151,7 +151,7 @@ class CPUControlTest(unittest.TestCase):
         (self.policy / 'scaling_voltage_domain').write_text('0')
         (self.policy / 'scaling_voltage_offset').write_text('0')
         self.control.runtime.mkdir(parents=True, exist_ok=True)
-        (self.control.runtime / 'voltage-supported').write_text('1')
+        (self.control.runtime / module.VOLTAGE_CAPABILITY_CACHE).write_text('1')
 
     def test_voltage_is_saved_for_boot_and_does_not_fake_readback(self):
         self.enable_voltage()
@@ -170,7 +170,7 @@ class CPUControlTest(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.control.apply({'policies':[{'id':'policy0','max':900000,'voltage_next':value}]})
             self.assertEqual(module.read(self.policy/'scaling_max_freq'), '1500000')
-        (self.control.runtime / 'voltage-supported').write_text('0')
+        (self.control.runtime / module.VOLTAGE_CAPABILITY_CACHE).write_text('0')
         with self.assertRaisesRegex(ValueError, 'unavailable'):
             self.control.set_item('policy0_voltage_next', '-3125')
         self.assertFalse(self.control.voltage_config.exists())
@@ -236,6 +236,68 @@ class CPUControlTest(unittest.TestCase):
             self.assertEqual(run.call_args.args[0][-1], 'voltage_offset_uv=0,0,0')
         self.assertEqual(self.control.voltage_profile(), [-3125,0,0])
         self.assertFalse(self.control.voltage_armed.exists())
+
+
+class VoltageFirmwareTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.control = module.Control(self.root)
+        self.compatible = self.root / 'sys/firmware/devicetree/base/compatible'
+        self.compatible.parent.mkdir(parents=True)
+        self.compatible.write_bytes(b'sprd,ums512-base\0sprd,ums9621\0')
+        for slot, dev in [('a', 'mmcblk0p6'), ('b', 'mmcblk0p7')]:
+            path = self.root / 'sys/class/block' / dev / 'uevent'
+            path.parent.mkdir(parents=True)
+            path.write_text('PARTNAME=sml_' + slot + '\n')
+            image = self.root / 'dev' / dev
+            image.parent.mkdir(exist_ok=True)
+            image.write_bytes(slot.encode() * 1024 * 1024)
+
+    def check_hashes(self, hashes):
+        with patch.object(module.hashlib, 'sha256') as sha:
+            sha.return_value.hexdigest.side_effect = hashes
+            result = self.control.voltage_supported()
+            self.assertEqual(sha.call_count, 2)
+            self.assertTrue(all(len(call.args[0]) == 1024 * 1024 for call in sha.call_args_list))
+            return result
+
+    def test_each_verified_firmware_pair_is_supported(self):
+        for digest in module.VERIFIED_VOLTAGE_FIRMWARE:
+            with self.subTest(digest=digest):
+                (self.control.runtime / module.VOLTAGE_CAPABILITY_CACHE).unlink(missing_ok=True)
+                self.assertTrue(self.check_hashes([digest, digest]))
+
+    def test_mixed_verified_slots_are_rejected(self):
+        self.assertFalse(self.check_hashes(sorted(module.VERIFIED_VOLTAGE_FIRMWARE)))
+
+    def test_unknown_or_mismatched_slot_is_rejected(self):
+        known = next(iter(module.VERIFIED_VOLTAGE_FIRMWARE))
+        for hashes in [('unknown', 'unknown'), (known, 'unknown')]:
+            (self.control.runtime / module.VOLTAGE_CAPABILITY_CACHE).unlink(missing_ok=True)
+            self.assertFalse(self.check_hashes(hashes))
+
+    def test_missing_slot_is_rejected(self):
+        (self.root / 'dev/mmcblk0p7').unlink()
+        with patch.object(module.hashlib, 'sha256') as sha:
+            sha.return_value.hexdigest.return_value = next(iter(module.VERIFIED_VOLTAGE_FIRMWARE))
+            self.assertFalse(self.control.voltage_supported())
+
+    def test_soc_match_is_a_complete_compatible_entry(self):
+        self.compatible.write_bytes(b'other,sprd,ums9621\0')
+        with patch.object(module.hashlib, 'sha256') as sha:
+            self.assertFalse(self.control.voltage_supported())
+            sha.assert_not_called()
+
+    def test_old_negative_cache_is_rechecked_and_new_cache_is_used(self):
+        self.control.runtime.mkdir(parents=True)
+        (self.control.runtime / 'voltage-supported').write_text('0')
+        digest = next(iter(module.VERIFIED_VOLTAGE_FIRMWARE))
+        self.assertTrue(self.check_hashes([digest, digest]))
+        with patch.object(module.hashlib, 'sha256') as sha:
+            self.assertTrue(self.control.voltage_supported())
+            sha.assert_not_called()
 
 
 if __name__=='__main__':

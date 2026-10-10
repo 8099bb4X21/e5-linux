@@ -651,6 +651,12 @@ function errorText(value, language) {
 /* END SHARED PLATFORM MESSAGES */
 
 var DASH_I18N = {
+	"频率与调速策略": ["Frequency and governor", "Frekans ve yönetici"],
+	"即时生效": ["Applies immediately", "Hemen uygulanır"],
+	"电压设置": ["Voltage settings", "Voltaj ayarları"],
+	"重启后生效": ["Applies after reboot", "Yeniden başlatmada uygulanır"],
+	"当前频率": ["Current frequency", "Geçerli frekans"],
+	"当前内核或固件不支持开机电压调整": ["Boot voltage adjustment is unavailable with this kernel or firmware", "Bu çekirdek veya ürün yazılımı açılış voltajı ayarını desteklemiyor"],
 	"当前有效范围：": ["Effective range: ", "Etkin aralık: "],
 	"原厂电压（0 mV）": ["Factory voltage (0 mV)", "Fabrika voltajı (0 mV)"],
 	"当前偏移：": ["Active offset: ", "Etkin ofset: "],
@@ -1239,7 +1245,7 @@ function localizeMenu() {
 	if (!root || !root.querySelectorAll) return;
 	var update = function() {
 		if (uiLanguage() === 'zh') return;
-		Array.prototype.forEach.call(root.querySelectorAll('a[href*="/admin/home"], a[href*="/admin/modem"], a[href*="/admin/system/cpu"]'), localize);
+		Array.prototype.forEach.call(root.querySelectorAll('a[href*="/admin/home"], a[href*="/admin/modem"]'), localize);
 		Array.prototype.forEach.call(root.children, function(li) {
 			var a = li.querySelector('a');
 			if (a && a.textContent.trim() === '蜂窝') localize(a);
@@ -1704,7 +1710,7 @@ function busy(btn, on) {
  * M.confirmBox(title, message, opts) -> Promise<boolean>：主题化确认框，
  * 取消/遮罩/Escape 都 resolve(false)，确定/Enter resolve(true)。
  * M.alertBox(title, message, opts) -> Promise<true>：单按钮提示框。
- * opts: { danger:true 红色确认键, okText, cancelText }；danger 时默认焦点在取消上。 */
+ * opts: { danger:true 红色确认键, okText, cancelText, content: DOM Node }；danger 时默认焦点在取消上。 */
 function dialog(opts) {
 	opts = opts || {};
 	return new Promise(function(resolve) {
@@ -1718,6 +1724,7 @@ function dialog(opts) {
 			'</div></div>';
 		wrap.querySelector('h4').textContent = translate(opts.title || '确认');
 		wrap.querySelector('.mud-dlg-msg').textContent = translate(opts.message || '');
+		if (opts.content instanceof Node) wrap.querySelector('.mud-dlg-msg').appendChild(opts.content);
 		var btns = wrap.querySelectorAll('.mud-dlg-btns .mud-btn');
 		btns[btns.length - 1].textContent = translate(opts.okText || '确定');
 		if (withCancel) btns[0].textContent = translate(opts.cancelText || '取消');
@@ -1731,7 +1738,7 @@ function dialog(opts) {
 			else if (ev.key == 'Enter') { ev.preventDefault(); done(true); }
 		};
 		wrap.addEventListener('click', function(ev) {
-			var b = ev.target.closest('button');
+			var b = ev.target.closest('.mud-dlg-btns button[data-r]');
 			if (b) done(b.getAttribute('data-r') == '1');
 			else if (ev.target === wrap && withCancel) done(false);
 		});

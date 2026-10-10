@@ -38,8 +38,11 @@ including temperature-specific tables and transition delays. Runtime reinitializ
 would mutate tables repeatedly, so module unloading and sysfs rebinding are disabled.
 The backend loads the module once, at S13, before the charger-only boot gate.
 
-Verified SML image (both slots, 1 MiB including its header):
-`c3ab5b763cbcfd09d1a4e8f598ed703c739a2081682f8278276dba4581cd1c44`.
+Verified SML images (both slots must contain the same image, 1 MiB including its header):
+
+- T551M: `c3ab5b763cbcfd09d1a4e8f598ed703c739a2081682f8278276dba4581cd1c44`.
+- E5: `51ab807ce7c13795e134031b81f6f6b904da38a771c166ce4e279f93dac72890`.
+
 The userspace gate checks the SoC and both firmware images before accepting any
 nonzero offset. Unknown firmware falls back to factory voltage. Nothing writes
 SML, NV, DTBO or boot partitions when a user saves voltage settings.
@@ -51,6 +54,18 @@ exact 3125 uV multiples within -50000..25000 uV and encodes `floor(abs(uV)/1000)
 to invert that rounding. The low byte remains reserved for existing debug flags.
 The DCDC `margin_set` value is **transition timing**, not a voltage offset.
 There is no added overclock state or direct PMIC write.
+
+The E5 equivalents are `0xb0007300` (DVFS init), `0xb0006248` (flag decoder)
+and `0xb0004068` (selector adjustment). The selector function is byte-identical;
+the decoder only relocates its domain state from `0xb0024df0` to `0xb0028068`.
+The three CPU/SRAM table paths retain paired selector adjustment and temperature
+table tracking. Comparing the DVFS code from T551M `0xb0004090..0xb000757b`
+with E5 at -0x28 finds only relocated address loads and branch targets.
+E5 hardware verification at -3125 uV confirms all 31 OPPs and five maximum-
+frequency PMIC samples for each domain. The domain-to-rail map is unchanged:
+0/1/2 -> vddcpu1/2/0. SRAM readback remains subject to firmware floors.
+The versioned capability cache refreshes a previous unsupported result on update;
+unknown or mixed-slot firmware stays disabled.
 
 `scaling_voltage_offset` and `scaling_voltage_domain` report the boot request
 and firmware domain. The existing voltage table reports the resulting firmware

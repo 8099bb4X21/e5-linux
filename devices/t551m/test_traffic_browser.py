@@ -38,7 +38,30 @@ def main():
         page.goto(f'http://127.0.0.1:{server.server_port}/');page.wait_for_function("typeof last!=='undefined'&&last!==null")
         page.evaluate('showPage(P.traffic)');page.wait_for_function("document.querySelector('#tf-day-used').textContent==='1 KB'")
         assert '历史记录' in page.locator('#tf-state').inner_text()
-        page.locator('#tf-slot').select_option('1');page.wait_for_function("document.querySelector('#tf-day-used').textContent==='2 KB'")
+        page.wait_for_timeout(600)  # Let the initial wake touch guard expire.
+        assert page.locator('#tf-slot').is_hidden(), 'Native popup must not be reachable'
+        page.locator('#tf-slot-button').click()
+        assert page.locator('#tf-slot-options').is_visible()
+        assert page.locator('#tf-slot-options [aria-selected=true]').inner_text()=='跟随数据卡'
+        page.evaluate('T551M.status(last)')
+        assert page.locator('#tf-slot-options').is_visible(), 'Polling closed the picker'
+        page.keyboard.press('Escape')
+        assert page.locator('#tf-slot-options').is_hidden()
+        assert page.locator('#tf-slot-button').evaluate('(e)=>e===document.activeElement')
+        for theme in ['dark','light']:
+            page.evaluate("theme=>{last.screen.ui_theme=theme;last.screen.ui_size='large';T551M.status(last)}",theme)
+            page.locator('#tf-slot-button').click()
+            page.wait_for_timeout(200)  # Inspect the settled opening animation.
+            box=page.locator('#tf-slot-options').bounding_box()
+            assert box['x']>=0 and box['x']+box['width']<=320 and box['y']+box['height']<=480
+            page.screenshot(path=str(TOP/f'logs/t551m/traffic-picker-{theme}.png'))
+            page.locator('#mobile-title').click()
+            assert page.locator('#tf-slot-options').is_hidden()
+        page.locator('#tf-slot-button').click()
+        page.locator('#tf-slot-options [data-value="1"]').click()
+        page.wait_for_function("document.querySelector('#tf-day-used').textContent==='2 KB'")
+        assert page.locator('#tf-slot-button').inner_text()=='SIM 2'
+        assert page.locator('#tf-slot-options').is_hidden()
         assert page.locator('#tf-boot-rx').inner_text()=='6 KB'
         assert not any('sim' in path for path,_ in posts),'View selector switched real SIM'
         page.screenshot(path=str(TOP/'logs/t551m/traffic-screen.png'))

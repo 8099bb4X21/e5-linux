@@ -11,6 +11,15 @@ import subprocess
 import time
 
 
+# Whole 1 MiB SML images, including the vendor header. Both implement the
+# signed DVFS_INIT domain-byte ABI; see devices/t551m/cpufreq/README.md.
+VERIFIED_VOLTAGE_FIRMWARE = frozenset({
+    'c3ab5b763cbcfd09d1a4e8f598ed703c739a2081682f8278276dba4581cd1c44',
+    '51ab807ce7c13795e134031b81f6f6b904da38a771c166ce4e279f93dac72890',
+})
+VOLTAGE_CAPABILITY_CACHE = 'voltage-supported-v2'
+
+
 def read(path, default=''):
     try:
         return path.read_text().strip()
@@ -57,12 +66,12 @@ class Control:
         Both slots must match: the running secure monitor is selected before
         Linux. No NV, DTBO, secure firmware or boot partitions are written.
         """
-        cache = self.runtime / 'voltage-supported'
+        cache = self.runtime / VOLTAGE_CAPABILITY_CACHE
         if cache.exists():
             return read(cache) == '1'
         supported = False
         compatible = read(self.root / 'sys/firmware/devicetree/base/compatible')
-        if 'sprd,ums9621\0' in compatible + '\0':
+        if 'sprd,ums9621' in compatible.split('\0'):
             hashes = {}
             for entry in (self.root / 'sys/class/block').glob('*/uevent'):
                 fields = dict(line.split('=', 1) for line in read(entry).splitlines() if '=' in line)
@@ -75,9 +84,9 @@ class Control:
                     hashes[name] = hashlib.sha256(data).hexdigest()
                 except OSError:
                     pass
-            supported = len(hashes) == 2 and all(h ==
-                'c3ab5b763cbcfd09d1a4e8f598ed703c739a2081682f8278276dba4581cd1c44'
-                for h in hashes.values())
+            supported = (len(hashes) == 2 and
+                         len(set(hashes.values())) == 1 and
+                         hashes['sml_a'] in VERIFIED_VOLTAGE_FIRMWARE)
         self.runtime.mkdir(parents=True, exist_ok=True)
         cache.write_text('1' if supported else '0')
         return supported
