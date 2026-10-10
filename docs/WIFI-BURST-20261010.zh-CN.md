@@ -123,6 +123,10 @@ build-id：`abf9bbe05d566213af34402d63db8899ad469773`。
 
 ## Android 原版 BA 清理对比
 
+本节仅比较两份原厂实现中的常规清理。用户随后提供的历史 KPM 证明还存在
+本节未涵盖的“全 peer TX BA rearm”补丁，当前驱动缺少该机制，详见下一节。
+不能把“常规 DELTXBA 已有”概括成“多客户端 BA 恢复已经完整”。
+
 2026-10-10 从本机 `super` 的 `vendor_dlkm_a` extent 只读提取
 `lib/modules/sprd_wlan_combo.ko`，未切换 Android，也未卸载正在运行的驱动。
 模块保存于本地 `work/t551m/stock-sprd_wlan_combo.ko`，大小 39,199,704 字节，
@@ -184,3 +188,70 @@ BA 资源管理或带宽选择修复位于闭源 WCN 固件内。
 本轮只做读取、反汇编和文档记录，没有加入定时清 BA、强制重协商或切换带宽
 的实验行为。证据文件保留在 `work/t551m/stock-wifi-*` 和
 `logs/t551m/wifi-ba-*`，没有将原厂二进制加入 Git。
+
+## 用户历史 V4 KPM 的新证据
+
+参考文件为用户提供的
+`D:\随身WiFi\荣悦E5刷机\热点速率研究\saved_versions\20260722_SC2355_BA_V4_Runtime_KPM_universal\sc2355_ba_v4_universal_test.kpm`。
+大小 8,144 字节，SHA-256 为
+`8308221f3c16d0ed255f47a3041b59280adee08cb77fa6f46749f9824e7730c5`。
+同目录保留了 `module_sc2355_ba_v4_universal.c`、`verify_layout.py` 和 README。
+已经同时读取源码与 KPM 反汇编，以下关键行为相符，而不是仅根据文件名判断。
+
+### 与常规 DELTXBA 不同的机制
+
+1. `event_sta_lut_after()` 在 STA LUT **ADD/UPDATE**（action 1/2）之后，
+   遍历 32 个 peer，将全部 `ba_tx_done_map` 清零。它不要求客户端数达到 3，
+   不主动发送 DELBA、不清接收重排序缓冲、不强制 80 MHz；目的是让仍有流量
+   的旧客户端也能重新进入原驱动的 ADDBA 条件，而不是只重置刚加入的客户端。
+   KPM `.text+0x50` 装入计数 32，`+0x64` 执行清零循环，`+0x6c` 写屏障。
+2. `tx_prepare_addba_before()` 在原来的 HT、流量计数、位图及约 3 秒重试
+   条件满足后，再加全局 **120 ms** 的 ADDBA 准入间隔。未获准时直接跳过
+   本次 BA 建立，后续报文再尝试，不通过 sleep/忙等暂停数据发送。
+   它限制的是重新协商请求，不是每个数据包的发送间隔。
+3. 这个通用 KPM 的准入时间戳采用原子 CAS；反汇编 `+0x220` 起可见
+   `LDAXR/STLXR`，`tx_prepare_addba_after()` 在原函数没有置位时尝试撤销
+   本次准入。不可把这个通用 KPM 称为 non-atomic 版本。
+
+**当前 OpenWrt 缺少第 1、2 项**：`sc2355_event_sta_lut()` 的 ADD/UPDATE
+只清 `peer_entry[i]`，`sc2355_tx_prepare_addba()` 只有单个 peer/TID 的重试
+间隔。前一节确认的 DELTXBA 是依赖固件 type 6 通知的单 peer/TID 清理，
+不能替代这里由客户端关联事件触发的全 peer 重建。前次聊天将两者混在一起
+回答“已有清 BA”，结论不完整；这份补丁提供了具体缺失机制的证据。
+
+### 本机与历史样本的对应关系
+
+运行用户提供的只读 `verify_layout.py` 检查本机 Android ko，结果为：
+
+```text
+valid=True stride=0x98 ba=0x30e8 tx_num=0x43d0
+```
+
+进一步比较归档内 `sprd_wlan_combo_e5_stock.ko`（完整文件 SHA-256 为
+`e3595237cbbaad642d7ab0c70a7d3dc8b8a7bbc22fc0ed0a429b03944f893b6d`）：
+它与本机原版的完整文件哈希不同，但 `.text` 内容哈希相同；
+`sc2355_event_sta_lut`、`tx_prepare_addba`、`sdio_tx_ba_mgmt`、
+`sc2355_wlan_ba_session_event` 的偏移、长度与机器码哈希均相同。
+这说明参考补丁直接针对相同的 BA 代码，而不是仅因 SoC 名称相同而推测。
+该检查不代表完整 ELF、重定位、模块 ABI 或其他平台配置全部兼容。
+证据保存于 `logs/t551m/wifi-ba-reference-comparison.json`。
+
+### 历史验证范围与源码移植边界
+
+同一研究目录的 `E5_WIFI_RESEARCH_FINAL_ARCHIVE_20260723.md` 明确将问题
+分成两层：全 peer rearm 对“第三台加入后全体约 70 Mbps”的退化有改善；
+部分后关联客户端即使 BA 建立成功，仍只有约 70–200 Mbps，归档将其进一步
+指向固件内部 AP/vdev 聚合、速率或调度状态。前者有已验证的驱动侧办法，
+不能因此宣称后者也已解决，也不能将约 70 Mbps 直接等同于实际 VHT20。
+这些是用户旧设备的历史测试记录，本轮未在 T551M 上重新复现或验证。
+
+归档最终推荐的是 `20260723_E5_rollback_to_v4_nonatomic_gate120` 中的
+静态版本：全 peer rearm + non-atomic、非阻塞 120 ms 间隔，保持原厂 WCN。
+原子 120 ms、450 ms、force-awake 和 WCN single-flight 均未成为该归档的
+日用首选；因此后续移植应区分本次给出的通用 KPM 与后来实测选定的基线。
+
+在当前 6.18 源码中落地时，应使用结构体成员与正常驱动生命周期，并核对
+AP/GO 上下文、并发和重试语义。当前 `peer_entry.time[]` 是 `s64`，旧版
+KPM 假定每个时间戳为 16 字节的 `timespec64`，函数名、ABI、编译布局也有
+变化；不应将这份运行时二进制或 Android 地址偏移直接套到现有 OpenWrt。
+本轮完成补丁机制与缺口核对，未加载 KPM、未改变实机 BA/带宽策略。
