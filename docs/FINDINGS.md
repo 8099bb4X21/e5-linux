@@ -5485,7 +5485,12 @@ OTG10 已正常启动，全局 autosuspend=2；三轮实物插拔均完成网卡
 E5 已安装 mobile4 OTG 内核、匹配模块、新 initramfs 和 mobile.js；正常从
 TF 启动，userdata 只读，/run 没有修复记录。启动日志 15.26 秒 switch-root，
 USB NCM、热点和 WAN 正常。三次 OTG 插拔均获取 IP，用户确认充电器插入、
-拔出均能唤醒并保持锁屏。默认 Android 选择保留。T551M 源码、候选镜像
-及离线 rootfs 已同步，当前未连接，尚未部署本次新增功能。
+拔出均能唤醒并保持锁屏。默认 Android 选择保留。
+
+随后 T551M 也完成部署与重启校验，保留原 OTG10 内核和默认 Linux 启动。
+userdata checkpoint 为 clean-unmount，10.47 秒直接挂载成功，16.33 秒
+switch-root，没有执行 fsck。USB DHCP/SSH、蜂窝 WAN、热点 AP、屏幕 API
+和 cog 进程正常，boot_b 与新 mobile.js 校验通过。正式镜像、离线 rootfs
+及校验文件已同步；本轮没有重新进行 T551M 物理插拔测试。
 
 详见 [恢复与插拔亮屏记录](F2FS-RECOVERY-AND-CHARGER-WAKE-20261010.zh-CN.md)。

@@ -69,8 +69,8 @@ OpenWrt 用于实机验证。第一次重启因 --rearm 在默认 Android 下为
 
 E5 启动镜像：`out/e5/boot-mobile4-recovery.img`，SHA256
 `676f8d88409eabf500fd97262ac0b0e059182d71a10f0f3786852cef35c5287d`。
-T551M 对应候选：`out/t551m/boot-otg10-recovery.img`，已构建，当前未连接，
-尚未将本次自动恢复与插拔亮屏更新刷入 T551M。
+T551M 对应镜像：`out/t551m/boot-otg10-recovery.img`；E5 验证时仅完成构建，
+随后已按用户要求部署，结果见下文。
 
 ### 最终实物验证与离线同步
 
@@ -86,4 +86,31 @@ E5 离线 rootfs、匹配模块、正式 `out/e5/kernel` 和 `out/e5/boot-mobile
 已同步；旧输出保存在 `out/e5/release-before-otg4`。历史初次移植用的
 features-update.tar.gz 不是本次重新打包的发布物。
 T551M 离线 rootfs 候选为 `out/t551m/openwrt-t551m-recovery-wake.ext4.gz`，
-完成 ext4 五阶段检查及压缩文件校验；仍未部署，未替换其正式输出。
+完成 ext4 五阶段检查及压缩文件校验；随后随 T551M 部署提升为正式输出。
+
+### T551M 后续部署
+
+核对设备 profile、eMMC CID、OTG10 内核、userdata 内 ext4 根镜像路径及
+当前 boot_b 校验值后部署。现有模块逐个校验通过，内核及模块无需更换；
+只更新启动镜像和 mobile.js。旧启动头与屏幕文件保存在设备
+`/mnt/e5-data/e5linux/recovery-wake-rollback`，boot_b 尾部日志区保留。
+没有操作 NV，默认及下次启动均保持 Linux。
+
+重启后读取 boot_b 前 56 MiB 和 mobile.js 校验一致，boot ID 已改变。
+启动日志显示 userdata checkpoint 为 clean-unmount，10.47 秒直接挂载成功，
+16.33 秒 switch-root，45 个早期模块全部加载成功；没有 f2fs 检查/修复阶段，
+`/run` 没有修复标记或日志。健康 userdata 启动未执行 fsck。
+电脑 USB DHCP 恢复后 SSH 正常；蜂窝 WAN 的 sipa_eth0 为 up、热点为 AP，
+USB gadget configured，无残留主机总线，全局 autosuspend 仍为 2。
+屏幕 API 返回供电状态布尔值，cog/WPE 进程正常，新 mobile.js 已加载部署。
+验证记录：`work/t551m/recovery-wake-verified.txt`。
+
+本轮没有再次进行 T551M 的物理充电器插拔或 OTG 网卡三轮测试；OTG10 内核
+保持此前已通过实物测试的版本，共享亮屏逻辑已在 E5 实测及浏览器专项测试通过。
+没有人为破坏 T551M 分区来触发恢复。
+
+正式 `out/t551m/openwrt-persistent-boot.img`、对应 manifest/init、离线
+`openwrt-t551m-persistent.ext4.gz` 及 `SHA256SUMS-persistent` 已同步。
+旧正式产物保存在 `out/t551m/release-before-recovery-wake`。
+新启动镜像 SHA256 为
+`64c14981b48587aca97d41a9ce4b1baec6dc10466c4595b69ac02977ab4b6a24`。
