@@ -7,6 +7,7 @@ const M=new Function('rpc','baseclass','L',common)({declare:()=>()=>Promise.reso
 const cpu=fs.readFileSync(base+'view/mu300/cpu.js','utf8');
 const labels=[...cpu.matchAll(/text\('([^']*)','([^']*)'\)/g)].map(x=>x[1]);
 labels.push('SIM 卡管理','切换上网卡','开机使用','清空当前卡记录','需要确认清空','与屏幕共用系统双卡短信池');
+labels.push('切换上网卡后，看板、锁定和 AT 的查看卡槽会同步；仍可手动查看另一张卡。');
 for(const lang of ['en','tr']) {
     L.env.lang=lang;
     for(const label of labels) assert(!/[\u3400-\u9fff]/.test(M.translate(label)),lang+': '+label);

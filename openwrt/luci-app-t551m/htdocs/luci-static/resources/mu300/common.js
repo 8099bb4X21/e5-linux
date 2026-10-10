@@ -12,13 +12,33 @@
  * 深浅两套模式都跟随主题。 */
 
 function simSlot() { return sessionStorage.getItem('modem-view-slot') === '1' ? '1' : '0'; }
+var dataSimRevision = 0, simVisibilityBound = false;
+function followDataSim(slot, confirmed) {
+	if (slot !== 0 && slot !== 1 && slot !== '0' && slot !== '1') return;
+	var next = String(slot), previous = sessionStorage.getItem('modem-data-slot');
+	// A manual view stays selected until the actual data SIM changes again.
+	// First observation also repairs sessions left on SIM 1 by older releases.
+	if (!confirmed && previous === next) return;
+	dataSimRevision++;
+	sessionStorage.setItem('modem-data-slot', next);
+	var changed = simSlot() !== next;
+	sessionStorage.setItem('modem-view-slot', next);
+	// Drop all page-local signal/history/rate caches together, just like a
+	// manual selector change. The SIM-management page itself has no selector.
+	if (changed && document.querySelector('.mud-sim-selector')) window.location.reload();
+}
 function scopedRpc(method, params, nobatch) {
 	params = params || [];
 	var call = rpc.declare({object:'mu300dash', method:method, params:params.concat(['slot']), expect:{'':{}}, nobatch:!!nobatch});
 	return function() {
 		var args = Array.prototype.slice.call(arguments, 0, params.length);
 		while (args.length < params.length) args.push('');
-		return call.apply(null, args.concat([simSlot()]));
+		var revision = dataSimRevision;
+		return call.apply(null, args.concat([simSlot()])).then(function(result) {
+			if (method === 'status' && revision === dataSimRevision)
+				followDataSim(result && result.info && result.info.modem && result.info.modem.data_sim);
+			return result;
+		});
 	};
 }
 function simSelector(root) {
@@ -49,6 +69,13 @@ function simSelector(root) {
 	};
 	localize(row);
 	root.insertBefore(row,root.firstChild);
+	callSimGet().catch(function() {});
+	if (!simVisibilityBound) {
+		simVisibilityBound = true;
+		document.addEventListener('visibilitychange', function() {
+			if (!document.hidden && document.querySelector('.mud-sim-selector')) callSimGet().catch(function() {});
+		});
+	}
 }
 var callStatus = scopedRpc('status');
 var callRates = scopedRpc('rates', [], true);
@@ -56,7 +83,15 @@ var callRates = scopedRpc('rates', [], true);
 var callCells = scopedRpc('cells', [], true);
 var callSignal = scopedRpc('signal', [], true);
 var callSysinfo = rpc.declare({ object: 'mu300dash', method: 'sysinfo', expect: { '': {} } });
-var callSimGet = rpc.declare({object:'mu300dash',method:'sim_get',expect:{'':{}},nobatch:true});
+var readSimGet = rpc.declare({object:'mu300dash',method:'sim_get',expect:{'':{}},nobatch:true});
+function callSimGet() {
+	var revision = dataSimRevision;
+	return readSimGet().then(function(info) {
+		// A late pre-switch read must not undo a verified completed switch.
+		if (revision === dataSimRevision && info && info.ok !== false) followDataSim(info.data_sim);
+		return info;
+	});
+}
 var callSimSet = rpc.declare({object:'mu300dash',method:'sim_set',params:['slot','current','confirm'],expect:{'':{}},nobatch:true});
 var callSimStatus = rpc.declare({object:'mu300dash',method:'sim_status',params:['id'],expect:{'':{}},nobatch:true});
 var callAct = scopedRpc('act',['op','arg']);
@@ -659,7 +694,7 @@ var DASH_I18N = {
 	'无法读取切换结果': ['Cannot read the switch result', 'Değiştirme sonucu okunamıyor'],
 	'SIM 卡管理': ['SIM management', 'SIM yönetimi'],
 	'开机使用': ['SIM at boot', 'Açılışta SIM'],
-	'选择承载移动数据的 SIM 卡；查看信号、锁定与 AT 卡槽仍在各自页面选择。': ['Choose the SIM that carries mobile data; signal, lock and AT views keep their own SIM selection.', 'Mobil veri SIM kartını seçin; sinyal, kilit ve AT sayfaları kendi SIM seçimini korur.'],
+	'切换上网卡后，看板、锁定和 AT 的查看卡槽会同步；仍可手动查看另一张卡。': ['After switching the data SIM, dashboard, lock and AT views follow it; you can still select the other SIM manually.', 'İnternet SIM kartı değiştirildiğinde panel, kilit ve AT görünümleri onu izler; diğer SIM kartı yine elle seçebilirsiniz.'],
 	'提交失败': ['Submission failed', 'Gönderim başarısız'],
 	'与屏幕共用系统双卡短信池': ['Shared system inbox for both SIMs and the screen', 'Ekran ile ortak çift SIM mesaj kutusu'],
 	'清空当前卡记录': ['Clear this SIM history', 'Bu SIM geçmişini temizle'],
@@ -1347,7 +1382,7 @@ html.mud-bootstrap-theme{--surface:var(--background-color-high);--surface-sunken
 .mud-card:hover{border-color:color-mix(in oklab,var(--brand,var(--primary,#2f7bf6)) 30%,var(--hairline,var(--border,#e3e6ea)))}
 .mud-card.mud-sim-selector{padding:0;margin-bottom:10px;overflow:hidden}
 .mud-sim-toggle{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;margin:0;padding:9px 12px;border:0;border-radius:inherit;background:transparent;box-shadow:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.mud-sim-toggle:hover{background:var(--hover-faint,rgba(128,128,128,.06))}
+.mud .mud-sim-toggle:hover{background:transparent}
 .mud-sim-toggle:focus-visible{outline:2px solid var(--brand,var(--primary,#2f7bf6));outline-offset:-3px}
 .mud-sim-title{flex:1;min-width:0;font-size:.8rem;font-weight:500}
 .mud-sim-current{flex-shrink:0;padding:2px 7px;border-radius:6px;background:var(--brand-subtle,rgba(128,128,128,.1));color:var(--brand,var(--primary,#2f7bf6));font-size:.72rem;font-weight:600;line-height:1.5}
@@ -1819,7 +1854,7 @@ function choiceBox(title, message, choices, opts) {
 
 /* LuCI 的 require 把模块当类工厂：必须返回 baseclass 派生的类，加载后拿到的是它的实例 */
 return baseclass.extend({
-	simSlot: simSlot, simSelector: simSelector,
+	simSlot: simSlot, simSelector: simSelector, followDataSim: followDataSim,
 	callSimGet: callSimGet, callSimSet: callSimSet, callSimStatus: callSimStatus,
 	callStatus: callStatus, callRates: callRates, callCells: callCells, callSignal: callSignal, callSysinfo: callSysinfo, callAct: callAct, callAt: callAt, callAtHist: callAtHist,
 	callLockGet: callLockGet, callLockFresh: callLockFresh, callLockSet: callLockSet, callLockStatus: callLockStatus, waitLockJob: waitLockJob,

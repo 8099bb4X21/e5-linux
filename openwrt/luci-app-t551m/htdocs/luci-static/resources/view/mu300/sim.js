@@ -11,7 +11,7 @@ return view.extend({
 		var root = document.createElement('div');
 		root.className = 'mud';
 		root.innerHTML = '<div class="mud-card"><h3>SIM 卡管理</h3>' +
-			'<p class="mud-note">选择承载移动数据的 SIM 卡；查看信号、锁定与 AT 卡槽仍在各自页面选择。</p>' +
+			'<p class="mud-note">切换上网卡后，看板、锁定和 AT 的查看卡槽会同步；仍可手动查看另一张卡。</p>' +
 			'<div class="mud-data-sim-host"></div></div>';
 		M.localize(root);
 		this._control = DataSim.attach(root.querySelector('.mud-data-sim-host'));
