@@ -143,6 +143,9 @@ def main():
                          'the initramfs root before the module pass and into the real root '
                          'before switch_root')
     ap.add_argument('--cmdline', default=BOOT_CMDLINE.decode())
+    ap.add_argument('--f2fs-tools', type=Path,
+                    default=Path(os.environ.get('E5_F2FS_TOOLS', str(HERE.parent / 'out/boot/f2fs-tools'))),
+                    help='aarch64/musl bundle made by boot/prepare-f2fs-tools.py')
     ap.add_argument('--out', required=True, type=Path)
     a = ap.parse_args()
 
@@ -165,8 +168,22 @@ def main():
         'etc/misc-bc-slot-a.bin': (slot_a_bc, stat.S_IFREG | 0o644),
         'etc/misc-bc-slot-b-trial.bin': (slot_b_bc, stat.S_IFREG | 0o644),
         'etc/sd-registry.sh': ((HERE.parent / 'rootfs/overlay/opt/e5/e5-sd-registry').read_bytes(), stat.S_IFREG | 0o644),
+        'etc/f2fs-repair.sh': ((HERE / 'f2fs-repair.sh').read_bytes(), stat.S_IFREG | 0o644),
     }
     dirs = {'bin', 'sbin', 'etc', 'proc', 'sys', 'dev', 'run', 'tmp', 'root', 'config', 'linux-modules'}
+    if not (a.f2fs_tools / 'manifest.json').is_file():
+        sys.exit('Missing early F2FS tools; run boot/prepare-f2fs-tools.py --root ARM64_OPENWRT_ROOT')
+    repair_manifest = json.loads((a.f2fs_tools / 'manifest.json').read_text())
+    repair_names = ('sbin/fsck.f2fs', 'lib/ld-musl-aarch64.so.1', 'lib/libf2fs.so.10',
+                    'lib/libuuid.so.1', 'lib/libgcc_s.so.1')
+    for name in repair_names:
+        payload = (a.f2fs_tools / name).read_bytes()
+        if hashlib.sha256(payload).hexdigest() != repair_manifest['sha256'].get(name):
+            sys.exit('F2FS tool checksum mismatch: '+name)
+        files['repair/'+name] = (payload, stat.S_IFREG | 0o755)
+    files['repair/lib/libc.so'] = (b'ld-musl-aarch64.so.1', stat.S_IFLNK | 0o777)
+    files['repair/manifest.json'] = ((a.f2fs_tools / 'manifest.json').read_bytes(), stat.S_IFREG | 0o644)
+    dirs.update({'repair', 'repair/sbin', 'repair/lib'})
 
     order = []
     if a.module_order.exists():
@@ -259,6 +276,9 @@ def main():
         'misc_slot_b_trial_hex': slot_b_bc.hex(),
         'overlay_files': overlay_files,
         'persist_log_offset': PERSIST_LOG_OFFSET,
+        'f2fs_repair': {'policy': 'userdata-mount-failure-only', 'tf_boot': 'skip',
+                        'tools': repair_manifest['sha256'],
+                        'script_sha256': hashlib.sha256((HERE / 'f2fs-repair.sh').read_bytes()).hexdigest()},
     }
     a.out.with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(manifest, indent=2))

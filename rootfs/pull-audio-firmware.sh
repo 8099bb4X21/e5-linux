@@ -52,7 +52,7 @@ head -c 11 "$IMG" | grep -q '^SharkL5_AUD' || { echo "l_agdsp_a has no SharkL5_A
 echo "  l_agdsp_a.img: $sz bytes, $(head -c 27 "$IMG")"
 
 echo "== VBC parameter XMLs (/odm/etc/audio_params/sprd) =="
-for f in audio_structure.xml dsp_vbc.xml cvs.xml; do
+for f in audio_structure.xml dsp_vbc.xml cvs.xml codec.xml; do
     dev "cp -f /odm/etc/audio_params/sprd/$f /data/local/tmp/$f" >/dev/null
     adb pull "/data/local/tmp/$f" "$STAGE/$f" >/dev/null
     dev "rm -f /data/local/tmp/$f" >/dev/null
@@ -68,6 +68,7 @@ echo "== install into the rootfs overlay =="
 mkdir -p "$OVL/lib/firmware"
 cp "$IMG" "$OVL/lib/firmware/l_agdsp_a.img"
 cp "$STAGE/audio_structure" "$STAGE/dsp_vbc" "$STAGE/cvs" "$OVL/lib/firmware/"
+cp "$STAGE/codec.xml" "$OVL/lib/firmware/"
 # the aw87xxx smart-amp profile the Awinic i2c driver requests by that
 # exact name at amp power-up (Android carries it in /vendor/firmware)
 cp "$STAGE/aw87xxx_acf.bin" "$OVL/lib/firmware/aw87xxx_acf.bin"

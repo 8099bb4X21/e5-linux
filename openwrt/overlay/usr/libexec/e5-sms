@@ -108,11 +108,17 @@ function sim_info() {
 	};
 }
 
+function visible(messages) {
+	let hidden=[];
+	try { hidden=json(readfile('/etc/unisoc-modem/hidden-sms.json') ?? '[]'); } catch(e) {}
+	return filter(messages,m=>index(hidden,m.id)<0);
+}
+
 function sms_list() {
 	let sim = sim_info();
 	let lj = sh_json('mmcli -J -m any --timeout=5 --messaging-list-sms 2>/dev/null');
 	if (lj == null)
-		return { messages: stat(RECEIVE) ? (sh_json(`${RECEIVE} list 2>/dev/null`)?.messages ?? []) : [], sim, error: 'no modem' };
+		return { messages: visible(stat(RECEIVE) ? (sh_json(`${RECEIVE} list 2>/dev/null`)?.messages ?? []) : []), sim, error: 'no modem' };
 	let paths = lj['modem.messaging.sms'] ?? lj.modem?.messaging?.sms ?? [];
 	let inbox = stat(RECEIVE) ? sh_json(`${RECEIVE} list 2>/dev/null`) : null;
 	let list = inbox?.messages ?? [];
@@ -123,7 +129,7 @@ function sms_list() {
 			push(list, { ...m, sim: sim.name, card: sim.card });
 	}
 	list = sort(list, (a, b) => (a.time == b.time) ? b.id - a.id : ((a.time ?? '') < (b.time ?? '') ? 1 : -1));
-	return { messages: list, sim, dual_sim: inbox?.dual_sim ?? false, slots: inbox?.slots ?? {}, updated: inbox?.updated };
+	return { messages: visible(list), sim, dual_sim: inbox?.dual_sim ?? false, slots: inbox?.slots ?? {}, updated: inbox?.updated };
 }
 
 function sms_send(number, file, card) {
@@ -253,6 +259,10 @@ function forward_new(p) {
 	let id = sms_id(p);
 	if (id == null)
 		return { ok: false, error: 'bad message' };
+	// Once migrated, only the native event worker owns forwarding. It reads
+	// this same inbox and claims the complete message before any transport.
+	if (stat('/etc/unisoc-modem/forward/native-v1') && stat('/usr/libexec/unisoc-modem/sms-forward'))
+		return sh_json(`/usr/libexec/unisoc-modem/sms-forward event ${id}`) ?? { ok: false, error: 'forward unavailable' };
 	let m = null;
 	for (let i = 0; i < 60; i++) {
 		m = sms_get(id);

@@ -9,6 +9,7 @@
 #   E5_OUTDIR      the object directory (default: work/build/<kernelversion>, kept between builds)
 #   E5_RELEASE=1   the kernel of a flash package, as build.sh: no e5.openwrt=, into upstream/out-release
 set -eo pipefail
+command -v pahole >/dev/null || { echo 'BTF requires pahole (Ubuntu: apt install pahole)' >&2; exit 1; }
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"
 K="${E5_KERNEL_TREE:-$TOP/linux-lts-e5}"
@@ -74,5 +75,6 @@ rm -rf "$O/mod" $DEST/modules && mkdir -p $DEST/modules
 make -s O="$O" ARCH=arm64 CROSS_COMPILE="$X" INSTALL_MOD_PATH="$O/mod" INSTALL_MOD_STRIP=1 modules_install
 find "$O/mod/lib/modules" -name '*.ko' -exec cp {} $DEST/modules/ \;
 tar -C "$O/mod" -cf $DEST/modules.tar lib/modules
+python3 "$HERE/check-container-support.py" "$DEST" --record
 echo "== modules: $(ls $DEST/modules | wc -l)"
 echo "== $(cat $DEST/kernel.release): $(ls -la $DEST/Image.lk | awk '{print $5}') bytes"

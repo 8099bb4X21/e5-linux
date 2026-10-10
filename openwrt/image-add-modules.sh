@@ -27,6 +27,12 @@ fi
     find "lib/modules/$rel" -type f | sort | while read -r f; do
         echo "write $T/m/$f /$f"; echo "sif /$f uid 0"; echo "sif /$f gid 0"; echo "sif /$f mode 0100644"
     done
+    # The complete module package keeps hardware-service paths as aliases to
+    # the flat .ko files required by OpenWrt's kmodloader.
+    find "lib/modules/$rel" -type l | sort | while read -r f; do
+        echo "symlink /$f $(readlink "$f")"
+        echo "sif /$f uid 0"; echo "sif /$f gid 0"
+    done
 ) > "$T/cmds"
 debugfs -w -f "$T/cmds" "$T/img" > "$T/log" 2>&1
 ! grep -iE 'error|not found|cannot|failed' "$T/log" || { echo "debugfs failed (above)" >&2; exit 1; }

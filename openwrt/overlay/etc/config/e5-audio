@@ -3,3 +3,4 @@ config audio 'main'
 	option enabled '1'
 	# speaker volume, 0 (mute) - 15 (/usr/libexec/e5-volume)
 	option volume '10'
+	option call_volume '15'

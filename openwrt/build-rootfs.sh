@@ -62,7 +62,9 @@
 # for the mainline kernel) next to the 5.15 ones; the image then runs on either kernel.
 # E5_ROOT_MODULES_ONLY=1 uses only that archive, without a local 5.15 build.
 #
-# E5_IMAGE_MB sets the image's size (default 1024).  Needs Docker with arm64
+# E5_DOCKER=1 installs Docker for a mainline KVM/container kernel. The service
+# starts on demand; the image defaults to 2048 MiB to leave room for containers.
+# E5_IMAGE_MB sets the image's size (default 1024, or 2048 with Docker). Needs Docker with arm64
 # (native on Apple silicon).
 set -euo pipefail
 VER=${E5_WRT_VER:-25.12.5}
@@ -82,7 +84,17 @@ SCREEN_PLUGINS=${E5_INFOSCREEN_PLUGINS-$TOP/../infoscreen-plugins}
 NAME=e5-openwrt-$VER-rootfs.tar.gz
 STANDALONE=${E5_STANDALONE:-}
 DEVICE_FILES=${E5_DEVICE_FILES:-1}
-IMAGE_MB=${E5_IMAGE_MB:-1024}
+CONTAINERS=${E5_DOCKER:-0}
+FEATURES=${E5_FEATURES:-0}
+if [ "$FEATURES" = 1 ]; then
+    [ -n "$INFOSCREEN" ] || { echo 'E5_FEATURES=1 requires the E5_INFOSCREEN base package' >&2; exit 1; }
+    [ -n "${E5_ROOT_MODULES:-}" ] && [ "${E5_ROOT_MODULES_ONLY:-0}" = 1 ] || {
+        echo 'E5_FEATURES=1 requires the matching devices/e5 mainline module archive' >&2; exit 1; }
+    python3 "$TOP/devices/t551m/build-at-client.py"
+fi
+DEFAULT_IMAGE_MB=1024
+[ "$CONTAINERS" != 1 ] || DEFAULT_IMAGE_MB=2048
+IMAGE_MB=${E5_IMAGE_MB:-$DEFAULT_IMAGE_MB}
 FIRMWARE=${E5_FIRMWARE:-$TOP/rootfs/overlay/lib/firmware}
 ANDROID=${E5_ANDROID_SUBSET:-$TOP/work/android-subset}
 KBUILD=${E5_KBUILD:-$TOP/out_linux}
@@ -138,6 +150,10 @@ if [ -n "${E5_ROOT_MODULES:-}" ]; then
     tar -xf "$E5_ROOT_MODULES" -C "$RM"
     echo "root modules: $(ls "$RM/lib/modules" 2>/dev/null | tr '\n' ' ')($(find "$RM" -name '*.ko' | wc -l | tr -d ' ') modules)"
 fi
+if [ "$CONTAINERS" = 1 ]; then
+    find "$RM/lib/modules" -name container-support.json -print -quit 2>/dev/null | grep -q . || {
+        echo "E5_DOCKER=1 requires a verified mainline E5_ROOT_MODULES archive" >&2; exit 1; }
+fi
 # the vendor audio modules (e5-audio-dsp loads them), in every form: GPL, of
 # this kernel build, nothing of a device's
 if [ "${E5_ROOT_MODULES_ONLY:-0}" = 1 ]; then
@@ -145,6 +161,14 @@ if [ "${E5_ROOT_MODULES_ONLY:-0}" = 1 ]; then
     [ $# = 1 ] && [ -d "$1/audio" ] && [ -f "$1/modem/sipc_wwan.ko" ] || {
         echo "E5_ROOT_MODULES_ONLY needs exactly one release with audio and sipc_wwan modules" >&2; exit 1; }
     ROOT_REL=$(basename "$1")
+    if [ "$FEATURES" = 1 ]; then
+        case "$ROOT_REL" in
+            *-e5-mobile1-*) ;;
+            *) echo 'E5_FEATURES requires the devices/e5 kernel, not donor board modules' >&2; exit 1 ;;
+        esac
+        [ -f "$1/aw32257_charger.ko" ] && [ -f "$1/audio/snd-soc-sprd-pa-aw87xxx.ko" ] || {
+            echo 'E5 native charger/amplifier modules are missing' >&2; exit 1; }
+    fi
     cp "$1/audio/"*.ko "$SA/audio/"
 else
     find "$KBUILD/sound/soc/sprd" "$KBUILD/drivers/unisoc_platform/sprd_audio" -name '*.ko' -exec cp {} "$SA/audio/" \; 2>/dev/null
@@ -244,6 +268,7 @@ VERSION=$(git -C "$TOP" describe --always --dirty 2>/dev/null || echo dev)
 
 docker run --rm --platform linux/arm64 \
     -v "$HERE/overlay":/in/overlay:ro -v "$TOP/rootfs/overlay/opt/e5":/in/opt-e5:ro \
+    -v "$TOP":/in/feature-source:ro -e E5_FEATURES="$FEATURES" -e E5_UI_CACHE=/tmp/e5-ui-cache \
     -v "$OUT":/in/apk:ro -v "$BUSYBOX":/in/busybox:ro -v "$WORK/logdw":/in/logdw:ro \
     -v "$WORK/e5-vibrate":/in/e5-vibrate:ro -v "${INFOSCREEN:-$WORK/no-infoscreen}":/in/infoscreen:ro \
     -v "${SCREEN_PLUGINS:-$WORK/no-infoscreen}":/in/infoscreen-plugins:ro \
@@ -252,7 +277,7 @@ docker run --rm --platform linux/arm64 \
     -v "$WORK/e5-sim-probe":/in/e5-sim-probe:ro \
     -v "$SA":/in/sa:ro -e STANDALONE="$STANDALONE" -v "$RM":/in/root-modules:ro \
     -v "$WORK/extra":/in/extra:ro -e EXTRA_LIST="$EXTRA_LIST" -v "$TP":/in/transplant:ro \
-    -v "$TAROUT":/out -e NAME="$NAME" -e VERSION="$VERSION" -e E5_BUILD_EPOCH="${E5_BUILD_EPOCH:-}" \
+    -v "$TAROUT":/out -e NAME="$NAME" -e VERSION="$VERSION" -e E5_BUILD_EPOCH="${E5_BUILD_EPOCH:-}" -e CONTAINERS="$CONTAINERS" \
     e5-openwrt-base:$VER /bin/sh -euc '
 mkdir -p /var/lock /var/run /tmp
 apk update >/dev/null
@@ -265,13 +290,17 @@ apk add --allow-untrusted /in/apk/bluez-libs-*.apk /in/apk/bluez-daemon-*.apk /i
 # (alsa-utils: aplay and amixer for the speaker, e5-audio-dsp and e5-volume)
 # (curl: the webhook of the SMS forward, /usr/libexec/e5-sms)
 apk add wpad-basic-mbedtls wifi-scripts iwinfo iw ip-full bash mount-utils luci-proto-modemmanager \
-    dbus-utils alsa-utils curl >/dev/null
+    dbus-utils alsa-utils curl openssl-util msmtp r8152-firmware >/dev/null
 # Bluetooth audio: PulseAudio built with BlueZ (the -avahi variant carries
 # the bluetooth modules), run by /etc/init.d/e5-pulseaudio, not by its own
 # init script (which forbids loading the modules a connecting device needs)
 apk add pulseaudio-daemon-avahi pulseaudio-tools >/dev/null
 # Reuse the tested Debian hostless FE_ST_VOICE backend for cellular audio.
 apk add python3 >/dev/null
+if [ "$CONTAINERS" = 1 ]; then
+    # Do not run dockerd post-install scripts inside the build container.
+    apk add --no-scripts docker dockerd iptables-nft ip6tables-nft resize2fs >/dev/null
+fi
 # attended sysupgrade flashes whole-disk images: that would overwrite the eMMC
 # (removed before the translations below, whose package for it would hold it)
 apk del luci-app-attendedsysupgrade attendedsysupgrade-common owut >/dev/null 2>&1 || true
@@ -328,6 +357,9 @@ printf "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02:
 printf "E5\n" > $R/etc/hostname
 
 cp -a /in/overlay/. $R/
+if [ "$CONTAINERS" = 1 ]; then
+    python3 $R/usr/libexec/e5-container-setup --root $R
+fi
 screen=
 if [ -d /in/infoscreen/root ]; then
     cp -a /in/infoscreen/root/. $R/
@@ -386,7 +418,7 @@ rm -f $R/etc/rc.d/*pulseaudio
 # (the cage package'"'"'s own kiosk service: cog on http://localhost/, which is LuCI,
 # shown at every boot before the info screen'"'"'s session takes the panel)
 rm -f $R/etc/rc.d/*cage
-for s in e5-hw e5-vendor e5-sipc-wwan e5-telnetd e5-boot-ok e5-sms-notify e5-charge e5-apn-auto e5-luci e5-audio e5-voice-audio e5-bt bluetoothd dbus modemmanager e5-usb-watch $screen; do
+for s in e5-hw e5-vendor e5-sipc-wwan e5-telnetd e5-boot-ok e5-sms-notify e5-charge e5-apn-auto e5-luci e5-audio e5-voice-audio e5-hfp e5-bt bluetoothd dbus modemmanager e5-usb-watch $screen; do
     n=$(sed -n "s/^START=//p" $R/etc/init.d/$s)
     ln -sf ../init.d/$s $R/etc/rc.d/S$n$s
 done
@@ -412,6 +444,9 @@ mkdir -p $R/etc/e5 && printf "%s\n" "$VERSION" > $R/etc/e5/image-version
 # when the image was built (seconds since 1970, UTC): 高级 -> 系统 shows it
 if [ -n "$E5_BUILD_EPOCH" ]; then printf "%s\n" "$E5_BUILD_EPOCH" > $R/etc/e5/build-time
 else date -u +%s > $R/etc/e5/build-time; fi
+if [ "$E5_FEATURES" = 1 ]; then
+    python3 /in/feature-source/devices/e5/stage.py --root $R
+fi
 cd $R && tar -czf /out/$NAME .
 ls -la /out/$NAME
 '
