@@ -51,10 +51,11 @@ if [ -n "$warn" ]; then
     echo "e5-at: warning: '$CMD' $warn" >&2
 fi
 
-# T551M uses permanently held nr2 for interactive commands, nr6/nr7 for
+# Adapted images use permanently held nr2 for interactive commands, nr6/nr7 for
 # collectors (selected with T551M_AT_CHANNEL). Keep nr1 and
 # the URC rings with ModemManager; never fall back to opening either device.
-if [ "$(cat /etc/e5/device-profile 2>/dev/null)" = t551m ]; then
+profile=$(cat /etc/e5/device-profile 2>/dev/null)
+if [ "$profile" = t551m ] || [ "$profile" = e5 ]; then
     case "$norm" in
         # E5SMS is a virtual command implemented by MM, not modem firmware.
         # Existing per-SIM SMS operations must retain MM's port-local charset,

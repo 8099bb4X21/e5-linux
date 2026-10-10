@@ -47,7 +47,7 @@ def devices():
     touches = [p / 'inhibited' for p in (SYS / 'class/input').glob('input*')
                if (p / 'name').read_text().strip() == 'tlsc6x_touch']
     if not backlights or not touches:
-        raise RuntimeError('T551M backlight or touch device missing')
+        raise RuntimeError('Backlight or touch device missing')
     return backlights, touches
 
 

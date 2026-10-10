@@ -66,7 +66,7 @@ window.T551M = (() => {
         const aliases = [
             [['中国移动','中国移动通信','CHINAMOBILE','CHNMOBILE','CMCC','46000','46002','46004','46007','46008'], ['中国移动','China Mobile']],
             [['中国联通','CHINAUNICOM','CHNUNICOM','UNICOM','CUCC','46001','46006','46009'], ['中国联通','China Unicom']],
-            [['中国电信','CHINATELECOM','CHNCT','CHNCTLTE','CTCC','46003','46005','46011','46012'], ['中国电信','China Telecom']],
+            [['中国电信','CHINATELECOM','CHNTELECOM','CHNCT','CHNCTLTE','CTCC','46003','46005','46011','46012'], ['中国电信','China Telecom']],
             [['中国广电','CHINABROADNET','CHNBG','CBN','CHINABROADCASTINGNETWORK','46015'], ['中国广电','China Broadnet']]
         ];
         for (const [names, translated] of aliases) if (names.includes(key)) return words(...translated);

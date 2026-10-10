@@ -57,7 +57,7 @@ PY
 )
 NAME=e5-openwrt-flash-$VER-$STAMP-$GIT
 MAINLINE=${E5_MAINLINE:-}
-KOUT=$TOP/upstream/out-release
+KOUT=${E5_UPSTREAM_OUT:-$TOP/upstream/out-release}
 if [ -n "$MAINLINE" ]; then
     NAME=e5-openwrt-flash-$VER-mainline-$STAMP-$GIT
     KERNEL=$KOUT/Image.lk

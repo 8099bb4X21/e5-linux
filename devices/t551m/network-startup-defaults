@@ -1,7 +1,8 @@
 #!/bin/sh
 set -e
-[ "$(cat /etc/e5/device-profile 2>/dev/null)" = t551m ] || exit 0
-python3 /opt/e5/t551m-network-startup --root /
+profile=$(cat /etc/e5/device-profile 2>/dev/null)
+case "$profile" in t551m|e5) ;; *) exit 0 ;; esac
+python3 /opt/e5/t551m-network-startup --root / --profile "$profile"
 # Migrate the image's original default once. Explicit custom initial APNs and
 # later user changes are preserved. Normal APN/auth/IP settings stay in WAN.
 marker=/etc/e5/t551m-network-startup-v1

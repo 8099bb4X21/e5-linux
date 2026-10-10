@@ -1272,7 +1272,7 @@ function carrierName(op) {
 	var aliases = [
 		[['中国移动','中国移动通信','CHINAMOBILE','CHNMOBILE','CMCC'], '中国移动'],
 		[['中国联通','CHINAUNICOM','CHNUNICOM','UNICOM','CUCC'], '中国联通'],
-		[['中国电信','CHINATELECOM','CHNCT','CHNCTLTE','CTCC'], '中国电信'],
+		[['中国电信','CHINATELECOM','CHNTELECOM','CHNCT','CHNCTLTE','CTCC'], '中国电信'],
 		[['中国广电','CHINABROADNET','CHNBG','CBN','CHINABROADCASTINGNETWORK'], '中国广电']
 	];
 	for (var i=0;i<aliases.length;i++)

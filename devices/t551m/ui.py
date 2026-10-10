@@ -23,7 +23,10 @@ PACKAGES = {
 }
 
 
-def stage(root):
+def stage(root, profile='t551m'):
+    if profile not in ('t551m', 'e5'):
+        raise ValueError('Unknown device profile: ' + profile)
+    root = Path(root)
     # Also stage into archive-only roots; the defaults hook patches package
     # files after installation when they are not present in the staging root.
     for source, destination in [('network-startup.py', 'opt/e5/t551m-network-startup'),
@@ -33,7 +36,7 @@ def stage(root):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(Path(__file__).with_name(source).read_bytes().replace(b'\r\n', b'\n'))
         target.chmod(0o755)
-    runpy.run_path(str(Path(__file__).with_name('network-startup.py')))['patch_root'](root)
+    runpy.run_path(str(Path(__file__).with_name('network-startup.py')))['patch_root'](root, profile)
     plugin = TOP / 'openwrt/luci-app-t551m'
     for srcdir, dest in [('root', root), ('htdocs', root / 'www'),
                          ('lmo', root / 'usr/lib/lua/luci/i18n')]:
@@ -46,9 +49,12 @@ def stage(root):
             if srcdir == 'root' and 'etc/config/' in target.as_posix() and target.exists():
                 continue
             target.write_bytes(src.read_bytes().replace(b'\r\n', b'\n') if srcdir != 'lmo' else src.read_bytes())
+            if profile == 'e5' and src.relative_to(plugin / srcdir).as_posix() == 'etc/config/unisoc_modem':
+                # B38 omission belongs to the T551M firmware, not the shared UI.
+                target.write_bytes(target.read_bytes().replace(b"'1,3,5,8,34,39,40,41'", b"'1,3,5,8,34,38,39,40,41'"))
             executable = srcdir == 'root' and any(part in src.parts for part in ('init.d', 'hotplug.d', 'libexec'))
             target.chmod(0o755 if executable else 0o644)
-    cache = TOP / 'work/t551m/aurora'
+    cache = Path(os.environ.get('E5_UI_CACHE', str(TOP / 'work/t551m/aurora')))
     packages = root / 'opt/e5/ui-packages'
     packages.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)

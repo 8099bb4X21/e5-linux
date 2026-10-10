@@ -5,9 +5,11 @@ from pathlib import Path
 import re
 
 
-def patch_root(root):
+def patch_root(root, profile='t551m'):
+    if profile not in ('t551m', 'e5'):
+        raise ValueError('Unknown device profile: ' + profile)
     config = root / 'etc/config/unisoc_modem'
-    if config.exists():
+    if config.exists() and profile == 't551m':
         text = config.read_text()
         if 'option lte_supported_bands ' not in text:
             anchor = "config core 'main'\n"
@@ -84,4 +86,6 @@ def patch_root(root):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, required=True)
-    patch_root(parser.parse_args().root)
+    parser.add_argument('--profile', choices=('t551m', 'e5'), default='t551m')
+    args = parser.parse_args()
+    patch_root(args.root, args.profile)

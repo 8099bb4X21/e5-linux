@@ -85,6 +85,13 @@ NAME=e5-openwrt-$VER-rootfs.tar.gz
 STANDALONE=${E5_STANDALONE:-}
 DEVICE_FILES=${E5_DEVICE_FILES:-1}
 CONTAINERS=${E5_DOCKER:-0}
+FEATURES=${E5_FEATURES:-0}
+if [ "$FEATURES" = 1 ]; then
+    [ -n "$INFOSCREEN" ] || { echo 'E5_FEATURES=1 requires the E5_INFOSCREEN base package' >&2; exit 1; }
+    [ -n "${E5_ROOT_MODULES:-}" ] && [ "${E5_ROOT_MODULES_ONLY:-0}" = 1 ] || {
+        echo 'E5_FEATURES=1 requires the matching devices/e5 mainline module archive' >&2; exit 1; }
+    python3 "$TOP/devices/t551m/build-at-client.py"
+fi
 DEFAULT_IMAGE_MB=1024
 [ "$CONTAINERS" != 1 ] || DEFAULT_IMAGE_MB=2048
 IMAGE_MB=${E5_IMAGE_MB:-$DEFAULT_IMAGE_MB}
@@ -154,6 +161,14 @@ if [ "${E5_ROOT_MODULES_ONLY:-0}" = 1 ]; then
     [ $# = 1 ] && [ -d "$1/audio" ] && [ -f "$1/modem/sipc_wwan.ko" ] || {
         echo "E5_ROOT_MODULES_ONLY needs exactly one release with audio and sipc_wwan modules" >&2; exit 1; }
     ROOT_REL=$(basename "$1")
+    if [ "$FEATURES" = 1 ]; then
+        case "$ROOT_REL" in
+            *-e5-mobile1-*) ;;
+            *) echo 'E5_FEATURES requires the devices/e5 kernel, not donor board modules' >&2; exit 1 ;;
+        esac
+        [ -f "$1/aw32257_charger.ko" ] && [ -f "$1/audio/snd-soc-sprd-pa-aw87xxx.ko" ] || {
+            echo 'E5 native charger/amplifier modules are missing' >&2; exit 1; }
+    fi
     cp "$1/audio/"*.ko "$SA/audio/"
 else
     find "$KBUILD/sound/soc/sprd" "$KBUILD/drivers/unisoc_platform/sprd_audio" -name '*.ko' -exec cp {} "$SA/audio/" \; 2>/dev/null
@@ -253,6 +268,7 @@ VERSION=$(git -C "$TOP" describe --always --dirty 2>/dev/null || echo dev)
 
 docker run --rm --platform linux/arm64 \
     -v "$HERE/overlay":/in/overlay:ro -v "$TOP/rootfs/overlay/opt/e5":/in/opt-e5:ro \
+    -v "$TOP":/in/feature-source:ro -e E5_FEATURES="$FEATURES" -e E5_UI_CACHE=/tmp/e5-ui-cache \
     -v "$OUT":/in/apk:ro -v "$BUSYBOX":/in/busybox:ro -v "$WORK/logdw":/in/logdw:ro \
     -v "$WORK/e5-vibrate":/in/e5-vibrate:ro -v "${INFOSCREEN:-$WORK/no-infoscreen}":/in/infoscreen:ro \
     -v "${SCREEN_PLUGINS:-$WORK/no-infoscreen}":/in/infoscreen-plugins:ro \
@@ -428,6 +444,9 @@ mkdir -p $R/etc/e5 && printf "%s\n" "$VERSION" > $R/etc/e5/image-version
 # when the image was built (seconds since 1970, UTC): 高级 -> 系统 shows it
 if [ -n "$E5_BUILD_EPOCH" ]; then printf "%s\n" "$E5_BUILD_EPOCH" > $R/etc/e5/build-time
 else date -u +%s > $R/etc/e5/build-time; fi
+if [ "$E5_FEATURES" = 1 ]; then
+    python3 /in/feature-source/devices/e5/stage.py --root $R
+fi
 cd $R && tar -czf /out/$NAME .
 ls -la /out/$NAME
 '

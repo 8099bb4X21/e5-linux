@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-def apply(kernel, replace_function):
+def apply(kernel, replace_function, restore_board_current=True):
     path = kernel / 'drivers/usb/typec/sc27xx_typec.c'
     text = path.read_text()
     if 'sc27xx_typec_controller_mode' not in text:
@@ -109,7 +109,7 @@ static int sc27xx_typec_controller_mode(struct device_node *node, int mode)
 
     path = kernel / 'drivers/power/supply/sprd_battery_info.c'
     text = path.read_text()
-    if '#include "board-charge-profile.h"' not in text:
+    if restore_board_current and '#include "board-charge-profile.h"' not in text:
         marker = 'int sprd_battery_get_battery_info('
         assert text.count(marker) == 1
         text = text.replace(marker, '#include "board-charge-profile.h"\n\n' + marker, 1)
@@ -119,8 +119,9 @@ static int sc27xx_typec_controller_mode(struct device_node *node, int mode)
             '\tif (board_restore_dcp_profile(info))\n'
             '\t\tdev_info(&psy->dev, "Restored board DCP profile: 3000000 uA; thermal limits retained\\n");', 1)
     path.write_text(text)
-    (path.parent / 'board-charge-profile.h').write_bytes(
-        Path(__file__).with_name('charge-profile.h').read_bytes())
+    if restore_board_current:
+        (path.parent / 'board-charge-profile.h').write_bytes(
+            Path(__file__).with_name('charge-profile.h').read_bytes())
 
     path = kernel / 'include/linux/power/sprd-bc1p2.h'
     text = path.read_text()
