@@ -128,10 +128,10 @@ var callSmsShow = rpc.declare({ object: 'mu300dash', method: 'sms_show', params:
 var callSmsSend = rpc.declare({ object: 'mu300dash', method: 'sms_send', params: [ 'num', 'text', 'card' ], expect: { '': {} } });
 var callSmsDel  = rpc.declare({ object: 'mu300dash', method: 'sms_delete', params: [ 'id', 'sim' ], expect: { '': {} } });
 var callSmsSync = rpc.declare({ object: 'mu300dash', method: 'sms_sync', expect: { '': {} } });
-var callForwardGet = rpc.declare({ object: 'mu300dash', method: 'forward_get', expect: { '': {} } });
-var callForwardStatus = rpc.declare({ object: 'mu300dash', method: 'forward_status', expect: { '': {} } });
+var callForwardGet = rpc.declare({ object: 'mu300dash', method: 'forward_get', params: [ 'profile' ], expect: { '': {} } });
+var callForwardStatus = rpc.declare({ object: 'mu300dash', method: 'forward_status', params: [ 'profile' ], expect: { '': {} } });
 var callForwardSet = rpc.declare({ object: 'mu300dash', method: 'forward_set', params: [ 'payload' ], expect: { '': {} } });
-var callForwardTest = rpc.declare({ object: 'mu300dash', method: 'forward_test', expect: { '': {} } });
+var callForwardTest = rpc.declare({ object: 'mu300dash', method: 'forward_test', params: [ 'profile' ], expect: { '': {} } });
 var callTrafficGet = scopedRpc('traffic_get');
 var callTrafficSet = scopedRpc('traffic_set',['payload']);
 var callTrafficClear = rpc.declare({object:'mu300dash',method:'traffic_clear',params:['slot','confirm'],expect:{'':{}}});
@@ -651,6 +651,41 @@ function errorText(value, language) {
 /* END SHARED PLATFORM MESSAGES */
 
 var DASH_I18N = {
+	'转发配置': ['Forwarding profiles', 'Yönlendirme profilleri'],
+	'启用当前配置': ['Enable this profile', 'Bu profili etkinleştir'],
+	'电源通知使用共用配置；请同时开启该配置并设置渠道。': ['Power notifications use the shared profile; enable that profile and configure its channel.', 'Güç bildirimleri ortak profili kullanır; bu profili etkinleştirip kanalını yapılandırın.'],
+	'转发正在执行，请稍后再试': ['A delivery is running; please try again shortly', 'Bir gönderim sürüyor; lütfen biraz sonra tekrar deneyin'],
+	'配置模式': ['Configuration mode', 'Yapılandırma modu'],
+	'所有 SIM 共用': ['Shared by all SIMs', 'Tüm SIM kartları için ortak'],
+	'按 SIM 独立配置': ['Separate profile per SIM', 'SIM başına ayrı profil'],
+	'正在编辑': ['Editing profile', 'Düzenlenen profil'],
+	'共用配置 / 电源通知': ['Shared profile / power notifications', 'Ortak profil / güç bildirimleri'],
+	'独立模式按收到短信的卡选择渠道和黑名单，不受上网卡切换影响。电源通知始终使用共用配置。': ['Separate mode selects the channel and blacklist by the receiving SIM, not the data SIM. Power notifications always use the shared profile.', 'Ayrı modda kanal ve kara liste veri SIM kartına değil, SMS alan karta göre seçilir. Güç bildirimleri her zaman ortak profili kullanır.'],
+	'当前配置用于新短信转发。': ['This profile handles new incoming SMS.', 'Bu profil yeni gelen SMS mesajlarını yönlendirir.'],
+	'当前配置不用于短信；保存后仍保留，可单独测试。': ['This profile is inactive for SMS; its settings are retained and can be tested separately.', 'Bu profil SMS için etkin değil; ayarları korunur ve ayrı olarak test edilebilir.'],
+	'电源通知请在共用配置中设置，独立模式下仍生效。': ['Configure power notifications in the shared profile; they remain active in separate mode.', 'Güç bildirimlerini ortak profilde ayarlayın; ayrı modda da etkin kalır.'],
+	'填入推送预设': ['Fill from a push preset', 'Bildirim ön ayarını doldur'],
+	'自定义 / 兼容旧版': ['Custom / legacy compatible', 'Özel / eski sürümle uyumlu'],
+	'企业微信': ['WeCom', 'WeCom'],
+	'钉钉 Webhook': ['DingTalk Webhook', 'DingTalk Webhook'],
+	'预设只填入表单，请替换密钥后保存；需要钉钉加签时请选择“钉钉机器人”。': ['Presets only fill the form. Replace the keys and save; use DingTalk bot for signed requests.', 'Ön ayarlar yalnızca formu doldurur. Anahtarları değiştirip kaydedin; imzalı istekler için DingTalk botunu seçin.'],
+	'请求方法': ['Request method', 'İstek yöntemi'],
+	'请求超时（秒，1–120）': ['Request timeout (seconds, 1–120)', 'İstek zaman aşımı (saniye, 1–120)'],
+	'正文格式': ['Body format', 'Gövde biçimi'],
+	'正文模板': ['Body template', 'Gövde şablonu'],
+	'纯文本': ['Plain text', 'Düz metin'],
+	'占位符：{from}、{text}、{time}、{sim}、{device}、{kind}。JSON 占位符放在字符串内；按格式自动转义，绝不执行命令。': ['Placeholders: {from}, {text}, {time}, {sim}, {device}, {kind}. Put JSON placeholders inside strings; values are escaped for the format, never executed.', 'Yer tutucular: {from}, {text}, {time}, {sim}, {device}, {kind}. JSON yer tutucularını dizgelerin içine koyun; değerler biçime göre kaçışlanır, komut olarak çalıştırılmaz.'],
+	'GET 只发送 URL 参数；JSON 模板留空时沿用旧版 from/text/date 格式。仅支持公网 HTTPS，验证证书且不跟随重定向。': ['GET sends URL parameters only. An empty JSON template preserves the legacy from/text/date format. Public HTTPS only, with certificate verification and no redirects.', 'GET yalnızca URL parametrelerini gönderir. Boş JSON şablonu eski from/text/date biçimini korur. Yalnızca genel HTTPS; sertifika doğrulanır, yönlendirmeler izlenmez.'],
+	'附加请求头（每行 Name: value）': ['Extra headers (Name: value, one per line)', 'Ek başlıklar (satır başına Name: value)'],
+	'请求超时必须为 1–120 秒': ['Request timeout must be 1–120 seconds', 'İstek zaman aşımı 1–120 saniye olmalıdır'],
+	'正文模板必须是有效 JSON': ['Body template must be valid JSON', 'Gövde şablonu geçerli JSON olmalıdır'],
+	'填入推送预设？': ['Fill from this push preset?', 'Bu bildirim ön ayarı doldurulsun mu?'],
+	'将替换当前 Webhook 地址、正文及请求头，保存后才会生效。': ['This replaces the Webhook URL, body and headers in the form. Changes take effect only after saving.', 'Formdaki Webhook adresi, gövde ve başlıklar değiştirilir. Değişiklikler yalnızca kaydettikten sonra geçerli olur.'],
+	'切换编辑配置？': ['Switch the profile being edited?', 'Düzenlenen profil değiştirilsin mi?'],
+	'未保存的修改将被丢弃。': ['Unsaved changes will be discarded.', 'Kaydedilmemiş değişiklikler silinecek.'],
+	'最近投递记录': ['Recent deliveries', 'Son teslimatlar'],
+	'测试消息': ['Test message', 'Test mesajı'],
+	'仅保留本次开机最近 30 次投递结果，不记录号码、地址或短信内容。': ['Keeps the last 30 delivery results since boot; no numbers, addresses or message content are recorded.', 'Açılıştan bu yana son 30 teslimat sonucu tutulur; numara, adres veya mesaj içeriği kaydedilmez.'],
 	"频率与调速策略": ["Frequency and governor", "Frekans ve yönetici"],
 	"即时生效": ["Applies immediately", "Hemen uygulanır"],
 	"电压设置": ["Voltage settings", "Voltaj ayarları"],

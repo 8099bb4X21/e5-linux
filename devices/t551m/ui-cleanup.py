@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Remove T551M's superseded web pages and unused second SMS forward worker."""
+"""Remove superseded web pages; retain the native-event forwarding service."""
 import argparse
 import json
 from pathlib import Path
@@ -10,10 +10,6 @@ OBSOLETE = (
     'usr/share/luci/menu.d/luci-app-e5-sms.json',
     'www/luci-static/resources/view/e5-sms/sms.js',
     'www/luci-static/resources/view/e5-sms/sms.css',
-    'etc/init.d/unisoc-sms-forward',
-    'etc/rc.d/S96unisoc-sms-forward',
-    'etc/rc.d/K01unisoc-sms-forward',
-    'usr/libexec/unisoc-modem/sms-forward',
 )
 
 

@@ -67,7 +67,9 @@ class AdaptationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             kept = ['etc/config/e5-notify', 'etc/e5-sms/inbox.json',
-                    'etc/init.d/e5-sms-notify', 'etc/init.d/e5-infoscreen']
+                    'etc/init.d/e5-sms-notify', 'etc/init.d/e5-infoscreen',
+                    'etc/init.d/unisoc-sms-forward', 'usr/libexec/unisoc-modem/sms-forward',
+                    'etc/unisoc-modem/forward/config.json']
             for relative in [*kept, *cleanup['OBSOLETE']]:
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)

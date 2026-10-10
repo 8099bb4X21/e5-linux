@@ -259,6 +259,10 @@ function forward_new(p) {
 	let id = sms_id(p);
 	if (id == null)
 		return { ok: false, error: 'bad message' };
+	// Once migrated, only the native event worker owns forwarding. It reads
+	// this same inbox and claims the complete message before any transport.
+	if (stat('/etc/unisoc-modem/forward/native-v1') && stat('/usr/libexec/unisoc-modem/sms-forward'))
+		return sh_json(`/usr/libexec/unisoc-modem/sms-forward event ${id}`) ?? { ok: false, error: 'forward unavailable' };
 	let m = null;
 	for (let i = 0; i < 60; i++) {
 		m = sms_get(id);

@@ -38,6 +38,11 @@ def stage(root, profile='t551m'):
         target.chmod(0o755)
     runpy.run_path(str(Path(__file__).with_name('network-startup.py')))['patch_root'](root, profile)
     plugin = TOP / 'openwrt/luci-app-t551m'
+    # Hot-update archives must carry the native incoming-message dispatch too.
+    sms = root / 'usr/libexec/e5-sms'
+    sms.parent.mkdir(parents=True, exist_ok=True)
+    sms.write_bytes((TOP / 'openwrt/overlay/usr/libexec/e5-sms').read_bytes().replace(b'\r\n', b'\n'))
+    sms.chmod(0o755)
     for srcdir, dest in [('root', root), ('htdocs', root / 'www'),
                          ('lmo', root / 'usr/lib/lua/luci/i18n')]:
         for src in (plugin / srcdir).rglob('*'):
@@ -103,12 +108,12 @@ def stage(root, profile='t551m'):
         old_cpu_link = root / 'etc/rc.d/S18e5-cpu'
         if old_cpu_link.is_symlink():
             old_cpu_link.unlink()
-        for name, priority in [('e5-cpu', '13'), ('t551m-at', '81'), ('unisoc-modem-ui', '95'), ('unisoc-traffic', '96')]:
+        for name, priority in [('e5-cpu', '13'), ('t551m-at', '81'), ('unisoc-modem-ui', '95'), ('unisoc-traffic', '96'), ('unisoc-sms-forward', '96')]:
             link = root / f'etc/rc.d/S{priority}{name}'
             link.parent.mkdir(parents=True, exist_ok=True)
             if not link.is_symlink():
                 link.symlink_to('../init.d/' + name)
-        for name, priority in [('e5-cpu', '89'), ('t551m-at', '09'), ('unisoc-traffic', '01')]:
+        for name, priority in [('e5-cpu', '89'), ('t551m-at', '09'), ('unisoc-traffic', '01'), ('unisoc-sms-forward', '01')]:
             link = root / f'etc/rc.d/K{priority}{name}'
             if not link.is_symlink():
                 link.symlink_to('../init.d/' + name)

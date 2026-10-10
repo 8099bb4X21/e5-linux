@@ -11,10 +11,6 @@ for package in luci-theme-argon luci-app-argon-config luci-i18n-argon-config-zh-
     if apk info -e "$package" >/dev/null 2>&1; then apk del --no-network "$package"; fi
 done
 # Remove the superseded pages, retaining the shared inbox/forwarding backend.
-if [ -x /etc/init.d/unisoc-sms-forward ]; then
-    /etc/init.d/unisoc-sms-forward stop
-    /etc/init.d/unisoc-sms-forward disable
-fi
 python3 /opt/e5/t551m-ui-cleanup
 # Independent nr2 terminal and nr6/nr7 collector workers; MM owns network/SMS.
 /etc/init.d/t551m-at enable
@@ -24,6 +20,8 @@ python3 /opt/e5/t551m-ui-cleanup
 /etc/init.d/unisoc-traffic enable
 /etc/init.d/e5-cpu disable
 /etc/init.d/e5-cpu enable
-# Existing e5-sms-notify owns forwarding; do not create another forward worker.
+# Existing e5-sms-notify still owns receipt; this service only watches power.
+/etc/init.d/unisoc-sms-forward enable
+/etc/init.d/unisoc-sms-forward start
 rm -f /tmp/luci-indexcache
 exit 0
