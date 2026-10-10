@@ -319,12 +319,24 @@ window.T551M = (() => {
         if (mounted && !dark) paintUsage();
         if (screenLocked && !dark) usage();
     }
+    let supplyOnline = null;
     function status(data) {
         if (!mounted) return;
         syncTrafficPicker();
         const first = !Object.keys(config).length;
         const lockWasEnabled = config.lock_enabled !== false;
         config = data.screen || {};
+        // Watch physical supply presence, not Charging/Full/current: pausing
+        // at the charge limit must not wake the panel on every status change.
+        const online = data.battery?.online;
+        if (typeof online === 'boolean') {
+            const changed = supplyOnline !== null && supplyOnline !== online;
+            supplyOnline = online; // set before wake's re-entrant status paint
+            if (changed) {
+                if (blank) setBlank(false);
+                else resetIdle();
+            }
+        }
         const slot = data.modem?.sim_card;
         if ([0,1].includes(slot) && slot !== usageSlot) {
             usageSlot = slot;

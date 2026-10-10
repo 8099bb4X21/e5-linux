@@ -66,6 +66,9 @@ persist() {
     {
         echo "E5-PERSIST-BEGIN uptime=$(cut -d' ' -f1 /proc/uptime) release=$(uname -r)"
         cat /run/stages
+        for f in /run/f2fs-before.log /run/f2fs-repair.log /run/f2fs-after.log; do
+            [ ! -f "$f" ] || { echo "--- $f"; tail -c 131072 "$f"; }
+        done
         echo "--- cmdline"; cat /proc/cmdline
         echo "--- lsmod"; cat /proc/modules
         echo "--- udc"; ls /sys/class/udc 2>&1
@@ -170,6 +173,7 @@ persist_job=$!
 # supposed to survive, and a reboot with no recorded reason is impossible to
 # diagnose after the fact.
 (sleep 600
+ while [ -e /run/f2fs-repair.running ]; do sleep 5; done
  if [ -e /run/stay ] || [ -e /data/e5linux/stay ]; then log "stage=timer-skipped"; persist; exit 0; fi
  log "stage=timer-reboot"
  echo "<3>E5-LINUX: safety timer expired, no /run/stay -- rebooting to slot a" > /dev/kmsg
@@ -566,6 +570,22 @@ pick_root() {
 }
 
 mkdir -p /newroot /data /disk /sdtry
+mount_userdata_root() {
+    mount -t f2fs -o noatime,nodiratime "$data" /data 2>>/run/datamount.err && return 0
+    # No fsck on the fast path, TF boot, boot-choice or firmware probes.
+    # Reload firmware from a clean boot after recovery: it may have failed
+    # earlier while userdata was corrupt. Only the fault path reboots.
+    . /etc/f2fs-repair.sh
+    if f2fs_repair_userdata "$data"; then
+        log "stage=f2fs-repaired reboot-for-clean-firmware-load"
+        write_misc_bc /etc/misc-bc-slot-b-trial.bin f2fs-repair-rearm
+        sync
+        persist
+        reboot -f
+    fi
+    log "stage=f2fs-recovery-incomplete retaining-rescue-fallback"
+    return 1
+}
 rootdir= data_mounted= on_card=
 [ -n "$data" ] && f2fs_last_cp "$data"
 # The SD card system is the one maintained (the systems on userdata are for
@@ -606,7 +626,7 @@ if [ -z "$e5_trial" ] && sd_wait 20 &&
                            mount -t f2fs -o ro,norecovery,noatime,nodiratime "$data" /data 2>>/run/datamount.err; }; then
         data_mounted=1
     fi
-elif [ -z "$SDMETA" ] && [ -z "$SDMETA_INVALID" ] && [ -n "$data" ] && mount -t f2fs -o noatime,nodiratime "$data" /data 2>>/run/datamount.err; then
+elif [ -z "$SDMETA" ] && [ -z "$SDMETA_INVALID" ] && [ -n "$data" ] && mount_userdata_root; then
     log "stage=data-mounted"
     data_mounted=1
     want=$(read_boot_os /data)

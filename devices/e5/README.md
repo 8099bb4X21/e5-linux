@@ -83,6 +83,13 @@ boot_b；不是可公开分发的通用镜像。本次没有完整执行通用�
 
 ## 验证
 
+构建启动镜像前需准备早期 F2FS 工具包：
+`python3 boot/prepare-f2fs-tools.py --root /path/to/arm64-openwrt-root`。
+使用 OpenWrt ARM64/musl 的 fsck.f2fs 1.16.0 及配套库，默认写入
+`out/boot/f2fs-tools`。仅 userdata 根挂载失败时自动检查、修复并复查；
+TF 启动跳过，正常启动不执行 fsck。详见
+[恢复与插拔亮屏记录](../../docs/F2FS-RECOVERY-AND-CHARGER-WAKE-20261010.zh-CN.md)。
+
 ```sh
 python3 devices/e5/test_charger.py /path/to/prepared-e5-linux
 python3 devices/e5/test_charge_profile.py
