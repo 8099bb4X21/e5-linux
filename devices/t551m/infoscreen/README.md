@@ -400,5 +400,4 @@ PCM 初始化并行，就绪立即通知观察器；屏幕音频设置和耳机�
 
 本目录也被E5构建入口复用。`transport.js`、`calls.js`、电话前端和SDK必须与
 `e5_call_events.py`、`e5_screen_rpc.py`及通话服务一起部署；`stage.py`统一携带。
-无屏FM_U20不安装屏幕，裁剪时同步清除上述事件/读取模块，避免无用服务。
 实现、构建覆盖和实测边界见[跨机型修复记录](../../../docs/SCREEN-MEMORY-FIX-20261011.zh-CN.md)。

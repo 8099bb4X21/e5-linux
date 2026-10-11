@@ -159,7 +159,7 @@ class Integration(unittest.TestCase):
             subprocess.run(['python3', str(TOP / 'openwrt/tests/data-priority-hook.py'),
                             str(root / 'src')], check=True)
 
-    def test_all_three_profiles_stage_the_executable_worker(self):
+    def test_supported_profiles_stage_the_executable_worker(self):
         stage = runpy.run_path(str(TOP / 'devices/t551m/ui.py'))['stage']
         stage.__globals__['PACKAGES'] = {}  # no package downloads in isolated tests
         original_run = runpy.run_path
@@ -172,7 +172,7 @@ class Integration(unittest.TestCase):
             return original_run(str(path))
 
         with tempfile.TemporaryDirectory(prefix='e5-policy-stage-') as directory:
-            for profile in ('e5', 't551m', 'fm-u20'):
+            for profile in ('e5', 't551m'):
                 root = Path(directory) / profile
                 root.mkdir()
                 with patch.dict(os.environ, E5_UI_CACHE=str(Path(directory) / 'cache')), \
@@ -182,7 +182,6 @@ class Integration(unittest.TestCase):
                 self.assertEqual(worker.read_bytes(), WORKER.read_bytes())
                 self.assertEqual(worker.stat().st_mode & 0o777, 0o755)
         self.assertIn('profile=\'e5\'', (TOP / 'devices/e5/stage.py').read_text())
-        self.assertIn('profile=\'fm-u20\'', (TOP / 'devices/fm-u20/stage.py').read_text())
 
     def test_base_images_include_worker_and_reject_stale_mm_package(self):
         build = (TOP / 'openwrt/build-rootfs.sh').read_text()

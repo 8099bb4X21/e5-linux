@@ -119,7 +119,15 @@ LAN_DEVICE=$(cfg lan_device); LAN_DEVICE=${LAN_DEVICE:-br-lan}
 WIFI_DEVICE=$(cfg wifi_device); WIFI_DEVICE=${WIFI_DEVICE:-wlan0}
 USB_DEVICE=$(cfg usb_device); USB_DEVICE=${USB_DEVICE:-usb0}
 jaddr4() { printf '%s' "$1" | sed -n 's/.*"address": *"\([^"]*\)".*/\1/p' | head -n1; }
-jarr_dns() { printf '%s' "$1" | sed -n 's/.*"dns-server": *\[\([^]]*\)\].*/\1/p' | tr -d '"' ; }
+wan_dns_servers() {
+    # Parse ubus' multiline arrays, using only the active top-level list.
+    # Reuse WAN/WAN6 snapshots; no additional RPC, AT request or cache.
+    local snapshot
+    for snapshot in "$@"; do
+        [ -n "$snapshot" ] || continue
+        jsonfilter -s "$snapshot" -e '@["dns-server"][*]' 2>/dev/null || :
+    done | awk 'NF && !seen[$0]++ { printf "%s%s", sep, $0; sep=", " }'
+}
 
 wan_up=$(jval "$WANJSON" up)
 [ "$wan_up" = "true" ] && wan_up=1 || wan_up=0
@@ -129,7 +137,7 @@ wan_ip4=$(jaddr4 "$WANJSON")
 wan6_up=$(jval "$WAN6JSON" up)
 [ "$wan6_up" = "true" ] && wan6_up=1 || wan6_up=0
 wan6_ip=$(t2 ip -6 addr show "$DATA_DEVICE" 2>/dev/null | awk '/inet6 [23]/{split($2,s,"/"); print s[1]; exit}')
-wan_dns=$(jarr_dns "$WANJSON")
+wan_dns=$(wan_dns_servers "$WANJSON" "$WAN6JSON")
 apn=$(t3 uci -q get "network.$DATA_IFACE.apn")
 [ -n "$apn" ] || apn="(SIM default)"
 if [ "$VIEW_DATA" = 0 ]; then
@@ -185,6 +193,8 @@ P_V=$(rd /sys/class/power_supply/battery/voltage_now)
 P_I=$(rd /sys/class/power_supply/battery/current_now)
 P_USB=$(rd /sys/class/power_supply/usb/online)
 case "$P_CAP" in ''|*[!0-9]*) P_PRESENT=0 ;; *) P_PRESENT=1 ;; esac
+# Some batteryless boards expose a dummy 100% capacity in the factory driver.
+[ "$(rd /sys/class/power_supply/battery/present)" != 0 ] || P_PRESENT=0
 P_V=$(n_or_null "$(awk -v v="$P_V" 'BEGIN{if(v+0>0)printf "%.2f",v/1000000}')")
 P_I=$(n_or_null "$(awk -v v="$P_I" 'BEGIN{if(v!="")printf "%d",v}')")
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Shared E5/T551M/FM-U20 policy. No tty opens, radio cycles or dial prerequisites.
+# Shared E5/T551M policy. No tty opens, radio cycles or dial prerequisites.
 # queue [0|1] detaches; run [0|1] is the bounded background worker.
 set -u
 export PATH="$PATH:/opt/e5/bin:/usr/sbin:/sbin"

@@ -19,7 +19,7 @@
 
 ## 机型与通道
 
-E5、T551M、FM-U20 共享 `devices/t551m/ui.py` 的装配入口和同一份平台任务。
+E5、T551M 共享 `devices/t551m/ui.py` 的装配入口和同一份平台任务。
 任务存在 `/opt/e5/t551m-at` 时使用已部署的 nr2 AT owner，与 MM 的 nr1
 拨号通道分离；即便该 owner 临时不可用，也不改走拨号口或直接打开 tty。
 每条命令携带当前 SIM 的 SPACTCARD 前缀，启动任务时固定所选 SIM。
