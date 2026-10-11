@@ -17,7 +17,10 @@ VERIFIED_VOLTAGE_FIRMWARE = frozenset({
     'c3ab5b763cbcfd09d1a4e8f598ed703c739a2081682f8278276dba4581cd1c44',
     '51ab807ce7c13795e134031b81f6f6b904da38a771c166ce4e279f93dac72890',
 })
-VOLTAGE_CAPABILITY_CACHE = 'voltage-supported-v2'
+VERIFIED_M8_VOLTAGE_FIRMWARE = frozenset({
+    '31425dab4aca8450757ac4207de419d06643b7204776fc7e8da5aab1d68814df',
+})
+VOLTAGE_CAPABILITY_CACHE = 'voltage-supported-v3'
 
 
 def read(path, default=''):
@@ -71,7 +74,10 @@ class Control:
             return read(cache) == '1'
         supported = False
         compatible = read(self.root / 'sys/firmware/devicetree/base/compatible')
-        if 'sprd,ums9621' in compatible.split('\0'):
+        compatibles = compatible.split('\0')
+        verified = (VERIFIED_VOLTAGE_FIRMWARE if 'sprd,ums9621' in compatibles else
+                    VERIFIED_M8_VOLTAGE_FIRMWARE if 'sprd,ums9620' in compatibles else ())
+        if verified:
             hashes = {}
             for entry in (self.root / 'sys/class/block').glob('*/uevent'):
                 fields = dict(line.split('=', 1) for line in read(entry).splitlines() if '=' in line)
@@ -86,7 +92,7 @@ class Control:
                     pass
             supported = (len(hashes) == 2 and
                          len(set(hashes.values())) == 1 and
-                         hashes['sml_a'] in VERIFIED_VOLTAGE_FIRMWARE)
+                         hashes['sml_a'] in verified)
         self.runtime.mkdir(parents=True, exist_ok=True)
         cache.write_text('1' if supported else '0')
         return supported
@@ -175,7 +181,8 @@ class Control:
             editable = domain in (0, 1, 2) and offset is not None and self.voltage_supported()
             # Verified SML routes domain 0/1/2 to PMIC CPU1/CPU2/CPU0.
             # Regulator numbering does not follow Linux policy/domain numbering.
-            rail = (1, 2, 0)[domain] if editable else None
+            compatible = read(self.root / 'sys/firmware/devicetree/base/compatible').split('\0')
+            rail = (1, 2, 0)[domain] if editable and 'sprd,ums9621' in compatible else None
             policies.append({
                 'id': path.name, 'cpus': read(path / 'related_cpus'),
                 'driver': read(path / 'scaling_driver'),

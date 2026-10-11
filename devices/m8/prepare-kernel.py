@@ -119,9 +119,23 @@ def apply(kernel):
     # M8 uses the older three-cluster cpufreq-data-v1 binding, like UMS9620.
     for name in ('sprd-cpufreq-v2-driver.c', 'sprd-cpufreq-v2.h'):
         data = (source / 'drivers/cpufreq' / name).read_text()
-        # Shared SoC identity is not proof that the M8 SML accepts voltage offsets.
-        data = data.replace('if (uv && !of_machine_is_compatible("sprd,ums9620"))', 'if (uv)')
+        # M8 SML DVFS_INIT domain bytes verified separately; userspace checks
+        # both complete firmware hashes before loading nonzero offsets.
+        # See cpu-controls.md. Keep the donor's one-shot/range/SoC guards.
+        if name.endswith('.c'):
+            shared = (HERE.parent / 't551m/cpufreq' / name).read_text()
+            start = shared.index('/* Keep userspace requests distinct')
+            end = shared.index('static struct freq_attr *sprd_cpufreq_attr[]', start)
+            data = data.replace('static struct freq_attr *sprd_cpufreq_attr[]',
+                                shared[start:end] + 'static struct freq_attr *sprd_cpufreq_attr[]')
+            data = data.replace('&scaling_voltage_domain, NULL,',
+                                '&scaling_voltage_domain, &scaling_requested_min_freq,\n'
+                                '\t&scaling_requested_max_freq, NULL,')
         (kernel / 'drivers/cpufreq' / name).write_text(data)
+    (kernel / 'drivers/thermal/sprd_virtual_thermal.c').write_bytes(
+        (HERE / 'sprd_virtual_thermal.c').read_bytes())
+    append('drivers/thermal/Makefile', 'sprd_virtual_thermal.o',
+           'obj-$(CONFIG_SPRD_THERMAL_R5P0) += sprd_virtual_thermal.o')
     replace('drivers/base/arch_topology.c',
             '\nDEFINE_PER_CPU(unsigned long, hw_pressure);',
             '\nEXPORT_SYMBOL_GPL(topology_set_freq_scale);\n\nDEFINE_PER_CPU(unsigned long, hw_pressure);')

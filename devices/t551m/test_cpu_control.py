@@ -272,6 +272,16 @@ class VoltageFirmwareTest(unittest.TestCase):
     def test_mixed_verified_slots_are_rejected(self):
         self.assertFalse(self.check_hashes(sorted(module.VERIFIED_VOLTAGE_FIRMWARE)))
 
+    def test_m8_firmware_requires_its_soc_and_matching_slots(self):
+        digest = next(iter(module.VERIFIED_M8_VOLTAGE_FIRMWARE))
+        self.assertFalse(self.check_hashes([digest, digest]))
+        self.compatible.write_bytes(b'sprd,ums512-base\0sprd,ums9620\0')
+        (self.control.runtime / module.VOLTAGE_CAPABILITY_CACHE).unlink()
+        self.assertTrue(self.check_hashes([digest, digest]))
+        (self.control.runtime / module.VOLTAGE_CAPABILITY_CACHE).unlink()
+        known = next(iter(module.VERIFIED_VOLTAGE_FIRMWARE))
+        self.assertFalse(self.check_hashes([known, known]))
+
     def test_unknown_or_mismatched_slot_is_rejected(self):
         known = next(iter(module.VERIFIED_VOLTAGE_FIRMWARE))
         for hashes in [('unknown', 'unknown'), (known, 'unknown')]:

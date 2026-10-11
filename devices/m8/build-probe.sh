@@ -14,7 +14,7 @@ import sys
 s = Path(sys.argv[1]).read_text()
 s += '''
 # M8 trial: native display/audio/charging and dual-role USB peripherals.
-CONFIG_LOCALVERSION="-m8-probe11"
+CONFIG_LOCALVERSION="-m8-probe12"
 CONFIG_OF_OVERLAY=y
 CONFIG_CMDLINE="earlycon=sprd_serial,0x20210000,115200n8 console=ttyS1,115200n8 console=tty0 loglevel=7 log_buf_len=4M rdinit=/init panic=10 clk_ignore_unused pd_ignore_unused regulator_ignore_unused fw_devlink=permissive"
 CONFIG_SPRD_UMS9621_CLK=n

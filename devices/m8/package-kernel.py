@@ -50,7 +50,10 @@ def package(build, out):
                 'ln -sfn ../kernel/' + rel + ' audio/' + Path(rel).name + '\n' for rel in files))
     subprocess.run(['python3', str(TOP / 'upstream/wrap-image.py'), str(out / 'Image'), str(out / 'Image.lk')], check=True)
     order = (TOP / 'upstream/module-order.txt').read_text().replace('aw32257_charger.ko', 'bq2560x-charger.ko')
-    (out / 'module-order.txt').write_text('sprd-cpufreq-v2-driver.ko\n' + order)
+    # Load CPUFreq from the real root at S13, after validating the saved
+    # voltage profile and arming crash recovery. Early zero-offset loading
+    # consumes the firmware's one-shot DVFS_INIT before the profile is read.
+    (out / 'module-order.txt').write_text(order)
     for name in (out / 'module-order.txt').read_text().split():
         if name not in expected:
             raise ValueError('Missing early module: ' + name)
