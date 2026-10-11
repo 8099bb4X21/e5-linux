@@ -28,6 +28,9 @@ for entry in "$HERE/overlay"/*; do
     fi
 done
 
+# Windows checkouts may not retain the new helper's executable bit.
+chmod 755 "$ROOT/opt/e5/e5-data-priority"
+
 echo "=== locale ==="
 bash "$HERE/e5-chroot.sh" '
     grep -q "^en_US.UTF-8" /etc/locale.gen || echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen

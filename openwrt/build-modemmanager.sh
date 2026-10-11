@@ -47,7 +47,8 @@ set -euo pipefail
 # 11: consume IMS PDN unsolicited reports instead of failing an outgoing call.
 # 12: confirm transient empty call lists and adopt existing outgoing CP calls.
 # 13: serialize hangup, settle before redial and ignore pre-hangup CLCC snapshots.
-E5REV=13
+# 14: detached, owner-aware CEUS/CEMODE confirmation with bounded retries.
+E5REV=14
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"
@@ -66,6 +67,7 @@ cp "$HERE/tests/voice-identity.py" "$WORK/voice-identity.py"
 cp "$HERE/tests/sim-power.py" "$WORK/sim-power.py"
 cp "$HERE/tests/voice-urc.py" "$WORK/voice-urc.py"
 cp "$HERE/tests/voice-recovery.py" "$WORK/voice-recovery.py"
+cp "$HERE/tests/data-priority-hook.py" "$WORK/data-priority-hook.py"
 n=900
 for p in "$TOP"/rootfs/deb-patches/modemmanager-[0-9][0-9]-*.patch; do
     cp "$p" "$WORK/patches/src/$n-e5-$(basename "$p" | sed 's/^modemmanager-//')"
@@ -151,6 +153,7 @@ python3 /work/voice-identity.py "$(dirname "$voice_source")"
 python3 /work/sim-power.py "$(dirname "$voice_source")"
 python3 /work/voice-urc.py "$(dirname "$voice_source")"
 python3 /work/voice-recovery.py "$(dirname "$voice_source")"
+python3 /work/data-priority-hook.py "$(dirname "$voice_source")"
 rm -f /out/modemmanager*.apk
 find bin/packages -name "modemmanager*-r$((rel + 900 + E5REV)).apk" -exec cp {} /out/ \;
 ls -la /out/modemmanager*.apk

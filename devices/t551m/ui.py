@@ -92,6 +92,7 @@ def stage(root, profile='t551m'):
         (Path(__file__).with_name('at-service'), 'etc/init.d/t551m-at'),
         (Path(__file__).with_name('ui-cleanup.py'), 'opt/e5/t551m-ui-cleanup'),
         (TOP / 'rootfs/overlay/opt/e5/e5-at', 'opt/e5/e5-at'),
+        (TOP / 'rootfs/overlay/opt/e5/e5-data-priority', 'opt/e5/e5-data-priority'),
         (TOP / 'openwrt/overlay/usr/libexec/e5-volume', 'usr/libexec/e5-volume'),
         (TOP / 'openwrt/overlay/usr/libexec/e5-sms', 'usr/libexec/e5-sms'),
         (TOP / 'openwrt/overlay/etc/init.d/e5-pulseaudio', 'etc/init.d/e5-pulseaudio'),
@@ -140,7 +141,7 @@ if __name__ == '__main__':
                         archive.add(path, arcname=str(path.relative_to(root)), recursive=False)
                     elif path.is_file():
                         info = archive.gettarinfo(str(path), str(path.relative_to(root)))
-                        info.mode = 0o755 if any(p in path.parts for p in ('init.d', 'hotplug.d', 'libexec', 'uci-defaults')) or path.name in ('t551m-at', 't551m-atd', 'e5-at', 't551m-ui-compat', 't551m-network-startup') else 0o644
+                        info.mode = 0o755 if any(p in path.parts for p in ('init.d', 'hotplug.d', 'libexec', 'uci-defaults')) or path.name in ('t551m-at', 't551m-atd', 'e5-at', 'e5-data-priority', 't551m-ui-compat', 't551m-network-startup') else 0o644
                         info.uid = info.gid = 0
                         info.uname = info.gname = 'root'
                         with path.open('rb') as stream:

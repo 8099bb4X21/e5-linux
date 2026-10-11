@@ -375,7 +375,7 @@ if [ -n "$screen" ] && [ -f /in/infoscreen-plugins/plugins/phone/manifest.json ]
     cp -a /in/infoscreen-plugins/plugins/phone $R/etc/e5-infoscreen/plugins/
     chown -R 0:0 $R/etc/e5-infoscreen/plugins/phone
 fi
-for f in vendor-start.sh e5-modem-coldboot android-run node-perms.sh regdb-load.sh gadget-guard.sh usb-watch.sh e5-next-boot e5-os e5-sd-registry e5-at e5-audio-dsp e5-call-audio.py; do
+for f in vendor-start.sh e5-modem-coldboot android-run node-perms.sh regdb-load.sh gadget-guard.sh usb-watch.sh e5-next-boot e5-os e5-sd-registry e5-at e5-data-priority e5-audio-dsp e5-call-audio.py; do
     cp /in/opt-e5/$f $R/opt/e5/$f; chmod 755 $R/opt/e5/$f
 done
 cp /in/logdw $R/opt/e5/bin/logdw && chmod 755 $R/opt/e5/bin/logdw
@@ -389,7 +389,7 @@ cp /in/busybox $R/opt/e5/bin/busybox && chmod 755 $R/opt/e5/bin/busybox
 # the applets the shared scripts use that OpenWrt'"'"'s busybox leaves out --
 # the ones the full busybox really has
 have=$(/in/busybox --list)
-for a in mountpoint timeout seq stat chroot od losetup telnetd cut tr basename dirname \
+for a in mountpoint timeout setsid flock seq stat chroot od losetup telnetd cut tr basename dirname \
          find xargs head tail wc sort uniq awk readlink unzip; do
     chroot $R /bin/sh -c "command -v $a" >/dev/null 2>&1 && continue
     if printf "%s\n" "$have" | grep -qx "$a"; then
