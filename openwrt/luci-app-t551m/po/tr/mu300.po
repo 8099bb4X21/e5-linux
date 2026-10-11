@@ -35,3 +35,5 @@ msgstr "SIM yönetimi"
 
 msgid "CPU 设置"
 msgstr "CPU ayarları"
+msgid "铃声与通知"
+msgstr "Zil sesleri ve bildirimler"

@@ -68,6 +68,10 @@
 						"zh": "提示音",
 						"en": "Beep"
 					}
+				},
+				{
+					"value": "custom",
+					"label": {"zh": "网页上传的铃声", "en": "Uploaded ringtone", "tr": "Yüklenen zil sesi"}
 				}
 			]
 		}

@@ -51,7 +51,7 @@ def spawn(argv): spawned.append(argv); return AlertProcess()
 ringer=voice.RingAlert(spawn,lambda:now[0])
 with patch.object(voice.os,'killpg') as kill:
     ringer.update([{'id':'3','state':'ringing-in'}],{'sound':True,'vibrate':True,'tone':'call'},False)
-    assert spawned[0][0]=='paplay' and spawned[1][0]=='e5-vibrate'
+    assert spawned[0]==['/usr/libexec/e5-notification-sound','ring','call'] and spawned[1][0]=='e5-vibrate'
     ringer.update([{'id':'3','state':'active'}],{'sound':True,'vibrate':True},True)
     assert kill.call_count==2 and not ringer.call_ids
     spawned.clear();now[0]=3

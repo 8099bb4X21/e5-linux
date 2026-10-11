@@ -5,12 +5,13 @@
 # Without PulseAudio use 'VBC DAC0 DG Set' (0-127, both channels). Level 15 is 39,
 # the gain the device's own Android plays media with (the UCM profile's
 # value, rootfs/overlay/usr/share/alsa/ucm2/sprdphone-sc273/HiFi.conf), and
-# each level below takes 2 off: 11 at level 1.  Never louder than Android.
+# each level below takes 2 off: 11 at level 1. Never louder than Android.
 #
 #   e5-volume                 the level, as JSON: {"level":N,"max":15,"card":true|false,"output":"speaker"|"bluetooth"}
 #   e5-volume set N | up | down
 #   During calls these keys/status control call volume; 'call' selects it explicitly.
 #   e5-volume apply           the saved level to the card (after e5-audio-dsp start)
+#   e5-volume prepare         wake the selected media sink, then apply its level
 #   e5-volume play FILE|beep   play a sound (not while one is playing)
 #
 # With PulseAudio running (/etc/init.d/e5-pulseaudio) a sound goes through it,
@@ -47,6 +48,33 @@ apply() {
 	[ "$speaker" = 1 ] && [ "$1" -gt 0 ] && g=39
 	amixer -q -c "$c" cset "name=$CTL" "$g,$g" >/dev/null 2>&1
 }
+prepare() {
+	local sink state
+	# Both supported handsets need FAST_P startup before gain restoration.
+	# Leave unrecognized boards on their existing preparation path.
+	case "$(cat /etc/e5/device-profile 2>/dev/null)" in
+		t551m|e5) ;;
+		*) apply "$1"; return $? ;;
+	esac
+	# apply alone must remain passive: volume keys and startup must not keep
+	# the DSP awake. Playback needs a different order. Opening FAST_P after
+	# writing its gain can reinitialize the DSP path on the first sound.
+	if pidof pulseaudio >/dev/null; then
+		sink=$(pa pactl get-default-sink) || return 1
+		[ -n "$sink" ] || return 1
+		state=$(pa pactl list short sinks | awk -v sink="$sink" '$2 == sink { print $NF; exit }')
+		pa pactl suspend-sink "$sink" 0 >/dev/null 2>&1 || return 1
+		if [ "$sink" = speaker ] && [ "$state" = SUSPENDED ]; then
+			# Unsuspending alone need not start FAST_P. Run 100 ms of zeros
+			# through the PCM first, then restore gain after DSP startup.
+			# This is only for cold speaker playback, never an idle keeper.
+			head -c 19200 /dev/zero | pa paplay --device="$sink" --raw \
+				--rate=48000 --channels=2 --format=s16le --latency-msec=20 \
+				--client-name=e5-silent-preroll >/dev/null 2>&1 || return 1
+		fi
+	fi
+	apply "$1"
+}
 status() {
 	local out=speaker
 	case "$(pa pactl get-default-sink 2>/dev/null)" in bluez_sink*) out=bluetooth ;; esac
@@ -63,7 +91,7 @@ play() {
 	case "$f" in beep) f=/usr/share/e5/beep.wav ;; esac
 	c=$(card); [ -n "$c" ] && [ -f "$f" ] || return 1
 	[ "$(level)" -gt 0 ] || return 0
-	apply "$(level)" || return 1
+	prepare "$(level)" || return 1
 	if pidof pulseaudio >/dev/null; then
 		PULSE_SERVER=unix:/var/run/pulse/native paplay "$f" >/dev/null 2>&1 &
 		return 0
@@ -90,6 +118,7 @@ case "${1:-}" in
 	up) n=$(level); [ "$n" -lt $MAX ] && n=$((n + 1)); save "$n"; apply "$n"; status ;;
 	down) n=$(level); [ "$n" -gt 0 ] && n=$((n - 1)); save "$n"; apply "$n"; status ;;
 	apply) apply "$(level)" ;;
+	prepare) prepare "$(level)" ;;
 	play) play "${2:-beep}" ;;
 	*) sed -n '2,15p' "$0"; exit 2 ;;
 esac

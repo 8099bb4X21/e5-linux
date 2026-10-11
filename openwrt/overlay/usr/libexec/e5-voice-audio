@@ -526,7 +526,7 @@ def alert_settings():
     result = {'sound': values.get('ring_sound', '1') == '1',
             'screen': values.get('ring_screen', '1') != '0',
             'vibrate': values.get('ring_vibrate', '1') == '1',
-            'tone': 'beep' if values.get('ring_tone') == 'beep' else 'call'}
+            'tone': values.get('ring_tone') if values.get('ring_tone') in ('beep', 'custom') else 'call'}
     if r.returncode == 0 or signature == [None, None]:
         _alert_signature, _alert_values = signature, result
     return result
@@ -569,8 +569,8 @@ class RingAlert:
         # Only the ringing notification is repeated, never a call operation.
         self.next = now + 2.5
         if settings.get('sound') and not voice_active and (self.sound is None or self.sound.poll() is not None):
-            tone = 'beep' if settings.get('tone') == 'beep' else 'call'
-            self.sound = self.spawn(['paplay', '/usr/share/e5/' + tone + '.wav'])
+            tone = settings.get('tone') if settings.get('tone') in ('beep', 'custom') else 'call'
+            self.sound = self.spawn(['/usr/libexec/e5-notification-sound', 'ring', tone])
         if settings.get('vibrate') and (self.vibration is None or self.vibration.poll() is not None):
             self.vibration = self.spawn(['e5-vibrate', '250', '150', '250'])
 

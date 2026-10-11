@@ -248,10 +248,10 @@ const charge = uci_category('charge', L('充电', 'Charging'), [
 const notify = uci_category('notify', L('通知', 'Notifications'), [
 	{ id: 'vibrate', type: 'toggle', uci: 'e5-notify.sms.vibrate', default: '1', label: L('短信震动', 'Vibrate on SMS') },
 	{ id: 'screen', type: 'toggle', uci: 'e5-notify.sms.screen', default: '1', label: L('短信亮屏', 'Light up on SMS') },
-	{ id: 'sound', type: 'toggle', uci: 'e5-notify.sms.sound', default: '0', label: L('短信提示音', 'Sound on SMS'),
+	{ id: 'sound', type: 'toggle', uci: 'e5-notify.sms.sound', default: '1', label: L('短信提示音', 'Sound on SMS'),
 	  note: L('按“声音”里的音量播放', 'At the volume set under Sound') }
 ], function() {
-	return [ { id: 'test', type: 'action', label: L('试一下震动', 'Test the vibration') } ];
+	return [ { id: 'test', type: 'action', label: L('测试短信提醒', 'Test SMS notification') } ];
 }, function(item, value) {
 	if (item != 'test') return 'no such setting';
 	ctx.run('(e5-sms-notify test) >/dev/null 2>&1 &');

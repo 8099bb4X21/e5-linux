@@ -1250,6 +1250,7 @@ var DASH_I18N = {
 	'「': ['“', '“'],
 	'」': ['”', '”']
 };
+DASH_I18N['铃声与通知'] = ['Ringtones & notifications', 'Zil sesleri ve bildirimler'];
 var DASH_KEYS = Object.keys(DASH_I18N).sort(function(a, b) { return b.length - a.length; });
 var DASH_PATTERN = new RegExp(DASH_KEYS.map(function(k) { return k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|'), 'g');
 function uiLanguage() {

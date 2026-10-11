@@ -24,7 +24,9 @@ cfg() { uci -q get "e5-notify.sms.$1" || echo "$2"; }
 
 alert() {
 	# (the sound at the speaker volume, /usr/libexec/e5-volume; none at 0)
-	[ "$(cfg sound 0)" = 1 ] && [ -x /usr/libexec/e5-volume ] && /usr/libexec/e5-volume play beep
+	if [ "$(cfg sound 1)" = 1 ] && [ -x /usr/libexec/e5-notification-sound ]; then
+		setsid /usr/libexec/e5-notification-sound sms >/dev/null 2>&1 &
+	fi
 	[ "$(cfg vibrate 1)" = 1 ] && e5-vibrate $(cfg pattern "250 150 250")
 }
 
