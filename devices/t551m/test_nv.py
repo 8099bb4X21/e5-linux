@@ -116,6 +116,27 @@ class CalibrationValidation(unittest.TestCase):
             nv.keep_working_copy(path.name, path, True, False)
         self.assertFalse(path.exists())
 
+    def test_interrupted_pair_recovers_before_changed_origin_validation(self):
+        primary = self.image(b'\x01\x00', 0xfffe, 'nr_fixnv1_a')
+        backup = self.image(b'\x02\x00', 0, 'nr_fixnv2_a')
+        tracked = {primary.name: 'old-origin', backup.name: 'old-origin'}
+        nv.recover_existing_pairs(primary.parent, tracked, ())
+        self.assertTrue(nv.keep_working_copy(backup.name, backup, True, False))
+        self.assertEqual(primary.read_bytes(), backup.read_bytes())
+
+    def test_early_recovery_does_not_adopt_unknown_or_refresh_files(self):
+        primary = self.image(b'\x01\x00', 0xfffe, 'nr_fixnv1_a')
+        backup = self.image(b'\x02\x00', 0, 'nr_fixnv2_a')
+        before = backup.read_bytes()
+        nv.recover_existing_pairs(primary.parent, {primary.name: 'known'}, ())
+        self.assertEqual(backup.read_bytes(), before)
+        tracked = {primary.name: 'known', backup.name: 'known'}
+        nv.recover_existing_pairs(primary.parent, tracked, (), refresh=True)
+        self.assertEqual(backup.read_bytes(), before)
+        with self.assertRaisesRegex(RuntimeError, 'Detach NV loops'):
+            nv.recover_existing_pairs(primary.parent, tracked, (backup,))
+        self.assertEqual(backup.read_bytes(), before)
+
     def test_calibration_without_checksum_still_requires_review(self):
         path = self.image(b'\x01\x00', 0xfffe, 'calinv')
         with self.assertRaisesRegex(RuntimeError, 'explicitly refresh'):

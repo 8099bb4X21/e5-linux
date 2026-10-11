@@ -1,12 +1,41 @@
 #!/usr/bin/env python3
-"""Apply T551M networking startup settings to an existing OpenWrt root."""
+"""Apply shared Unisoc networking fixes and explicit board defaults to a root.
+
+The historical path is retained for installed update hooks. PDP retries apply
+equally to E5, T551M and M8; only radio capability defaults are board-specific.
+"""
 import argparse
 from pathlib import Path
 import re
 
 
+CONNECT_RETRY = '''# unisoc-pdp-connect-retry: bounded recovery without disabling the radio.
+modemmanager_connect_retry() {
+	local device="$1" connectargs="$2" attempt=1 result rc delay
+	while :; do
+		result=$(mmcli --modem="${device}" --timeout 120 --simple-connect="${connectargs}" 2>&1)
+		rc=$?
+		printf '%s\\n' "$result"
+		[ "$rc" -eq 0 ] && return 0
+		# Observed after Android -> OpenWrt: context activation error 28 can
+		# clear on a later attempt. Do not retry SIM/auth/other errors here.
+		[ "$device" = unisoc-sipc ] && [ "$attempt" -lt 3 ] || return "$rc"
+		case "$result" in
+			*"Couldn't activate PDP context "*"Unknown mobile equipment error: 28'"*) ;;
+			*) return "$rc" ;;
+		esac
+		delay=$((attempt * 5))
+		echo "PDP activation error 28; retrying in ${delay}s (${attempt}/2)"
+		sleep "$delay"
+		attempt=$((attempt + 1))
+	done
+}
+
+'''
+
+
 def patch_root(root, profile='t551m'):
-    if profile not in ('t551m', 'e5'):
+    if profile not in ('t551m', 'e5', 'm8'):
         raise ValueError('Unknown device profile: ' + profile)
     config = root / 'etc/config/unisoc_modem'
     if config.exists() and profile == 't551m':
@@ -77,6 +106,15 @@ def patch_root(root, profile='t551m'):
 ''')
             proto.write_text(text)
 
+        if '# unisoc-pdp-connect-retry:' not in text:
+            anchor = 'proto_modemmanager_setup() {'
+            call = '\tmmcli --modem="${device}" --timeout 120 --simple-connect="${connectargs}" || {'
+            if text.count(anchor) != 1 or text.count(call) != 1:
+                raise ValueError('Unexpected ModemManager connect configuration')
+            text = text.replace(anchor, CONNECT_RETRY + anchor)
+            text = text.replace(call, '\tmodemmanager_connect_retry "$device" "$connectargs" || {')
+            proto.write_text(text)
+
     luci = root / 'www/luci-static/resources/protocol/modemmanager.js'
     if luci.exists():
         text = luci.read_text()
@@ -93,6 +131,6 @@ def patch_root(root, profile='t551m'):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('--profile', choices=('t551m', 'e5'), default='t551m')
+    parser.add_argument('--profile', choices=('t551m', 'e5', 'm8'), default='t551m')
     args = parser.parse_args()
     patch_root(args.root, args.profile)

@@ -156,6 +156,38 @@ hardware.start()
 assert hardware.values['Speaker Function']=='on'
 hardware.stop()
 assert hardware.values==hardware.original and not hardware.speaker
+# Shared hardware keeps the quieter handset DSP curve, the real amplifier's
+# codec gains, logical phone selection, and microphone mute.
+hardware=Hardware()
+hardware.receiver_output='speaker'
+hardware.band=1
+hardware.codec_gains={9:{'dacs_playback_volume':0,'ao_playback_volume':2}}
+hardware.set_volume(4)
+hardware.start()
+assert not hardware.speaker and hardware.speaker_path
+assert hardware.values['Speaker Function']=='on'
+assert hardware.values['Earpiece Function']=='off'
+assert hardware.values['NXP Profile Select']==0x02020005
+assert hardware.values['AO Gain AO Playback Volume']==2
+assert hardware.values['VBC_VOLUME']==2
+hardware.mute(True)
+hardware.set_route('bluetooth',16000)
+assert not hardware.speaker_path
+assert hardware.values['Speaker Function']=='off'
+assert hardware.values['NXP Profile Select']==0x1e1e0005
+hardware.set_route('receiver')
+assert not hardware.speaker and hardware.speaker_path
+assert hardware.values['Speaker Function']=='on'
+assert hardware.values['VBC ADC2 DG Set']=='0,0'
+hardware.set_volume(0)
+assert hardware.values['VBC_DL_MUTE']=='enable'
+hardware.set_volume(4)
+assert hardware.values['VBC_DL_MUTE']=='disable'
+hardware.set_speaker(True)
+assert hardware.values['NXP Profile Select']==0x09090005
+hardware.stop()
+assert hardware.values==hardware.original
+
 class FailingPcm(Pcm):
     def __init__(self,card,device,stream):
         if stream==1:raise RuntimeError('capture setup failed')

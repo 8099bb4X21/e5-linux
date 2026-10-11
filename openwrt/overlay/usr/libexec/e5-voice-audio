@@ -580,6 +580,15 @@ def main():
     from e5_call_volume import Volume
     volume = Volume()
     logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='e5-voice-audio: %(message)s')
+    # Screen RPC serves network/settings as well as calls. Keep it available
+    # even when audio hardware is absent or its firmware is still starting.
+    events = None
+    if Path('/usr/share/e5-infoscreen/www/calls.js').exists():
+        try:
+            from e5_call_events import CallEvents
+            events = CallEvents()
+        except (ImportError, OSError):
+            logging.exception('call events unavailable; UI can use polling fallback')
     # Opening PCM before the firmware has booted can reset the audio domain.
     # e5-audio writes this boot-local marker only after DSP setup succeeds.
     while not Path('/run/e5-audio.ready').exists():
@@ -599,14 +608,6 @@ def main():
         logging.warning('GIO unavailable; using mmcli fallback')
     messages = queue.Queue()
     pipe_fd = None
-    events = None
-    if Path('/usr/share/e5-infoscreen/www/calls.js').exists():
-        try:
-            from e5_call_events import CallEvents
-            events = CallEvents()
-        except (ImportError, OSError):
-            logging.exception('call events unavailable; UI can use polling fallback')
-
     def notification_reader():
         nonlocal pipe_fd
         try:

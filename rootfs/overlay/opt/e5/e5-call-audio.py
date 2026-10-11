@@ -14,6 +14,7 @@ import math
 import os
 from pathlib import Path
 import re
+import runpy
 import signal
 import struct
 import sys
@@ -204,6 +205,10 @@ class VoicePcm:
 
 
 class VoiceHardware:
+    # Logical "phone" selection may share the speaker on single-transducer
+    # hardware. Keep UI intent separate from codec wiring and calibration.
+    receiver_output = 'receiver'
+    receiver_volume_ceiling = 15
     # Shared voice routes from this device's Android parameters.
     ROUTES = {
         'S_VOICE_P_CODEC SWITCH': 'on', 'S_VOICE_C_CODEC SWITCH': 'on',
@@ -301,9 +306,42 @@ class VoiceHardware:
         self.volume = 15
         self.remote_volume = False
         self.volume_curves = self.load_volume_curves()
+        profile = runpy.run_path(str(Path(__file__).with_name('e5_call_profiles.py')))['prepare']()
+        if profile is not None:
+            self.volume_curves = self.load_volume_curves(data=profile)
         self.codec_gains = self.load_codec_gains()
+        self.receiver_output = self.load_receiver_output()
+        self.receiver_volume_ceiling = self.load_receiver_volume_ceiling()
         self.applied_volume = None
         self.mixer = AlsaControl(self.card)
+
+    @staticmethod
+    def load_receiver_output(path=Path('/etc/e5/receiver-output')):
+        try:
+            value = path.read_text().strip()
+        except FileNotFoundError:
+            return 'receiver'
+        except OSError as error:
+            logging.warning('cannot read receiver wiring: %s', error)
+            return 'receiver'
+        if value not in ('receiver', 'speaker'):
+            logging.warning('invalid receiver wiring; using separate receiver')
+            return 'receiver'
+        return value
+
+    @property
+    def speaker_path(self):
+        return not self.bluetooth and (self.speaker or self.receiver_output == 'speaker')
+
+    @staticmethod
+    def load_receiver_volume_ceiling(path=Path('/etc/e5/receiver-volume-ceiling')):
+        try:
+            value = int(path.read_text().strip())
+        except FileNotFoundError:
+            return 15
+        if not 1 <= value <= 15:
+            raise ValueError('receiver volume ceiling must be 1..15')
+        return value
 
     @staticmethod
     def load_codec_gains(path=Path('/lib/firmware/codec.xml')):
@@ -333,12 +371,12 @@ class VoiceHardware:
             return {}
 
     @staticmethod
-    def load_volume_curves(path=Path('/lib/firmware/audio_structure')):
+    def load_volume_curves(path=Path('/lib/firmware/audio_structure'), data=None):
         # Read the same AS profile blob loaded by the driver, never a donor's
         # calibration. This is the v4 0x2da-byte AS layout used by this backend.
         # In particular, some SWB tables have an out-of-order/louder entry.
         try:
-            data = path.read_bytes()
+            data = path.read_bytes() if data is None else data
             magic, count, size = struct.unpack_from('<16sII', data)
             if magic.rstrip(b'\0') != b'audio_profile' or size != 0x2da or len(data) != 24 + count * size:
                 raise ValueError('unknown audio structure layout')
@@ -350,10 +388,18 @@ class VoiceHardware:
 
     def dsp_volume(self):
         # Keep the already verified Bluetooth gain; HFP VGS owns its volume.
-        if self.bluetooth or self.volume == 15:
+        if self.bluetooth:
             return 7
         if not self.volume:
             return 1  # explicit downlink mute remains authoritative at zero
+        # Preserve the full UI travel while capping phone-mode loudness to
+        # the board's equivalent native UI level; handsfree keeps full range.
+        level = self.volume if self.speaker else (
+            1 + (self.volume - 1) * (self.receiver_volume_ceiling - 1) / 14)
+        if level == 15:
+            return 7
+        # Acoustic mode follows user intent even when both routes share a
+        # transducer: the native handset curve is much quieter than handsfree.
         mode = self.profile_word(self.band, self.speaker) >> 24
         gains = self.volume_curves.get(mode, ())
         if len(gains) == 7 and gains[-1] > 0:
@@ -361,9 +407,9 @@ class VoiceHardware:
             # maximum, sort by audible gain, and map the UI to those points.
             points = [(i + 1, math.log(g)) for i, g in enumerate(gains) if 0 < g <= gains[-1]]
             low, high = min(g for _, g in points), math.log(gains[-1])
-            target = low + (high - low) * (self.volume - 1) / 14
+            target = low + (high - low) * (level - 1) / 14
             return min(points, key=lambda p: (abs(p[1] - target), p[0]))[0]
-        return 1 + (self.volume - 1) * 6 // 14
+        return 1 + int((level - 1) * 6 // 14)
 
     def controls(self):
         return tuple(dict.fromkeys((*self.ROUTES, *self.RECEIVER, *self.SPEAKER,
@@ -389,15 +435,18 @@ class VoiceHardware:
                 self.put(name, str(self.bt_rate))
             return
         for name, value in self.CODEC_IIS.items(): self.put(name, value)
-        gains = self.codec_gains.get(word >> 24, {})
+        # Wire the real amplifier with its own codec gains, but retain the
+        # handset DSP profile/volume ceiling for the logical phone mode.
+        physical_mode = self.profile_word(self.band, self.speaker_path) >> 24
+        gains = self.codec_gains.get(physical_mode, {})
         self.put('DAC Gain DAC Playback Volume', gains.get(
-            'dacs_playback_volume' if self.speaker else 'dacl_playback_volume', 0 if self.speaker else 3))
+            'dacs_playback_volume' if self.speaker_path else 'dacl_playback_volume', 0 if self.speaker_path else 3))
         self.put('AO Gain AO Playback Volume', gains.get('ao_playback_volume',
-            (3, 3, 3, 4)[self.band] if self.speaker else 6))
-        if not self.speaker:
+            (3, 3, 3, 4)[self.band] if self.speaker_path else 6))
+        if not self.speaker_path:
             self.put('EAR Gain EAR Playback Volume', gains.get('ear_playback_volume', (2, 2, 2, 4)[self.band]))
         logging.info('voice profiles=%#x, bandwidth=%d, output=%s, VBC_VOLUME=%d',
-                     word, self.band, 'speaker' if self.speaker else 'receiver', self.dsp_volume())
+                     word, self.band, 'speaker' if self.speaker_path else 'receiver', self.dsp_volume())
 
     def output(self):
         # Disable the old endpoint before rewiring; never feed both outputs.
@@ -406,7 +455,7 @@ class VoiceHardware:
         if self.bluetooth:
             for name, value in self.BLUETOOTH.items(): self.put(name, value)
             return
-        for name, value in (self.SPEAKER if self.speaker else self.RECEIVER).items():
+        for name, value in (self.SPEAKER if self.speaker_path else self.RECEIVER).items():
             self.put(name, value)
 
     def set_speaker(self, enabled):

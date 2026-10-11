@@ -12,6 +12,7 @@ import runpy
 
 TOP = Path(__file__).resolve().parents[2]
 SHARED = TOP / 'devices/t551m'
+source_bytes = runpy.run_path(str(TOP / 'devices/staging.py'))['source_bytes']
 
 
 def copy(root, source, target, mode=0o755, preserve=False):
@@ -19,8 +20,7 @@ def copy(root, source, target, mode=0o755, preserve=False):
     if preserve and dest.exists():
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
-    data = source.read_bytes()
-    dest.write_bytes(data if source.suffix in ('.zip', '.whl') else data.replace(b'\r\n', b'\n'))
+    dest.write_bytes(source_bytes(source))
     dest.chmod(mode)
 
 
@@ -49,7 +49,7 @@ def stage_nv(root):
                               'start_service() {\n\trm -f /run/e5-vendor-prepared\n\t/opt/e5/t551m-nv-prepare || return 1')
     service = service.replace('instance cp_diskserver /opt/e5/android-run cp_diskserver',
         "instance cp_diskserver /bin/sh -c 'i=0; until [ -e /run/e5-vendor-prepared ]; do "
-        "i=$((i + 1)); [ $i -lt 120 ] || exit 1; sleep 0.1; done; exec /opt/e5/android-run cp_diskserver'")
+        "i=$((i + 1)); [ $i -lt 12 ] || exit 1; sleep 1; done; exec /opt/e5/android-run cp_diskserver'")
     service += '\nstop_service() {\n\t/opt/e5/t551m-nv-stop quiesce\n}\n\nservice_stopped() {\n\t/opt/e5/t551m-nv-stop detach\n}\n'
     (root / 'etc/init.d/e5-vendor').write_text(service)
     (root / 'etc/init.d/e5-vendor').chmod(0o755)

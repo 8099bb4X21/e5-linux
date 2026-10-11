@@ -456,6 +456,16 @@ function usb_status() {
 	if (role_node) {
 		policy = read_trim(role_node) || 'auto';
 		role = read_trim(replace(role_node, /usb_role_policy$/, 'usb_role')) || 'none';
+	} else {
+		// DWC3 uses the standard role-switch ABI, without the MUSB policy file.
+		for (let p in glob('/sys/class/usb_role/*/role'))
+			if (read_trim(p) == 'host') role = 'host';
+		// Some automatic-only role switches intentionally hide the role file.
+		for (let p in glob('/sys/class/extcon/*/state'))
+			if (match(readfile(p) ?? '', /(^|\n)USB-HOST=1/)) role = 'host';
+		if (role != 'host')
+			for (let p in glob('/sys/class/udc/*/state'))
+				if (read_trim(p) == 'configured') role = 'device';
 	}
 	for (let e in glob('/sys/class/extcon/*/state'))
 		if (match(readfile(e) ?? '', /(^|\n)USB=1/))

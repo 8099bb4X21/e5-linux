@@ -50,12 +50,8 @@ apply() {
 }
 prepare() {
 	local sink state
-	# Both supported handsets need FAST_P startup before gain restoration.
-	# Leave unrecognized boards on their existing preparation path.
-	case "$(cat /etc/e5/device-profile 2>/dev/null)" in
-		t551m|e5) ;;
-		*) apply "$1"; return $? ;;
-	esac
+	# Shared FAST_P playback path: select by sink state, not board name.
+	# New devices using this speaker path need the same cold-start ordering.
 	# apply alone must remain passive: volume keys and startup must not keep
 	# the DSP awake. Playback needs a different order. Opening FAST_P after
 	# writing its gain can reinitialize the DSP path on the first sound.

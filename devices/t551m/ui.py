@@ -11,6 +11,7 @@ import tempfile
 import urllib.request
 
 TOP = Path(__file__).resolve().parents[2]
+source_bytes = runpy.run_path(str(TOP / 'devices/staging.py'))['source_bytes']
 PACKAGES = {
     'luci-theme-aurora-1.4.0-r20260920.apk':
         ('luci-theme-aurora', '1.4.0', '05f9015e0a4e2859f6a153f69e472f2984481490d4ce6db19b8a41bba7264f1e'),
@@ -24,7 +25,7 @@ PACKAGES = {
 
 
 def stage(root, profile='t551m'):
-    if profile not in ('t551m', 'e5'):
+    if profile not in ('t551m', 'e5', 'm8'):
         raise ValueError('Unknown device profile: ' + profile)
     root = Path(root)
     # Also stage into archive-only roots; the defaults hook patches package
@@ -53,10 +54,14 @@ def stage(root, profile='t551m'):
             # Preserve user settings and traffic history on subsequent builds.
             if srcdir == 'root' and 'etc/config/' in target.as_posix() and target.exists():
                 continue
-            target.write_bytes(src.read_bytes().replace(b'\r\n', b'\n') if srcdir != 'lmo' else src.read_bytes())
+            target.write_bytes(source_bytes(src) if srcdir != 'lmo' else src.read_bytes())
             if profile == 'e5' and src.relative_to(plugin / srcdir).as_posix() == 'etc/config/unisoc_modem':
                 # B38 omission belongs to the T551M firmware, not the shared UI.
                 target.write_bytes(target.read_bytes().replace(b"'1,3,5,8,34,39,40,41'", b"'1,3,5,8,34,38,39,40,41'"))
+            if profile == 'm8' and src.relative_to(plugin / srcdir).as_posix() == 'etc/config/unisoc_modem':
+                # Discover this modem's capabilities; no donor band allowlist.
+                target.write_bytes(b''.join(line for line in target.read_bytes().splitlines(keepends=True)
+                                           if b'option lte_supported_bands ' not in line))
             executable = srcdir == 'root' and any(part in src.parts for part in ('init.d', 'hotplug.d', 'libexec'))
             target.chmod(0o755 if executable else 0o644)
     # Fresh archive roots only receive the modem config in the loop above.

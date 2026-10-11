@@ -48,3 +48,41 @@ with tempfile.TemporaryDirectory() as directory:
     codec.write_text('<!DOCTYPE codec [<!ENTITY bad "3">]><codec/>')
     assert module.VoiceHardware.load_codec_gains(codec)=={}
 print('PASS: per-unit codec calibration and XML validation')
+with tempfile.TemporaryDirectory() as directory:
+    wiring=Path(directory)/'receiver-output'
+    assert module.VoiceHardware.load_receiver_output(wiring)=='receiver'
+    for value, expected in [('speaker\n','speaker'),('receiver\n','receiver'),('invalid','receiver')]:
+        wiring.write_text(value)
+        assert module.VoiceHardware.load_receiver_output(wiring)==expected
+print('PASS: receiver wiring capability and legacy default')
+hw=module.VoiceHardware.__new__(module.VoiceHardware)
+hw.receiver_output='speaker';hw.speaker=False;hw.bluetooth=False;hw.band=1;hw.volume=1
+hw.volume_curves={2:(20,10,30,40,50,60,70),9:(10,20,30,40,50,60,70)}
+assert hw.speaker_path and hw.dsp_volume()==2, 'phone used the handsfree DSP curve'
+hw.speaker=True
+assert hw.dsp_volume()==1
+print('PASS: shared transducer retains independent handset/handfree DSP curves')
+hw.volume_curves={2:(4,10,26,65,205,579,1029),9:(7,29,103,365,1295,12953,23034)}
+hw.speaker=False;hw.volume=5
+reference=hw.dsp_volume()
+hw.receiver_volume_ceiling=5;hw.volume=15
+assert hw.dsp_volume()==reference, 'phone maximum exceeded equivalent level 5'
+steps=[]
+for level in range(1,16):
+    hw.volume=level;steps.append(hw.dsp_volume())
+assert steps==sorted(steps) and steps[-1]==reference
+hw.speaker=True;hw.volume=15
+assert hw.dsp_volume()==7, 'phone ceiling restricted handsfree'
+hw.speaker=False;hw.bluetooth=True
+assert hw.dsp_volume()==7, 'phone ceiling restricted Bluetooth'
+with tempfile.TemporaryDirectory() as directory:
+    ceiling=Path(directory)/'ceiling'
+    assert module.VoiceHardware.load_receiver_volume_ceiling(ceiling)==15
+    ceiling.write_text('5\n')
+    assert module.VoiceHardware.load_receiver_volume_ceiling(ceiling)==5
+    for value in ('0','16','invalid'):
+        ceiling.write_text(value)
+        try: module.VoiceHardware.load_receiver_volume_ceiling(ceiling)
+        except ValueError: pass
+        else: raise AssertionError('invalid phone ceiling accepted')
+print('PASS: phone ceiling, monotonic range, full handsfree/Bluetooth and unchanged board defaults')

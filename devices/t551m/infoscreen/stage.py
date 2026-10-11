@@ -238,15 +238,19 @@ def stage(root):
         'etc/init.d/e5-hfp': repo / 'openwrt/overlay/etc/init.d/e5-hfp',
         'etc/sysctl.d/10-e5-printk.conf': repo / 'openwrt/overlay/etc/sysctl.d/10-e5-printk.conf',
         'opt/e5/e5-call-audio.py': repo / 'rootfs/overlay/opt/e5/e5-call-audio.py',
+        'opt/e5/e5_call_profiles.py': repo / 'rootfs/overlay/opt/e5/e5_call_profiles.py',
     }.items():
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
         target.chmod(0o644 if name.startswith('etc/sysctl.d/') else 0o755)
-    ding = root / 'usr/share/e5/ding.wav'
-    ding.parent.mkdir(parents=True, exist_ok=True)
-    ding.write_bytes((repo / 'openwrt/overlay/usr/share/e5/ding.wav').read_bytes())
-    ding.chmod(0o644)
+    # Repair every built-in asset during shared updates as well as fresh
+    # builds. WAV payloads are binary: newline conversion shifts PCM samples.
+    for name in ('ding.wav', 'call.wav', 'beep.wav'):
+        sound = root / 'usr/share/e5' / name
+        sound.parent.mkdir(parents=True, exist_ok=True)
+        sound.write_bytes((repo / 'openwrt/overlay/usr/share/e5' / name).read_bytes())
+        sound.chmod(0o644)
     for source in (repo / 'openwrt/overlay/usr/lib/e5/vendor').iterdir():
         target = root / 'usr/lib/e5/vendor' / source.name
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -9,12 +9,12 @@ SOURCE = Path(__file__).resolve().parents[1] / 'overlay/usr/libexec/e5-volume'
 
 
 class VolumeTest(unittest.TestCase):
-    def apply(self, level, sinks, operation='apply', profile='t551m'):
+    def apply(self, level, sinks, operation='apply', profile='t551m', sink='speaker'):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name, body in {
                 'pidof': 'exit 0',
-                'pactl': '''if [ "$1" = list ]; then printf '%s\n' "$TEST_SINKS"; elif [ "$1" = get-default-sink ]; then echo speaker; else printf 'pulse %s\n' "$*" >> "$TEST_LOG"; fi''',
+                'pactl': '''if [ "$1" = list ]; then printf '%s\n' "$TEST_SINKS"; elif [ "$1" = get-default-sink ]; then echo "$TEST_DEFAULT_SINK"; else printf 'pulse %s\n' "$*" >> "$TEST_LOG"; fi''',
                 'amixer': '''printf 'mixer %s\n' "$*" >> "$TEST_LOG"''',
                 'paplay': '''cat >/dev/null; printf 'preroll %s\n' "$*" >> "$TEST_LOG"''',
                 'cat': '''if [ "$1" = /etc/e5/device-profile ]; then printf '%s\n' "$TEST_PROFILE"; else exec /bin/cat "$@"; fi''',
@@ -24,7 +24,7 @@ class VolumeTest(unittest.TestCase):
                 p.chmod(0o755)
             source = SOURCE.read_text().split('case "${1:-}" in')[0]
             script = source + '\ncard() { echo 0; }\n'+operation+' "$1"\n'
-            env = dict(os.environ, PATH=str(root)+':'+os.environ['PATH'], TEST_LOG=str(root/'log'), TEST_SINKS=sinks, TEST_PROFILE=profile)
+            env = dict(os.environ, PATH=str(root)+':'+os.environ['PATH'], TEST_LOG=str(root/'log'), TEST_SINKS=sinks, TEST_PROFILE=profile, TEST_DEFAULT_SINK=sink)
             subprocess.run(['sh', '-c', script, 'volume-test', str(level)], env=env, check=True)
             return (root/'log').read_text().splitlines()
 
@@ -56,7 +56,7 @@ class VolumeTest(unittest.TestCase):
         self.assertFalse(any('suspend-sink' in line for line in lines))
 
     def test_suspended_speaker_is_primed_silently_before_gain(self):
-        for profile in ['t551m', 'e5']:
+        for profile in ['t551m', 'e5', 'm8', 'future-board', '']:
             with self.subTest(profile=profile):
                 lines = self.apply(5, '0\tspeaker\tmodule-alsa-sink\ts16le 2ch 48000Hz\tSUSPENDED', 'prepare', profile)
                 self.assertEqual(lines[0], 'pulse suspend-sink speaker 0')
@@ -65,16 +65,18 @@ class VolumeTest(unittest.TestCase):
                 self.assertTrue(lines[-1].endswith('name=VBC DAC0 DG Set 39,39'))
 
     def test_warm_speaker_has_no_preroll(self):
-        for profile in ['t551m', 'e5']:
+        for profile in ['t551m', 'e5', 'm8', 'future-board', '']:
             with self.subTest(profile=profile):
                 lines = self.apply(5, '0\tspeaker\tmodule-alsa-sink\ts16le 2ch 48000Hz\tIDLE', 'prepare', profile)
                 self.assertFalse(any(line.startswith('preroll') for line in lines))
 
-    def test_unknown_boards_preserve_previous_playback(self):
-        for profile in ['unknown', '']:
-            with self.subTest(profile=profile):
-                sinks='0\tspeaker\tmodule-alsa-sink\ts16le 2ch 48000Hz\tSUSPENDED'
-                self.assertEqual(self.apply(5,sinks,'prepare',profile),self.apply(5,sinks,'apply',profile))
+    def test_bluetooth_playback_does_not_prime_speaker(self):
+        sinks = ('0\tspeaker\tmodule-alsa-sink\ts16le 2ch 48000Hz\tSUSPENDED\n'
+                 '1\tbluez_sink.TEST\tmodule-bluez5-device\ts16le 2ch 48000Hz\tSUSPENDED')
+        lines = self.apply(5, sinks, 'prepare', 'future-board', 'bluez_sink.TEST')
+        self.assertEqual(lines[0], 'pulse suspend-sink bluez_sink.TEST 0')
+        self.assertFalse(any(line.startswith('preroll') for line in lines))
+        self.assertNotIn('pulse suspend-sink speaker 0', lines)
 
     def test_e5_retains_default_volume_curve_without_boost(self):
         sinks='0\tspeaker\tmodule-alsa-sink\n1\tbluez_sink.TEST\tmodule-bluez5-device'

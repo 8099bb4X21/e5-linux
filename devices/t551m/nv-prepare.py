@@ -147,6 +147,21 @@ def keep_working_copy(name, target, changed, refresh):
     return True
 
 
+def recover_existing_pairs(store, original, attached, refresh=False):
+    """Recover interrupted isolated writes before per-file origin validation.
+
+    Both files must already be tracked. Never adopt an unknown file or use a
+    newly changed Android partition as a recovery source. Explicit refresh
+    keeps its existing import path.
+    """
+    if refresh:
+        return
+    for primary, backup in PAIRS:
+        if (primary in original and backup in original and
+                (store / primary).is_file() and (store / backup).is_file()):
+            reconcile_pair(store / primary, store / backup, attached)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--refresh', action='store_true', help='Refresh working copies changed by Android; requires stopped vendor daemons and no NV loops')
@@ -176,6 +191,7 @@ def main():
     STORE.mkdir(mode=0o700, exist_ok=True)
     manifest = STORE / 'factory-sha256.json'
     original = json.loads(manifest.read_text()) if manifest.exists() else {}
+    recover_existing_pairs(STORE, original, attached_loops(), args.refresh)
     boot_source = {}
     for name, dev in devices.items():
         current = digest(dev)

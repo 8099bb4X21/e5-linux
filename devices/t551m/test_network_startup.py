@@ -115,6 +115,48 @@ run_modes() {
             else:
                 self.assertEqual(out.strip(), 'SET:'+mode)
 
+    def test_pdp_retry_shared_across_profiles(self):
+        path = self.root / 'lib/netifd/proto/modemmanager.sh'
+        for profile in ('e5', 't551m', 'm8'):
+            with self.subTest(profile=profile):
+                path.write_text(PROTO)
+                patch_root(self.root, profile)
+                self.assertEqual(path.read_text().count('# unisoc-pdp-connect-retry:'), 1)
+                self.assertIn('modemmanager_connect_retry "$device" "$connectargs" || {', path.read_text())
+                before = path.read_bytes()
+                patch_root(self.root, profile)
+                self.assertEqual(path.read_bytes(), before)
+                self.test_pdp_retry_is_bounded_and_specific()
+
+    def test_pdp_retry_is_bounded_and_specific(self):
+        text = (self.root / 'lib/netifd/proto/modemmanager.sh').read_text()
+        helper = text[text.index('# unisoc-pdp-connect-retry:'):text.index('proto_modemmanager_setup() {')]
+        harness = '''
+mmcli() {
+    n=$(cat "$COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$COUNT"
+    if [ "$n" -gt "$FAILURES" ]; then echo connected; return 0; fi
+    echo "$ERROR" >&2; return 1
+}
+sleep() { echo "WAIT:$1"; }
+''' + helper + '\nmodemmanager_connect_retry "$DEVICE" "apn=test,ip-type=ipv4v6"\n'
+        error = "error: couldn't connect the modem: 'GDBus.Error:Unknown: Couldn't activate PDP context 1: Unknown mobile equipment error: 28'"
+        cases = [(0, error, 'unisoc-sipc', 1, [], 0),
+                 (1, error, 'unisoc-sipc', 2, ['WAIT:5'], 0),
+                 (2, error, 'unisoc-sipc', 3, ['WAIT:5', 'WAIT:10'], 0),
+                 (9, error, 'unisoc-sipc', 3, ['WAIT:5', 'WAIT:10'], 1),
+                 (9, 'SIM PIN required', 'unisoc-sipc', 1, [], 1),
+                 (9, error.replace("28'", "29'"), 'unisoc-sipc', 1, [], 1),
+                 (9, error, '/dev/ttyUSB0', 1, [], 1)]
+        count = self.root / 'attempts'
+        for failures, message, device, expected, waits, rc in cases:
+            with self.subTest(failures=failures, message=message, device=device):
+                count.unlink(missing_ok=True)
+                env = dict(os.environ, COUNT=str(count), FAILURES=str(failures), ERROR=message, DEVICE=device)
+                result = subprocess.run(['busybox', 'sh', '-c', harness], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, rc, result.stderr)
+                self.assertEqual(int(count.read_text()), expected)
+                self.assertEqual([line for line in result.stdout.splitlines() if line.startswith('WAIT:')], waits)
+
     def test_unknown_package_layout_refused(self):
         path = self.root / 'lib/netifd/proto/modemmanager.sh'
         path.write_text('# changed upstream interface\n')
@@ -127,6 +169,8 @@ run_modes() {
         original = "config core 'main'\n\toption device '/dev/ttyUSB0'\n"
         path.write_text(original)
         patch_root(self.root, 'e5')
+        self.assertEqual(path.read_text(), original)
+        patch_root(self.root, 'm8')
         self.assertEqual(path.read_text(), original)
         patch_root(self.root, 't551m')
         configured = path.read_text()

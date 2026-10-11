@@ -26,7 +26,8 @@
 # e5linux/openwrt-install.conf, taken in here (91-e5-wireless reads it after).
 if [ ! -f /etc/e5/install.conf ] && [ -f /mnt/e5-data/e5linux/openwrt-install.conf ]; then
 	mkdir -p /etc/e5
-	(umask 077; cp /mnt/e5-data/e5linux/openwrt-install.conf /etc/e5/install.conf) &&
+	# Windows-generated shell assignments must not retain CR in their values.
+	(umask 077; sed 's/\r$//' /mnt/e5-data/e5linux/openwrt-install.conf > /etc/e5/install.conf) &&
 		rm -f /mnt/e5-data/e5linux/openwrt-install.conf
 fi
 E5_APN=
