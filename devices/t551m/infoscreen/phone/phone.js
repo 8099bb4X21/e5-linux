@@ -33,6 +33,7 @@ let dialAfter=0;
 let selectedCard=0, simPicked=false, selectedCall=null;
 let audio={available:false,active:false,speaker:false,muted:false}, audioFeedback=false;
 let dtmfOpen=false, toneCall=null, toneDigits='', tones=[], sendingTone=false;
+let liveRevision=0;
 function toggleKeypad(on) {
  dtmfOpen=!!on && current()?.state==='active';
  $('dtmf-panel').hidden=!dtmfOpen;
@@ -160,20 +161,14 @@ async function request(path,body){
   return r;
  }catch(e){if(e.name==='AbortError')throw new Error(t('timedOut'));throw e;}finally{clearTimeout(timer);}
 }
-async function read(){
- if(reading)return;
- reading=true;
- try{
-  const r=await e5.api('/status');
+function applyLive(r){
   if(!r.error && Array.isArray(r.calls)) calls=r.calls.filter(c=>LIVE.has(c.state));
-  if(!simPicked && (r.sim?.card===0 || r.sim?.card===1))selectedCard=r.sim.card;
   if(r.audio){
    audio=r.audio;
    if(current()?.state==='active'&&(!audio.active||audio.error)){
     if(!feedback||audioFeedback){showFeedback(audio.error||t('audioWait'));audioFeedback=true;}
    }else if(audioFeedback){showFeedback(null);audioFeedback=false;}
   }
-  contacts=Array.isArray(r.contacts)?r.contacts:[];
   if(r.error){if(!feedback)showFeedback(r.error);}
   if(awaitingId){
    if(calls.some(c=>c.id===awaitingId)){awaitingId=null;showFeedback(null);}
@@ -181,6 +176,16 @@ async function read(){
   }
   render();
   if(r.error)$('connection').textContent=t('offline');
+}
+async function read(){
+ if(reading)return;
+ reading=true;
+ const revision=liveRevision;
+ try{
+  const r=await e5.api('/status');
+  if(!simPicked && (r.sim?.card===0 || r.sim?.card===1))selectedCard=r.sim.card;
+  contacts=Array.isArray(r.contacts)?r.contacts:[];
+  if(revision===liveRevision)applyLive(r);else render();
  }catch(e){if(!feedback)showFeedback(e.message);$('connection').textContent=t('offline');}
  finally{reading=false;}
 }
@@ -316,4 +321,14 @@ $('editor-close').addEventListener('click',closeEditor);
 e5.onKey(key);
 e5.onBack(()=>{if(!$('audio-sheet').hidden){closeAudio();return true;}if(number){setNumber(number.slice(0,-1));return true;}return false;});
 e5.onLang(translate);
-translate();read();setInterval(read,350);setInterval(()=>{if(activeSince)$('call-duration').textContent=duration(Date.now()-activeSince);},1000);
+translate();read();
+let unsubscribe=null, fallbackTimer=null;
+if(window.parent!==window && window.parent.T551MCalls?.subscribe)
+ unsubscribe=window.parent.T551MCalls.subscribe(data=>{liveRevision++;applyLive(data);});
+else fallbackTimer=setInterval(read,350);
+const clockTimer=setInterval(()=>{
+ if(activeSince)$('call-duration').textContent=duration(Date.now()-activeSince);
+ if(awaitingId && Date.now()-awaitingSince>6000){awaitingId=null;if(!feedback)showFeedback(t('noState'),true);render();}
+ if(dialAfter && Date.now()>=dialAfter){dialAfter=0;render();}
+},1000);
+window.addEventListener('pagehide',()=>{unsubscribe?.();clearInterval(fallbackTimer);clearInterval(clockTimer);});

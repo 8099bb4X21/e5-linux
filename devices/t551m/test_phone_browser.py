@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import threading
 import time
+import sys
 from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright
 
@@ -14,19 +15,22 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--fixtures',type=Path,required=True)
     ap.add_argument('--webroot',type=Path,required=True)
+    ap.add_argument('--push',action='store_true',help='Exercise the real loopback event stream instead of polling')
     a=ap.parse_args()
     fixtures=json.loads(a.fixtures.read_text(encoding='utf-8'))
     fixtures['/api/status']['screen'].update(idle=0,lock_enabled=False,touch=True)
     model={'calls':[],'contacts':[],'sim':{'card':0},'wake':True,
            'audio':{'available':True,'active':True,'speaker':False,'muted':False}}
-    posts=[];fail_tone=[False]
+    posts=[];fail_tone=[False];live_reads=[]
     class Handler(SimpleHTTPRequestHandler):
         def log_message(self,*args):pass
         def reply(self,value,code=200):
             self.send_response(code);self.send_header('Content-Type','application/json');self.end_headers()
-            self.wfile.write(json.dumps(value).encode())
+            try:self.wfile.write(json.dumps(value).encode())
+            except (BrokenPipeError,ConnectionError):pass  # Frame closed during an in-flight request.
         def do_GET(self):
             path=urlsplit(self.path).path
+            if path=='/api/plugins/phone/live':live_reads.append(time.monotonic())
             if path in ['/api/plugins/phone/live','/api/plugins/phone/status']:return self.reply(model)
             if path.startswith('/api/'):return self.reply(fixtures.get(path,{}))
             return super().do_GET()
@@ -50,7 +54,17 @@ def main():
                 model['audio'].update(body)
                 model['audio']['speaker']=model['audio'].get('route')=='speaker'
             return self.reply({'ok':True})
-    server=ThreadingHTTPServer(('127.0.0.1',0),partial(Handler,directory=str(a.webroot)))
+    stream=[None];stop=threading.Event()
+    if a.push:
+        sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'openwrt/overlay/usr/lib/e5'))
+        from e5_call_events import CallEvents
+        stream[0]=CallEvents()
+        def publish():
+            while not stop.wait(.02):
+                state={**model['audio'],'calls':model['calls'],'available':not bool(model.get('error')),'error':model.get('error')}
+                stream[0].publish(state,model['wake'])
+        threading.Thread(target=publish,daemon=True).start()
+    server=ThreadingHTTPServer(('127.0.0.1',8088 if a.push else 0),partial(Handler,directory=str(a.webroot)))
     threading.Thread(target=server.serve_forever,daemon=True).start()
     with sync_playwright() as pw:
         exe=Path('C:/Program Files/Google/Chrome/Application/chrome.exe')
@@ -160,10 +174,22 @@ def main():
         frame.locator('body').evaluate("e=>e.dispatchEvent(new KeyboardEvent('keydown',{key:'F13',bubbles:true,cancelable:true}))")
         page.wait_for_timeout(500)
         assert len([p for p,b in posts if p.endswith('/answer')])==count+1
+        if a.push:
+            # Observer failures above intentionally used the polling fallback.
+            before=len(live_reads);page.wait_for_timeout(1800)
+            assert len(live_reads)==before,'healthy stream still polls'
+            stream[0].close();page.wait_for_timeout(900)
+            assert len(live_reads)>before,'stream loss did not enable fallback'
+            stream[0]=CallEvents();page.wait_for_timeout(4500)
+            before=len(live_reads);page.wait_for_timeout(1800)
+            assert len(live_reads)==before,'reconnected stream did not stop fallback'
         assert not errors,errors
         print(json.dumps({'dtmf_order':'PASS','dtmf_no_retry':'PASS','incoming_wake':'PASS',
-                          'lock_preserved':'PASS','touch_preference':'PASS','remote_end_ui_seconds':round(delay,3),'js_errors':errors}))
+                          'lock_preserved':'PASS','touch_preference':'PASS','transport':'push' if a.push else 'poll',
+                          'remote_end_ui_seconds':round(delay,3),'js_errors':errors}))
         browser.close()
+    stop.set()
+    if stream[0]:stream[0].close()
     server.shutdown()
 
 

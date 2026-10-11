@@ -162,7 +162,7 @@ with tempfile.TemporaryDirectory() as tmp:
         delta.unlink();uci.return_value.stdout="phone.main.ring_sound='1'"
         assert voice.alert_settings()['sound'] and uci.call_count==3
         config.unlink();uci.return_value.returncode=1;uci.return_value.stdout=''
-        assert voice.alert_settings()=={'sound':True,'vibrate':True,'tone':'call'}
+        assert voice.alert_settings()=={'sound':True,'vibrate':True,'tone':'call','screen':True}
         voice.alert_settings();assert uci.call_count==4
 print('Ringtone config cache, staged changes and deleted-config defaults passed')
 

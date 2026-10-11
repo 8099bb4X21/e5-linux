@@ -4,6 +4,8 @@ window.T551MCalls = (() => {
     const live = new Set(['dialing','ringing-out','ringing-in','waiting','active','held']);
     let showing=false, ringing=new Set(), guardUntil=0, booted=false;
     const guarded=new WeakSet();
+    const listeners=new Set();
+    let latest=null, stream=null, streaming=false, pollTimer=null, polling=false, stopped=false;
     const active=()=>showing;
     function attach(frame) {
         const doc=frame.contentDocument;
@@ -43,13 +45,47 @@ window.T551MCalls = (() => {
             applyTouch();resetIdle();
         }
     }
+    function deliver(data) {
+        latest=data;update(data);
+        for(const listener of listeners) { try {listener(data);} catch(e) {console.log('call listener: '+e);} }
+    }
+    function subscribe(listener) {
+        listeners.add(listener);
+        if(latest)listener(latest);
+        return ()=>listeners.delete(listener);
+    }
     async function pollCalls() {
+        clearTimeout(pollTimer);pollTimer=null;
+        if(stopped || streaming || polling)return;
+        polling=true;
         const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),2500);
         try {
             const response=await fetch('/api/plugins/phone/live',{cache:'no-store',signal:controller.signal});
-            if(response.ok)update(await response.json());
-        } catch(_) {} finally {clearTimeout(timeout);setTimeout(pollCalls,350);}
+            const data=await response.json();
+            if(response.ok && !streaming && !stopped)deliver(data);
+        } catch(_) {} finally {
+            clearTimeout(timeout);polling=false;
+            if(!stopped && !streaming)pollTimer=setTimeout(pollCalls,350);
+        }
     }
-    function boot(){if(!booted){booted=true;pollCalls();}}
-    return {active,update,attach,boot};
+    function boot(){
+        if(booted)return;booted=true;
+        // One stream for both the shell and the phone frame. The existing
+        // observer pushes only changes; idle UI no longer wakes every 350ms.
+        if(typeof EventSource==='function' && location.hostname==='127.0.0.1') {
+            stream=new EventSource('http://127.0.0.1:8089/events');
+            stream.onmessage=event=>{
+                try {
+                    const data=JSON.parse(event.data);
+                    if(data.error || !Array.isArray(data.calls)) {streaming=false;pollCalls();return;}
+                    streaming=true;clearTimeout(pollTimer);pollTimer=null;deliver(data);
+                }catch(_) {streaming=false;pollCalls();}
+            };
+            stream.onerror=()=>{streaming=false;pollCalls();};
+            pollTimer=setTimeout(pollCalls,1500);
+        } else pollCalls();
+    }
+    window.addEventListener('pagehide',()=>{stopped=true;stream?.close();clearTimeout(pollTimer);listeners.clear();});
+    window.addEventListener('pageshow',event=>{if(event.persisted){stopped=false;booted=false;boot();}});
+    return {active,update,attach,boot,subscribe};
 })();

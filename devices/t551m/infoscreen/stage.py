@@ -183,7 +183,7 @@ async function loadAdvanced() {
     settings = replace(settings, 'screen, usb_cat, system_cat, traffic_records, about ];', 'screen, mobile_ui, mobile_navigation, usb_cat, system_cat, traffic_records, ...cpu_categories, about ];')
     index = (HERE / 'base/index.html').read_text(encoding='utf-8')
     index = replace(index, '<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="style.css">\n<link rel="stylesheet" href="mobile.css">')
-    index = replace(index, '<script src="app.js"></script>', '<script src="power-menu.js"></script>\n<script src="mobile.js"></script>\n<script src="calls.js"></script>\n<script src="app.js"></script>')
+    index = replace(index, '<script src="app.js"></script>', '<script src="transport.js"></script>\n<script src="power-menu.js"></script>\n<script src="mobile.js"></script>\n<script src="calls.js"></script>\n<script src="app.js"></script>')
     index = replace(index, '<section class="page" data-title="adv_info">', '<section class="page" data-title="adv_info"><div id="ad-freshness" hidden></div>')
     return {'www/app.js': app, 'api.uc': api, 'settings.uc': settings, 'www/index.html': index,
             'updates.uc': (HERE / 'base/updates.uc').read_text(encoding='utf-8'),
@@ -191,6 +191,7 @@ async function loadAdvanced() {
             'www/style.css': scalable_css((HERE / 'base/style.css').read_text(encoding='utf-8')),
             'www/mobile.js': (HERE / 'mobile.js').read_text(encoding='utf-8'),
             'www/calls.js': (HERE / 'calls.js').read_text(encoding='utf-8'),
+            'www/transport.js': (HERE / 'transport.js').read_text(encoding='utf-8'),
             'www/sdk/e5.js': (HERE / 'base/sdk.js').read_text(encoding='utf-8'),
             'www/power-menu.js': (HERE / 'power-menu.js').read_text(encoding='utf-8'),
             'www/mobile-phone.css': (HERE / 'mobile-phone.css').read_text(encoding='utf-8'),
@@ -229,6 +230,8 @@ def stage(root):
         'usr/libexec/e5-volume': repo / 'openwrt/overlay/usr/libexec/e5-volume',
         'usr/libexec/e5-call-volume': repo / 'openwrt/overlay/usr/libexec/e5-call-volume',
         'usr/lib/e5/e5_call_volume.py': repo / 'openwrt/overlay/usr/lib/e5/e5_call_volume.py',
+        'usr/lib/e5/e5_call_events.py': repo / 'openwrt/overlay/usr/lib/e5/e5_call_events.py',
+        'usr/lib/e5/e5_screen_rpc.py': repo / 'openwrt/overlay/usr/lib/e5/e5_screen_rpc.py',
         'etc/init.d/e5-hfp': repo / 'openwrt/overlay/etc/init.d/e5-hfp',
         'etc/sysctl.d/10-e5-printk.conf': repo / 'openwrt/overlay/etc/sysctl.d/10-e5-printk.conf',
         'opt/e5/e5-call-audio.py': repo / 'rootfs/overlay/opt/e5/e5-call-audio.py',

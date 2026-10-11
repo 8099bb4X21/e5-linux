@@ -524,6 +524,7 @@ def alert_settings():
             key, value = line.split('=', 1)
             values[key.rsplit('.', 1)[-1]] = value.strip("'")
     result = {'sound': values.get('ring_sound', '1') == '1',
+            'screen': values.get('ring_screen', '1') != '0',
             'vibrate': values.get('ring_vibrate', '1') == '1',
             'tone': 'beep' if values.get('ring_tone') == 'beep' else 'call'}
     if r.returncode == 0 or signature == [None, None]:
@@ -598,6 +599,13 @@ def main():
         logging.warning('GIO unavailable; using mmcli fallback')
     messages = queue.Queue()
     pipe_fd = None
+    events = None
+    if Path('/usr/share/e5-infoscreen/www/calls.js').exists():
+        try:
+            from e5_call_events import CallEvents
+            events = CallEvents()
+        except (ImportError, OSError):
+            logging.exception('call events unavailable; UI can use polling fallback')
 
     def notification_reader():
         nonlocal pipe_fd
@@ -644,17 +652,22 @@ def main():
                     if bus: bus.modem = None
                     reset.clear()
                 observed = calls(terminated, bus.query if bus else None)
-                ringer.update(observed, alert_settings(), controller.active or any(c['state'] in LIVE for c in observed))
+                alerts = alert_settings()
+                ringer.update(observed, alerts, controller.active or any(c['state'] in LIVE for c in observed))
                 was_active = controller.active
                 state = controller.update(observed, settings)
                 if was_active and not controller.active:
                     write_json(RUN / 'settings.json', last_settings)
-                write_json(RUN / 'status.json', {**state, 'updated': time.time(), 'calls': observed})
+                snapshot = {**state, 'updated': time.time(), 'calls': observed}
+                write_json(RUN / 'status.json', snapshot)
+                if events: events.publish(snapshot, alerts['screen'])
             except Exception as error:
                 # A temporary D-Bus query failure must not tear down an active
                 # audio route, and there is never a timer that hangs up calls.
                 logging.error('state read: %s', error)
-                write_json(RUN / 'status.json', {**controller.status(), 'error': str(error), 'updated': time.time()})
+                snapshot = {**controller.status(), 'error': str(error), 'updated': time.time()}
+                write_json(RUN / 'status.json', snapshot)
+                if events: events.publish(snapshot)
             changed.wait(.5)
     finally:
         stop.set()
@@ -664,6 +677,7 @@ def main():
         ringer.stop()
         controller.stop()
         write_json(RUN / 'status.json', {**controller.status(), 'available': False, 'updated': time.time()})
+        if events: events.close()
 
 
 if __name__ == '__main__':
