@@ -20,8 +20,12 @@ f2fs_repair_userdata() {
     # No timeout/reboot may interrupt an active metadata repair. The boot
     # watchdog waits for the running marker; no normal boot delay is added.
     blockdev --setro "$dev" || { rm -f /run/f2fs-repair.running; return 1; }
-    /repair/lib/ld-musl-aarch64.so.1 --library-path /repair/lib \
-        /repair/sbin/fsck.f2fs -f --dry-run "$dev" </dev/null >"$before" 2>&1
+    # f2fs-tools 1.16 asks to export orphan nodes into ./lost_found even
+    # with -f/--dry-run (and -y). EOF asserts instead of returning a check
+    # result. Decline that optional host-directory dump, not metadata repair.
+    # Supply one answer only; unexpected further prompts must still fail closed.
+    printf 'n\n' | /repair/lib/ld-musl-aarch64.so.1 --library-path /repair/lib \
+        /repair/sbin/fsck.f2fs -f --dry-run "$dev" >"$before" 2>&1
     rc=$?
     blockdev --setrw "$dev" || { rm -f /run/f2fs-repair.running; return 1; }
     log "stage=f2fs-check-result rc=$rc"
@@ -30,14 +34,14 @@ f2fs_repair_userdata() {
     # reason to write metadata. Never format, resize or touch another partition.
     case "$rc" in 1|4) ;; *) rm -f /run/f2fs-repair.running; return 1 ;; esac
     log "stage=f2fs-repair dev=$dev"
-    /repair/lib/ld-musl-aarch64.so.1 --library-path /repair/lib \
-        /repair/sbin/fsck.f2fs -f "$dev" </dev/null >/run/f2fs-repair.log 2>&1
+    printf 'n\n' | /repair/lib/ld-musl-aarch64.so.1 --library-path /repair/lib \
+        /repair/sbin/fsck.f2fs -f "$dev" >/run/f2fs-repair.log 2>&1
     rc=$?
     log "stage=f2fs-repair-result rc=$rc"
     case "$rc" in 0|1) ;; *) rm -f /run/f2fs-repair.running; return 1 ;; esac
     blockdev --setro "$dev" || { rm -f /run/f2fs-repair.running; return 1; }
-    /repair/lib/ld-musl-aarch64.so.1 --library-path /repair/lib \
-        /repair/sbin/fsck.f2fs -f --dry-run "$dev" </dev/null >"$after" 2>&1
+    printf 'n\n' | /repair/lib/ld-musl-aarch64.so.1 --library-path /repair/lib \
+        /repair/sbin/fsck.f2fs -f --dry-run "$dev" >"$after" 2>&1
     rc=$?
     blockdev --setrw "$dev" || { rm -f /run/f2fs-repair.running; return 1; }
     rm -f /run/f2fs-repair.running

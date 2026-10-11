@@ -34,6 +34,15 @@ class Recovery(unittest.TestCase):
             write('repair/lib/ld-musl-aarch64.so.1', '''#!/bin/sh
 echo "fsck $*" >> "$ROOT/trace"
 n=$(cat "$ROOT/count" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$ROOT/count"
+if [ "$MODE" = orphan ] || [ "$MODE" = extra-prompt ]; then
+    # The real tool's optional lost_found export ignores -f, -y and dry-run.
+    read -r answer || { echo '[ASSERT] scanf EOF'; exit 255; }
+    echo "export-answer:$answer" >> "$ROOT/trace"
+    [ "$answer" = n ] || { echo 'unexpected orphan export'; exit 8; }
+    if [ "$MODE" = extra-prompt ]; then
+        read -r answer || { echo '[ASSERT] unexpected second prompt'; exit 255; }
+    fi
+fi
 case "$MODE:$n" in clean:1) exit 0;; operation:1) exit 8;; verify:3) echo '[Fail]'; exit 4;; esac
 case "$n" in 1|2) exit 1;; *) exit 0;; esac
 ''',True)
@@ -59,6 +68,16 @@ data="$ROOT/dev/mmcblk0p70"
 
     def test_healthy_mount_has_no_fsck_or_reboot(self):
         self.assertEqual(self.run_case('mounted-ok'),'mount\n')
+    def test_orphan_export_prompt_has_an_answer_in_all_three_passes(self):
+        trace=self.run_case('orphan')
+        self.assertEqual(trace.count('export-answer:n'),3)
+        self.assertTrue(trace.endswith('rearm\nreboot\n'))
+    def test_unexpected_additional_prompt_still_aborts_without_repair(self):
+        trace=self.run_case('extra-prompt',repeat=True)
+        self.assertEqual(trace.count('fsck '),1)
+        self.assertIn('stage=f2fs-check-result rc=255',trace)
+        self.assertNotIn('stage=f2fs-repair dev=',trace)
+        self.assertNotIn('reboot',trace)
     def test_repair_checks_then_verifies_before_reboot(self):
         trace=self.run_case()
         calls=[s for s in trace.splitlines() if s.startswith('fsck ')]
