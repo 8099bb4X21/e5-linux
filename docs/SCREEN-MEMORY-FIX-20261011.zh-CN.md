@@ -28,13 +28,13 @@ E5的TF新包重新装配用户态根镜像，沿用原E5内核和boot，保留T
 - 修复通过改变请求路径规避浏览器重复HTTP加载时的对象保留，未修改系统WebKit库；
   不是对底层引用生命周期问题已彻底修补的声明。
 
-源码仍位于历史目录`devices/t551m/infoscreen/`，E5通过
-`devices/e5/stage.py → devices/t551m/ui.py → infoscreen/stage.py`复用。
+源码仍位于历史目录`ci/infoscreen/`，E5通过
+`device/openwrt_device_e5/stage.py → device/openwrt_device_common/shared/ui.py → infoscreen/stage.py`复用。
 内部既有`T551M*`接口保留兼容，不作为机型开关，也不决定硬件参数。
 
 ## 验证
 
-- `wsl -d Ubuntu-22.04 -- python3 openwrt/tests/screen-profiles.py`：在临时目录
+- `wsl -d Ubuntu-22.04 -- python3 device/openwrt_device_common/tests/screen-profiles.py`：在临时目录
   检查E5/T551M的HTML加载顺序、SDK/电话前端、后端依赖齐全。
 - `call-events.py`、`screen-rpc.py`、`voice-audio.py`、`test_calls_transport.cjs`、
   `test_phone_browser.py --push`覆盖真实连接、200次读取、并发、取消、断线回退、

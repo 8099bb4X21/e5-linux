@@ -1,8 +1,0 @@
-{
-  "admin/modem/cpu": {
-    "title": "CPU 设置",
-    "order": 25,
-    "action": { "type": "view", "path": "mu300/cpu" },
-    "depends": { "acl": ["e5-cpu"] }
-  }
-}

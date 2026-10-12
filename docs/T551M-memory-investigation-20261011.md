@@ -67,11 +67,11 @@
 
 ## 回归与部署
 
-- `python openwrt/tests/call-events.py`：真实HTTP连接，来源隔离、首帧、
+- `python device/openwrt_device_common/tests/call-events.py`：真实HTTP连接，来源隔离、首帧、
   10000次仅更新时间戳不产生事件、状态变化、重连只取最新状态、退出通过。
-- `python3 openwrt/tests/voice-audio.py`（WSL）：音频生命周期、异常处理、
+- `python3 device/openwrt_device_common/tests/voice-audio.py`（WSL）：音频生命周期、异常处理、
   来电铃声/振动、双卡、配置缓存、D-Bus事件唤醒与原刷新频率全部通过。
-- `node devices/t551m/test_calls_transport.cjs`：延迟返回的回退空列表不能覆盖
+- `node ci/infoscreen/tests/device/test_calls_transport.cjs`：延迟返回的回退空列表不能覆盖
   新推送的通话状态，取消订阅及页面退出清理通过。
 - `test_phone_browser.py` 默认回退模式及新增`--push`真实推送模式均通过：
   DTMF顺序/失败不重发、来电亮屏、锁屏保持、防误触、用户触控禁用、拨挂节流。
@@ -114,7 +114,7 @@
   POST、上传、自定义headers及其他fetch选项保留原生行为；不重试控制操作。
   GET失败可回退原生请求；主动取消和页面卸载不重发。插件SDK共用父页面连接。
   原status、update、流量等刷新频率不变，后端读取仍获取同一接口的最新结果。
-- `openwrt/tests/screen-rpc.py`使用真实浏览器与HTTP后端验证200次连续读取、
+- `device/openwrt_device_common/tests/screen-rpc.py`使用真实浏览器与HTTP后端验证200次连续读取、
   并发完成顺序、HTTP错误、带自定义header的原生请求、POST仅执行一次、
   取消不重发、断线回退及及时关闭；通过。新传输与真实推送同时启用的电话
   浏览器回归也通过，无JS错误。

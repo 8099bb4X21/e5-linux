@@ -1,3 +1,0 @@
-#!/bin/sh
-# Compatibility entry point for the dashboard and boot replay service.
-exec /usr/libexec/unisoc-modem/lock-control "$@"

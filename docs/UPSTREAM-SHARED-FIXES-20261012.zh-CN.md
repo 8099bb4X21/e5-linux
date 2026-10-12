@@ -19,8 +19,8 @@
 首次缺失的数值可能要到下一次看板刷新才显示；驱动确实不提供时保持未知。
 看板状态最低刷新仍为 **2 秒**，上下行网速仍为 **1 秒**。
 
-共享入口分别为 `devices/t551m/wifi.py` → `devices/wifi-common.py`、
-`devices/t551m/network-startup.py` 和公共 LuCI 包。三个机型的构建/更新流程均使用
+共享入口分别为 `device/linux_device_common/kernel/wifi.py` → `device/linux_device_common/wifi-common.py`、
+`device/openwrt_device_common/shared/network-startup.py` 和公共 LuCI 包。三个机型的构建/更新流程均使用
 这些入口。保留 TF 启动及更新，未更改 NV、充电、CPU、温控或屏幕功能。
 
 ## 来源
@@ -38,16 +38,16 @@
 ## 验证与边界
 
 - 三个机型现有配置分别编译 `sprd_wlan_combo.ko`，均通过，包括 BTF 生成。
-- `devices/test_wifi_lifetime.py` 提取实际 C 函数，注入各级注册失败，验证 IPv4/IPv6、
+- `device/linux_device_common/test_wifi_lifetime.py` 提取实际 C 函数，注入各级注册失败，验证 IPv4/IPv6、
   两种 reset 模式的完整回收及注销/取消顺序。
-- `devices/test_upgrade_lock.py` 验证同时升级拒绝、SIGKILL 后释放、锁 inode 稳定、
+- `device/linux_device_common/test_upgrade_lock.py` 验证同时升级拒绝、SIGKILL 后释放、锁 inode 稳定、
   符号链接/不安全权限/缺少 flock 时拒绝执行。
-- `devices/test_wifi_metrics.py` 验证实际 awk 解析、未知值、错误 MAC、缓存优先级、
+- `device/linux_device_common/test_wifi_metrics.py` 验证实际 awk 解析、未知值、错误 MAC、缓存优先级、
   客户端退出、共享超时预算、慢客户端轮转、真实后台查询和继承文件锁。
-- `devices/test_wifi_capabilities.py` 在 OpenWrt chroot 中执行实际 ucode，覆盖 DFS
+- `device/linux_device_common/test_wifi_capabilities.py` 在 OpenWrt chroot 中执行实际 ucode，覆盖 DFS
   能力、固定 36 信道、htmode 原样保留、频率数据不完整、自动模式与 2.4 GHz 保持、
   监管标志不修改；完整 hostapd.uc 模块编译、旧策略迁移和补丁幂等检查通过。
-- `devices/t551m/test_rpc_isolation.py` 用真实公共 JS 与可阻塞批次模拟器确认慢 AT
+- `device/openwrt_device_common/tests/test_rpc_isolation.py` 用真实公共 JS 与可阻塞批次模拟器确认慢 AT
   不拖住状态/网速/sysinfo，SIM 槽位不串用，写请求不重复。
 - 原有刷新频率/防重入/卸载测试、SIM 视图同步、TX skb 所有权和网速后端回归通过。
 

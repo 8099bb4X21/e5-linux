@@ -35,7 +35,7 @@
 | M10 | P2 | USB 网卡自动加入 LAN | 已有手动加入以及已加入网卡的热插拔恢复；没有来源的“新网卡自动加入”开关 | 增加可选自动加入和驱动/MAC/归属显示，保留现有手动绑定；事件驱动、幂等恢复。验收：不接管 WAN、其他桥、USB Wi-Fi 或 gadget；关闭后不自动加入新网卡，不删除已保存端口。不移植 T551M USB/DMA 驱动。 |
 | M11 | P2·核查 | 开机回放去重与错误恢复 | **已有** `mobile-data` 的 AT 握手后、射频开启前 `lock replay early`、完成标记与晚期兜底 | 回归自动应用关闭、空列表解除、模式字段完整保存及完成标记。保留 MU300 nr1 首条握手和原有早期/晚期恢复策略。验收：早期成功后不再重放/SFUN；失败必须可见且按原兜底恢复；无保存配置不增添启动工作。仅修确认的差异，不另建第二个回放服务。 |
 | M12 | P2·核查 | AT 请求隔离与错误边界 | 已有稳定常驻 AT、通道池和串行锁，正是本仓库最初参考的实现 | 只审查有差异的排队过期、截断响应、迟到响应归属和写命令不自动重发；运营商双查询复用该体系。验收：看板/终端/短信并发无串包，不抢 nr1 拨号，不额外开 URC 读取者。**不整套替换 MU300 AT 服务，也不直接套 nr2/nr6/nr7 分配及 100ms 参数。** |
-| M13 | 每批必做 | 翻译、ACL、打包与兼容回归 | 已有中英土、原生 LuCI 菜单 LMO、Aurora/Bootstrap 兼容 | 每项变更同步 JS 翻译、PO/LMO、RPC 方法/ACL 和包文件。保留 `luci-app-mu300` 包名与平台可配置接口。验收：新词条/错误没有漏译，旧配置升级可读，直接安装插件不要求 `devices/t551m`、`e5-*` 服务或屏幕资源。 |
+| M13 | 每批必做 | 翻译、ACL、打包与兼容回归 | 已有中英土、原生 LuCI 菜单 LMO、Aurora/Bootstrap 兼容 | 每项变更同步 JS 翻译、PO/LMO、RPC 方法/ACL 和包文件。保留 `luci-app-mu300` 包名与平台可配置接口。验收：新词条/错误没有漏译，旧配置升级可读，直接安装插件不要求 `device/linux_device_t551m`、`e5-*` 服务或屏幕资源。 |
 
 ## 4. 条件项目与选做项目
 
@@ -66,7 +66,7 @@
 
 ## 6. 实施入口与需要保留的平台边界
 
-以下 `SRC` 为本仓库 `openwrt/luci-app-t551m/`，`DST` 为目标 `openwrt/luci-app-mu300/`。表中相对路径均基于对应插件目录。
+以下 `SRC` 为本仓库 `device/openwrt_device_common/luci-app-t551m/`，`DST` 为目标 `openwrt/luci-app-mu300/`。表中相对路径均基于对应插件目录。
 
 | 任务 | 来源参考入口 | 目标处理方式 |
 | --- | --- | --- |
@@ -77,7 +77,7 @@
 | M07/C03 | `root/usr/libexec/unisoc-modem/traffic`、`traffic-core.uc`；`htdocs/luci-static/resources/view/mu300/traffic.js` | 先在目标单账本实现清空；`set_config` 的网卡切换逻辑和可配网卡必须保留。双卡另做迁移。 |
 | M08 | `root/usr/libexec/unisoc-modem/hotspot.uc`、`hotspot`、`action` | 只提取 AP/radio 一致性逻辑，在目标 `action` 上适配；不改模块。 |
 | M09/M10 | `htdocs/luci-static/resources/view/mu300/device.js`；`root/usr/libexec/unisoc-modem/device-usb` | 扩展目标 Shell 后端和现有 hotplug；不搬 T551M Python USB 后端、DRP/MUSB 路径或修改 TF gadget 启动契约。 |
-| M12 | 本仓库 `devices/t551m/atd.py`、`at-client.c` 的超时/响应处理与相关用例 | 对照目标 `rootfs/overlay/opt/mu300/bin/mu300-atd`、`mu300-at`，只做经确认的通用修复。 |
+| M12 | 本仓库 `device/openwrt_device_common/shared/atd.py`、`at-client.c` 的超时/响应处理与相关用例 | 对照目标 `device/debian_device_common/overlay/opt/mu300/bin/mu300-atd`、`mu300-at`，只做经确认的通用修复。 |
 | M13 | `common.js`、`po/`、`lmo/`、`root/usr/share/{luci/menu.d,rpcd/acl.d}/`、`Makefile` | 翻译、菜单、权限和安装列表必须同批提交；不复制来源包名和硬依赖。 |
 | C01/C02 | `common.js` 的 `simSelector`；`htdocs/luci-static/resources/mu300/data-sim.js`；`view/mu300/sim.js` | 把卡槽/切卡/持久化改接目标平台；没有能力时不暴露控制入口。 |
 | C04 | `htdocs/luci-static/resources/view/mu300/forward.css` 的有界滚动样式 | 仅作为样式参考；目标 `forward.js`、`sms-forward` 及其 init 服务保留。 |

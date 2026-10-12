@@ -1,6 +1,6 @@
 #!/bin/sh
 # Pull the Android vendor runtime modem_control needs from a rooted E5, and build
-# the chroot subset that rootfs/overlay/opt/e5/vendor-start.sh uses.
+# the chroot subset that device/linux_device_common/overlay/opt/e5/vendor-start.sh uses.
 #
 # The E5's Android is a *production* build (ro.build.type=user, ro.debuggable=0):
 # there is no "su" in PATH and "adb root" is refused.  Magisk is installed though,

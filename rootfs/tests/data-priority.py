@@ -4,13 +4,14 @@ import os
 from pathlib import Path
 import runpy
 import subprocess
+import shutil
 import tempfile
 import time
 import unittest
 from unittest.mock import patch
 
 TOP = Path(__file__).resolve().parents[2]
-WORKER = TOP / 'rootfs/overlay/opt/e5/e5-data-priority'
+WORKER = TOP / 'device/linux_device_common/overlay/opt/e5/e5-data-priority'
 
 
 class Policy(unittest.TestCase):
@@ -156,17 +157,17 @@ class Integration(unittest.TestCase):
                 result = subprocess.run(['git', 'apply', '--include=src/plugins/unisoc/mm-broadband-modem-unisoc.c',
                                          str(patchfile)], cwd=root, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, str(patchfile) + ': ' + result.stderr)
-            subprocess.run(['python3', str(TOP / 'openwrt/tests/data-priority-hook.py'),
+            subprocess.run(['python3', str(TOP / 'device/openwrt_device_common/tests/data-priority-hook.py'),
                             str(root / 'src')], check=True)
 
     def test_supported_profiles_stage_the_executable_worker(self):
-        stage = runpy.run_path(str(TOP / 'devices/t551m/ui.py'))['stage']
+        stage = runpy.run_path(str(TOP / 'device/openwrt_device_common/shared/ui.py'))['stage']
         stage.__globals__['PACKAGES'] = {}  # no package downloads in isolated tests
         original_run = runpy.run_path
 
         def isolated_run(path):
             path = Path(path)
-            if path.name == 'build-at-client.py': return {'build': lambda: Path('/bin/true')}
+            if path.name == 'build-at-client.py': return {'build': lambda: Path(shutil.which('true'))}
             if path.name == 'ui-cleanup.py': return {'cleanup': lambda root: None}
             if path.parent.name == 'infoscreen': return {'stage': lambda root: None}
             return original_run(str(path))
@@ -181,15 +182,15 @@ class Integration(unittest.TestCase):
                 worker = root / 'opt/e5/e5-data-priority'
                 self.assertEqual(worker.read_bytes(), WORKER.read_bytes())
                 self.assertEqual(worker.stat().st_mode & 0o777, 0o755)
-        self.assertIn('profile=\'e5\'', (TOP / 'devices/e5/stage.py').read_text())
+        self.assertIn('profile=\'e5\'', (TOP / 'device/openwrt_device_e5/stage.py').read_text())
 
     def test_base_images_include_worker_and_reject_stale_mm_package(self):
         build = (TOP / 'openwrt/build-rootfs.sh').read_text()
         self.assertIn('e5-at e5-data-priority e5-audio-dsp', build)
         self.assertIn('openwrt-package-state.py" check "$VER"', build)
-        self.assertIn('"$HERE/overlay"/*', (TOP / 'rootfs/configure-rootfs.sh').read_text())
+        self.assertIn('"$OVERLAY"/*', (TOP / 'rootfs/configure-rootfs.sh').read_text())
         self.assertIn('/opt/e5/e5-data-priority queue 0',
-                      (TOP / 'rootfs/overlay/opt/e5/mobile-data').read_text())
+                      (TOP / 'device/linux_device_common/overlay/opt/e5/mobile-data').read_text())
 
 
 if __name__ == '__main__':

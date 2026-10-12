@@ -19,7 +19,7 @@
 
 ## 机型与通道
 
-E5、T551M 共享 `devices/t551m/ui.py` 的装配入口和同一份平台任务。
+E5、T551M 共享 `device/openwrt_device_common/shared/ui.py` 的装配入口和同一份平台任务。
 任务存在 `/opt/e5/t551m-at` 时使用已部署的 nr2 AT owner，与 MM 的 nr1
 拨号通道分离；即便该 owner 临时不可用，也不改走拨号口或直接打开 tty。
 每条命令携带当前 SIM 的 SPACTCARD 前缀，启动任务时固定所选 SIM。
@@ -40,6 +40,6 @@ ModemManager/unisoc-cpd owner；这种旧布局没有独立通道，命令仍经
   **仅替换脚本不等于新 MM 钩子已经生效**，还需重建/安装 ModemManager。
 - `python3 rootfs/tests/data-priority.py -v`：两张 SIM、成功停止重试、
   失败上限、后台异步、并发合并、三机型装配、补丁链及真实 C 钩子隔离编译。
-- MM 包构建内运行 `openwrt/tests/data-priority-hook.py`，并纳入来源哈希。
+- MM 包构建内运行 `device/openwrt_device_common/tests/data-priority-hook.py`，并纳入来源哈希。
 
 本次仅修改仓库并做离线验证，未刷机、未切换网络、未制作新安装包。

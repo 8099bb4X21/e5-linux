@@ -38,11 +38,11 @@ E5 尚未完成这批新增硬件功能的实机验证。
 - 旧账本保留为 `state-v1.json`；历史合并量归入旧账本最后统计的卡槽，
   不复制到另一卡。此前混合历史无法事后准确拆分。
 
-代码入口：[`sim-status.py`](../devices/t551m/infoscreen/sim-status.py)、
-[`sims.uc`](../devices/t551m/infoscreen/sims.uc)、
-[`mu300dash`](../openwrt/luci-app-t551m/root/usr/libexec/rpcd/mu300dash)、
-[`lock-control`](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/lock-control)、
-[`traffic`](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic)。
+代码入口：[`sim-status.py`](../ci/infoscreen/root/usr/libexec/t551m-sim-status)、
+[`sims.uc`](../ci/infoscreen/tests/fixtures/sims.uc)、
+[`mu300dash`](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/rpcd/mu300dash)、
+[`lock-control`](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/lock-control)、
+[`traffic`](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic)。
 
 ## 2. 屏幕与看板体验
 
@@ -70,10 +70,10 @@ E5 尚未完成这批新增硬件功能的实机验证。
 - 短信转发页“最近的转发”设置最大高度，超过后在区域内滚动，并支持键盘聚焦，
   避免记录累计后把整页不断拉长。
 
-代码入口：[`app.js`](../devices/t551m/infoscreen/base/app.js)、
-[`mobile.js`](../devices/t551m/infoscreen/mobile.js)、
-[`home.js`](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/home.js)、
-[`locks.js`](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/locks.js)。
+代码入口：[`app.js`](../ci/infoscreen/root/usr/share/e5-infoscreen/www/app.js)、
+[`mobile.js`](../ci/infoscreen/root/usr/share/e5-infoscreen/www/mobile.js)、
+[`home.js`](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/home.js)、
+[`locks.js`](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/locks.js)。
 
 ## 3. 后台开销与待机相关优化
 
@@ -102,8 +102,8 @@ E5 尚未完成这批新增硬件功能的实机验证。
 - 归档短信继续保留在本地收件箱；删除已全部归档的本地记录不再操作旧 SIM 位置。
 - 归档异常单独报告，保留双卡收件、通知和转发流程。
 
-代码入口：[`e5-sms-receive`](../openwrt/overlay/usr/libexec/e5-sms-receive)、
-[`sms_pdu.py`](../openwrt/overlay/usr/lib/e5/sms_pdu.py)。
+代码入口：[`e5-sms-receive`](../device/openwrt_device_common/overlay/usr/libexec/e5-sms-receive)、
+[`sms_pdu.py`](../device/openwrt_device_common/overlay/usr/lib/e5/sms_pdu.py)。
 
 ## 5. 充电与 USB-C 快速拔插
 
@@ -126,10 +126,10 @@ E5 尚未完成这批新增硬件功能的实机验证。
 此前采集到的电池端电流也不能当成 USB 输入电流。
 上述适配在内核内存中生效，不改写 A/B DT、DTBO 或 NV 分区。
 
-代码入口：[`usb_charger.py`](../devices/t551m/usb_charger.py)、
-[`charge-profile.h`](../devices/t551m/charge-profile.h)、
-[`usb-role.h`](../devices/t551m/usb-role.h)、
-[`usb-charge-role.h`](../devices/t551m/usb-charge-role.h)。
+代码入口：[`usb_charger.py`](../device/linux_device_common/kernel/usb_charger.py)、
+[`charge-profile.h`](../device/linux_device_t551m/charge-profile.h)、
+[`usb-role.h`](../device/linux_device_common/kernel/usb-role.h)、
+[`usb-charge-role.h`](../device/linux_device_common/kernel/usb-charge-role.h)。
 
 ## 6. OTG、USB 网卡和共享协议
 
@@ -158,9 +158,9 @@ E5 尚未完成这批新增硬件功能的实机验证。
 与数据传输、一次性 RNDIS 启动后回到 NCM 均验证通过。ECM 尚未验证 Linux/macOS
 主机上的完整收发；上述数据完整性验证也不代表千兆吞吐测试。
 
-代码入口：[`device-usb`](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/device-usb)、
-[`otg.py`](../devices/t551m/otg.py)、[`usb_host.py`](../devices/t551m/usb_host.py)、
-[`musb-sprd-host.h`](../devices/t551m/musb-sprd-host.h)。
+代码入口：[`device-usb`](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/device-usb)、
+[`otg.py`](../device/linux_device_common/kernel/otg.py)、[`usb_host.py`](../device/linux_device_common/kernel/usb_host.py)、
+[`musb-sprd-host.h`](../device/linux_device_common/kernel/musb-sprd-host.h)。
 
 ## 7. KVM、Docker、BTF 与常用内核能力
 
@@ -212,10 +212,10 @@ KVM 已实际执行 ARM64 客体并验证 MMIO 退出；Docker 已验证资源�
   固件收集流程补齐 `codec.xml`，校准数据本身不纳入 Git。
 - 随镜像提供固定版本及哈希的 dbus-next 0.2.3 和许可证，不需要设备在线安装依赖。
 
-代码入口：[`e5-hfp`](../openwrt/overlay/usr/libexec/e5-hfp)、
-[`e5-voice-audio`](../openwrt/overlay/usr/libexec/e5-voice-audio)、
-[`e5-call-audio.py`](../rootfs/overlay/opt/e5/e5-call-audio.py)、
-[`e5_call_volume.py`](../openwrt/overlay/usr/lib/e5/e5_call_volume.py)。
+代码入口：[`e5-hfp`](../device/openwrt_device_common/overlay/usr/libexec/e5-hfp)、
+[`e5-voice-audio`](../device/openwrt_device_common/overlay/usr/libexec/e5-voice-audio)、
+[`e5-call-audio.py`](../device/linux_device_common/overlay/opt/e5/e5-call-audio.py)、
+[`e5_call_volume.py`](../device/openwrt_device_common/overlay/usr/lib/e5/e5_call_volume.py)。
 
 ## 9. 接听和输出切换延迟
 
@@ -254,16 +254,16 @@ KVM 已实际执行 ARM64 客体并验证 MMIO 退出；Docker 已验证资源�
 | 双卡状态、频段及定向 AT | `test_sim_status.py`、`test_sim_at_scope.py`、`test_screen_sims.uc`、`test_screen_bands.uc` |
 | 锁定、回放、双卡流量 | `test_locks.py`、`test_boot_replay.py`、`test_locks_frontend.js`、`test_dual_traffic.py` |
 | 分批加载、刷新、屏幕 | `test_cell_progressive.py`、`test_dashboard_refresh.py`、`test_dashboard_rates.py`、`test_loading_browser.py`、`test_screen.py`、`test_screen_browser.py` |
-| 短信归档与满卡 | `openwrt/tests/dual-sms.py` |
+| 短信归档与满卡 | `device/openwrt_device_common/tests/dual-sms.py` |
 | 充电、角色和检测时序 | `test_charge_profile.py`、`test_usb_charger.py`、`test_usb_charge_redetect.py`、`test_usb_charge_transition.py`、`test_usb_charge_restart.py` |
 | OTG DMA、网页／屏幕 USB | `test_host_dma.py`（含 ASan/UBSan）、`test_device_usb.py`、`test_device_usb_browser.py`、`test_screen_usb.uc`、`test_screen_usb_devices.py` |
-| 通话、音量及控制 | `openwrt/tests/hfp.py`、`openwrt/tests/voice-audio.py`、`openwrt/tests/call-volume.py`、`openwrt/tests/volume.py`、`rootfs/tests/voice-state.py`、`rootfs/tests/voice-volume.py`、`rootfs/tests/voice-controls.py`、`test_phone_browser.py` |
+| 通话、音量及控制 | `device/openwrt_device_common/tests/hfp.py`、`device/openwrt_device_common/tests/voice-audio.py`、`device/openwrt_device_common/tests/call-volume.py`、`device/openwrt_device_common/tests/volume.py`、`rootfs/tests/voice-state.py`、`rootfs/tests/voice-volume.py`、`rootfs/tests/voice-controls.py`、`test_phone_browser.py` |
 | 内核与容器 | `upstream/check-container-support.py`、`tools/kvm-smoke.c`、`tools/docker-smoke.py`、`tools/bpf-smoke.c` |
 
-表中未带目录前缀的测试位于 `devices/t551m/`。实机部署、离线 rootfs、压缩镜像及
+表中未带目录前缀的测试位于 `device/linux_device_t551m/`。实机部署、离线 rootfs、压缩镜像及
 持久镜像校验已同步；最后一轮音频包的 13 项文件哈希、gzip 和 SHA-256 校验通过。
 功能已验证后，本次提交收尾只整理文档和 Git，不再重复刷机或操作真实通话。
 
 本提交不包含私有固件、NV 数据、设备访问凭据、用户短信／联系人、实机截图或镜像。
-详细构建及硬件验证沿革见 [设备说明](../devices/t551m/README.md) 和
-[屏幕说明](../devices/t551m/infoscreen/README.md)。
+详细构建及硬件验证沿革见 [设备说明](../device/linux_device_t551m/README.md) 和
+[屏幕说明](../ci/infoscreen/docs/device-ui.zh-CN.md)。

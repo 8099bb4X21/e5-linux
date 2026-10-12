@@ -44,7 +44,7 @@
 
 主要提交：C01，后续扩展 C02/C03/C05/C09。
 
-- 新增 `devices/t551m/` 设备层，基于本机 `boot_b` 模板和 `dtb_b/dtbo_b/vendor_boot_b` 生成启动镜像，不套用 E5 的启动控制块或硬件参数。
+- 新增 `device/linux_device_t551m/` 设备层，基于本机 `boot_b` 模板和 `dtb_b/dtbo_b/vendor_boot_b` 生成启动镜像，不套用 E5 的启动控制块或硬件参数。
 - 为 UMS9621 的 32 位 Android/vendor 用户态启用 COMPAT，启动包装器按 ELF class 选择 linker 和库，保留主线 ARM64 Linux。
 - 适配 320×480 ILI94887 面板、GPIO 脉冲背光、TLSC6x 触控、本机 WCN 固件/校准与 GPIO 功放；移除 E5 的 AW87xxx 硬依赖，避免强制解绑声卡和自动写入 E5 触控固件。
 - 新增内核准备/构建、设备文件收集、rootfs 配置、启动镜像制作、ADB/串口采集工具；设备专属输入与通用源码分开。
@@ -58,7 +58,7 @@
 历史同机重启样本中，进入 OpenWrt 从约 21.56s 降至 11.60s，厂商基带进程启动从约 35.65s 降至 25.14s。
 这些不是完整断电冷启动统计，TF 路径保留也不代表每批都重新完成实体 TF 启动测试。
 
-入口：[设备说明](../devices/t551m/README.md)、[内核准备](../devices/t551m/prepare-kernel.py)、[启动 init](../boot/init)、[rootfs 配置](../devices/t551m/configure-rootfs.py)。
+入口：[设备说明](../device/linux_device_t551m/README.md)、[内核准备](../device/linux_device_t551m/prepare-kernel.py)、[启动 init](../boot/init)、[rootfs 配置](../device/openwrt_device_t551m/configure-rootfs.py)。
 
 ## 4. NV 工作数据与“无模组”修复
 
@@ -75,7 +75,7 @@
 - 修复充电启动中 PM 已在线、NR/CH 未启动却被 loader 当作全基带已启动的问题；为已核对哈希的 ARM32/Thumb loader 生成临时补丁副本，只加载 NR/CH，不重启 PM；未知版本拒绝套补丁。
 
 本段记录的是隔离工作数据机制，不是新增用户 NV 备份功能。历史首次试启动曾出现 NV 校验故障并由机主恢复，之后的隔离验证不能倒推故障前从未写坏过数据。
-提交不含 NV 内容、设备访问凭据或私有固件。详细经过见[设备 NV 说明](../devices/t551m/README.md#nv-隔离)。
+提交不含 NV 内容、设备访问凭据或私有固件。详细经过见[设备 NV 说明](../device/linux_device_t551m/README.md#nv-隔离)。
 
 ## 5. AT 通道、基带初始化与联网等待
 
@@ -95,7 +95,7 @@
 历史验证包括三通道合计 2700 次只读查询全部匹配；连续查询中位约 300.12ms→100.05ms，空闲单次约 136.36ms→2.57ms。
 启用联网优化的重启样本从约 98s 降到 54–56s；加上必要 WCN 交接等待后约 59–60s。启用具体锁定回放的启动另有等待，不能承诺所有配置都固定在同一时间联网。
 
-入口：[AT 服务](../devices/t551m/atd.py)、[原生客户端](../devices/t551m/at-client.c)、[联网初始化](../devices/t551m/network-startup.py)。
+入口：[AT 服务](../device/openwrt_device_common/shared/atd.py)、[原生客户端](../device/openwrt_device_common/shared/at-client.c)、[联网初始化](../device/openwrt_device_common/shared/network-startup.py)。
 
 ## 6. Aurora 主题、网页看板与重复功能整理
 
@@ -112,7 +112,7 @@
 - 上下行网速独立每 1 秒按所查看 SIM 的接口计数计算，不等待 AT 或整页数据；接口重建、切卡、计数回退时重设基线。
 - 小区资料按类别使用 1/5 秒刷新阈值；合并在途查询、锁定写入期间保护，网页隐藏时暂停、退出时清理定时器。
 
-入口：[看板说明](../openwrt/luci-app-t551m/README.md)、[看板首页](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/home.js)。
+入口：[看板说明](../device/openwrt_device_common/luci-app-t551m/README.md)、[看板首页](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/home.js)。
 
 ## 7. 手机式屏幕界面、外观与导航
 
@@ -134,7 +134,7 @@
 - 后台页迟到响应不覆盖当前页，等待状态随页面生命周期管理；息屏、锁屏及全屏来电暂停不可见动画。
 - 流量页 select 使用主题底色、圆角、箭头和焦点色，跟随壁纸透明度；展开项采用实色主题底色，大字号/中英文自动换行。
 
-入口：[屏幕说明](../devices/t551m/infoscreen/README.md)、[移动界面](../devices/t551m/infoscreen/mobile.js)、[样式](../devices/t551m/infoscreen/mobile.css)、[标题栏修复记录](FIXLOG-2026-10-10-screen-toolbar.zh-CN.md)。
+入口：[屏幕说明](../ci/infoscreen/docs/device-ui.zh-CN.md)、[移动界面](../ci/infoscreen/root/usr/share/e5-infoscreen/www/mobile.js)、[样式](../ci/infoscreen/root/usr/share/e5-infoscreen/www/mobile.css)、[标题栏修复记录](FIXLOG-2026-10-10-screen-toolbar.zh-CN.md)。
 
 ## 8. 壁纸、明暗模式、锁屏与触控
 
@@ -205,7 +205,7 @@ LTE 模式/小区锁定与重启回放已有历史实机记录；5G SA/NSA 等�
 - 保持每 10 秒采样、每 60 秒保存，清空/套餐变更立即落盘；比特/字节网速设置不改变累计流量单位。
 
 与此同期还统一热点 AP/radio 开关、短信本地可见性、AT 分卡历史、锁定和回放、USB 自动配置、默认系统及设置错误反馈。
-具体交互和数据保留验证见[功能同步复查](../devices/t551m/infoscreen/README.md#功能同步复查2026-10-10)。
+具体交互和数据保留验证见[功能同步复查](../ci/infoscreen/docs/device-ui.zh-CN.md#功能同步复查2026-10-10)。
 
 ## 12. 短信、转发与通话界面
 
@@ -367,16 +367,16 @@ C04 记录部署时 userdata 的 F2FS SSA/SIT 不一致、停止 checkpoint，�
 | 范围 | 主要入口/记录 |
 | --- | --- |
 | 启动、TF 回退与 WCN 交接 | `boot/tests/early-firmware.py`、`boot/tests/wcn-handoff.py`、`rootfs/tests/modem-coldboot.py` |
-| NV、背光、AT、联网 | `devices/t551m/test_nv.py`、`test_backlight.py`、`test_at.py`、`test_at_client.py`、`test_network_startup.py` |
+| NV、背光、AT、联网 | `device/openwrt_device_common/tests/test_nv.py`、`test_backlight.py`、`test_at.py`、`test_at_client.py`、`test_network_startup.py` |
 | 屏幕、壁纸、loading、手势、电话 | `test_screen_browser.py`、`test_wallpaper.py`、`test_loading_browser.py`、`test_unlock_browser.py`、`test_unlock_live.py`、`test_phone_browser.py` |
 | 双卡、锁定、回放、流量、功能同步 | `test_sim_status.py`、`test_locks.py`、`test_boot_replay.py`、`test_dual_traffic.py`、`test_api_sync.py`、`test_settings_sync_browser.py`、相关 ucode/JS 测试 |
 | CPU、网页切卡、翻译、更新 | `test_cpu_control.py`、`test_cpu_browser.py`、`test_data_sim.py`、`test_data_sim_browser.py`、`test_feature_i18n.js`、`test_update_compat.py` |
 | 充电/USB/OTG DMA | `test_charge_mode.py`、`test_charge_screen.py`、`test_charger.py`、`test_usb_charger.py`、`test_usb_charge_*.py`、`test_host_dma.py`、`test_device_usb*.py` |
-| 音频、HFP、短信 | `openwrt/tests/hfp.py`、`call-volume.py`、`voice-audio.py`、`volume.py`、`dual-sms.py`；`rootfs/tests/voice-*.py` |
+| 音频、HFP、短信 | `device/openwrt_device_common/tests/hfp.py`、`call-volume.py`、`voice-audio.py`、`volume.py`、`dual-sms.py`；`rootfs/tests/voice-*.py` |
 | KVM/Docker/BTF/模块 | `upstream/check-container-support.py`、`tools/kvm-smoke.c`、`tools/docker-smoke.py`、`tools/bpf-smoke.c` |
-| Wi-Fi 所有权及离线日志 | `devices/t551m/test_wifi_tx.py`、`tools/tests/test_wcn_rate_analyze.py`、`tools/tests/test_wcn_packet_analyze.py` |
+| Wi-Fi 所有权及离线日志 | `device/linux_device_t551m/test_wifi_tx.py`、`tools/tests/test_wcn_rate_analyze.py`、`tools/tests/test_wcn_packet_analyze.py` |
 
-表中未带目录前缀的设备测试位于 `devices/t551m/`，音频表项的省略前缀沿用该行明确目录。
+表中未带目录前缀的设备测试位于 `device/linux_device_t551m/`，音频表项的省略前缀沿用该行明确目录。
 需要 Linux、准备后的内核、浏览器/WPE、硬件或测试夹具的入口不能只凭源码存在就宣称已实测。
 
 截至 C14，以下边界必须保留：
@@ -439,156 +439,156 @@ Wi-Fi 补丁也依赖匹配的 SDIO 驱动代码和内核配置；**代码可复
 
 | 动作 | 文件 | 新增/删除行 | 涉及提交 |
 | --- | --- | ---: | --- |
-| 新增 | [devices/t551m/README.md](../devices/t551m/README.md) | +625 / −0 | C01, C02, C03 |
-| 新增 | [devices/t551m/at-client.c](../devices/t551m/at-client.c) | +134 / −0 | C01 |
-| 新增 | [devices/t551m/at-service](../devices/t551m/at-service) | +17 / −0 | C01 |
-| 新增 | [devices/t551m/atd.py](../devices/t551m/atd.py) | +272 / −0 | C01, C02 |
-| 新增 | [devices/t551m/build-at-client.py](../devices/t551m/build-at-client.py) | +39 / −0 | C01 |
-| 新增 | [devices/t551m/build-charge-art.py](../devices/t551m/build-charge-art.py) | +85 / −0 | C02 |
-| 新增 | [devices/t551m/build-kernel.sh](../devices/t551m/build-kernel.sh) | +55 / −0 | C01, C03, C05 |
-| 新增 | [devices/t551m/charge-art.zip](../devices/t551m/charge-art.zip) | 二进制 | C02 |
-| 新增 | [devices/t551m/charge-mode-service](../devices/t551m/charge-mode-service) | +8 / −0 | C02 |
-| 新增 | [devices/t551m/charge-mode.py](../devices/t551m/charge-mode.py) | +252 / −0 | C02 |
-| 新增 | [devices/t551m/charge-profile.h](../devices/t551m/charge-profile.h) | +36 / −0 | C03 |
-| 新增 | [devices/t551m/charge-screen.py](../devices/t551m/charge-screen.py) | +125 / −0 | C02 |
-| 新增 | [devices/t551m/collect-files.py](../devices/t551m/collect-files.py) | +35 / −0 | C01 |
-| 新增 | [devices/t551m/configure-rootfs.py](../devices/t551m/configure-rootfs.py) | +175 / −0 | C01, C02, C03 |
-| 新增 | [devices/t551m/cpufreq.py](../devices/t551m/cpufreq.py) | +31 / −0 | C05 |
-| 新增 | [devices/t551m/cpufreq/README.md](../devices/t551m/cpufreq/README.md) | +62 / −0 | C05 |
-| 新增 | [devices/t551m/cpufreq/config](../devices/t551m/cpufreq/config) | +13 / −0 | C05 |
-| 新增 | [devices/t551m/cpufreq/sprd-cpufreq-v2-driver.c](../devices/t551m/cpufreq/sprd-cpufreq-v2-driver.c) | +1216 / −0 | C05 |
-| 新增 | [devices/t551m/cpufreq/sprd-cpufreq-v2.h](../devices/t551m/cpufreq/sprd-cpufreq-v2.h) | +114 / −0 | C05 |
-| 新增 | [devices/t551m/cpufreq/sprd_sip_svc.c](../devices/t551m/cpufreq/sprd_sip_svc.c) | +823 / −0 | C05 |
-| 新增 | [devices/t551m/cpufreq/sprd_sip_svc.h](../devices/t551m/cpufreq/sprd_sip_svc.h) | +206 / −0 | C05 |
-| 新增 | [devices/t551m/make-boot.py](../devices/t551m/make-boot.py) | +73 / −0 | C01 |
-| 新增 | [devices/t551m/musb-sprd-host.h](../devices/t551m/musb-sprd-host.h) | +83 / −0 | C03 |
-| 新增 | [devices/t551m/network-startup-defaults](../devices/t551m/network-startup-defaults) | +16 / −0 | C01 |
-| 新增 | [devices/t551m/network-startup.py](../devices/t551m/network-startup.py) | +87 / −0 | C01, C02 |
-| 新增 | [devices/t551m/nv-prepare.py](../devices/t551m/nv-prepare.py) | +224 / −0 | C01, C02 |
-| 新增 | [devices/t551m/nv-stop.py](../devices/t551m/nv-stop.py) | +77 / −0 | C01 |
-| 新增 | [devices/t551m/nv-verify.py](../devices/t551m/nv-verify.py) | +35 / −0 | C01, C02 |
-| 新增 | [devices/t551m/otg.py](../devices/t551m/otg.py) | +99 / −0 | C03 |
-| 新增 | [devices/t551m/prepare-kernel.py](../devices/t551m/prepare-kernel.py) | +227 / −0 | C01, C03, C05, C09 |
-| 新增 | [devices/t551m/t551m-backlight.h](../devices/t551m/t551m-backlight.h) | +49 / −0 | C01 |
-| 新增 | [devices/t551m/trial-service](../devices/t551m/trial-service) | +18 / −0 | C01 |
-| 新增 | [devices/t551m/trial.py](../devices/t551m/trial.py) | +89 / −0 | C01 |
-| 新增 | [devices/t551m/ui-cleanup.py](../devices/t551m/ui-cleanup.py) | +49 / −0 | C01 |
-| 新增 | [devices/t551m/ui-compat.py](../devices/t551m/ui-compat.py) | +31 / −0 | C01 |
-| 新增 | [devices/t551m/ui-defaults](../devices/t551m/ui-defaults) | +29 / −0 | C01, C05 |
-| 新增 | [devices/t551m/ui.py](../devices/t551m/ui.py) | +133 / −0 | C01, C05 |
-| 新增 | [devices/t551m/usb-charge-role.h](../devices/t551m/usb-charge-role.h) | +23 / −0 | C03 |
-| 新增 | [devices/t551m/usb-host-network.modules](../devices/t551m/usb-host-network.modules) | +8 / −0 | C03 |
-| 新增 | [devices/t551m/usb-host-storage.modules](../devices/t551m/usb-host-storage.modules) | +3 / −0 | C03 |
-| 新增 | [devices/t551m/usb-policy.h](../devices/t551m/usb-policy.h) | +92 / −0 | C03 |
-| 新增 | [devices/t551m/usb-role.h](../devices/t551m/usb-role.h) | +103 / −0 | C03 |
-| 新增 | [devices/t551m/usb-service](../devices/t551m/usb-service) | +19 / −0 | C01 |
-| 新增 | [devices/t551m/usb_charger.py](../devices/t551m/usb_charger.py) | +330 / −0 | C03 |
-| 新增 | [devices/t551m/usb_host.py](../devices/t551m/usb_host.py) | +74 / −0 | C03 |
-| 新增 | [devices/t551m/wifi-address-defaults](../devices/t551m/wifi-address-defaults) | +28 / −0 | C01 |
-| 新增 | [devices/t551m/wifi.py](../devices/t551m/wifi.py) | +88 / −0 | C09 |
+| 新增 | [device/linux_device_t551m/README.md](../device/linux_device_t551m/README.md) | +625 / −0 | C01, C02, C03 |
+| 新增 | [device/openwrt_device_common/shared/at-client.c](../device/openwrt_device_common/shared/at-client.c) | +134 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/shared/at-service](../device/openwrt_device_common/shared/at-service) | +17 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/shared/atd.py](../device/openwrt_device_common/shared/atd.py) | +272 / −0 | C01, C02 |
+| 新增 | [device/openwrt_device_common/shared/build-at-client.py](../device/openwrt_device_common/shared/build-at-client.py) | +39 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/shared/build-charge-art.py](../device/openwrt_device_common/shared/build-charge-art.py) | +85 / −0 | C02 |
+| 新增 | [device/linux_device_t551m/build-kernel.sh](../device/linux_device_t551m/build-kernel.sh) | +55 / −0 | C01, C03, C05 |
+| 新增 | [device/openwrt_device_common/shared/charge-art.zip](../device/openwrt_device_common/shared/charge-art.zip) | 二进制 | C02 |
+| 新增 | [device/openwrt_device_common/shared/charge-mode-service](../device/openwrt_device_common/shared/charge-mode-service) | +8 / −0 | C02 |
+| 新增 | [device/openwrt_device_common/shared/charge-mode.py](../device/openwrt_device_common/shared/charge-mode.py) | +252 / −0 | C02 |
+| 新增 | [device/linux_device_t551m/charge-profile.h](../device/linux_device_t551m/charge-profile.h) | +36 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/shared/charge-screen.py](../device/openwrt_device_common/shared/charge-screen.py) | +125 / −0 | C02 |
+| 新增 | [device/linux_device_t551m/collect-files.py](../device/linux_device_t551m/collect-files.py) | +35 / −0 | C01 |
+| 新增 | [device/openwrt_device_t551m/configure-rootfs.py](../device/openwrt_device_t551m/configure-rootfs.py) | +175 / −0 | C01, C02, C03 |
+| 新增 | [device/linux_device_common/kernel/cpufreq.py](../device/linux_device_common/kernel/cpufreq.py) | +31 / −0 | C05 |
+| 新增 | [device/linux_device_common/kernel/cpufreq/README.md](../device/linux_device_common/kernel/cpufreq/README.md) | +62 / −0 | C05 |
+| 新增 | [device/linux_device_common/kernel/cpufreq/config](../device/linux_device_common/kernel/cpufreq/config) | +13 / −0 | C05 |
+| 新增 | [device/linux_device_common/kernel/cpufreq/sprd-cpufreq-v2-driver.c](../device/linux_device_common/kernel/cpufreq/sprd-cpufreq-v2-driver.c) | +1216 / −0 | C05 |
+| 新增 | [device/linux_device_common/kernel/cpufreq/sprd-cpufreq-v2.h](../device/linux_device_common/kernel/cpufreq/sprd-cpufreq-v2.h) | +114 / −0 | C05 |
+| 新增 | [device/linux_device_common/kernel/cpufreq/sprd_sip_svc.c](../device/linux_device_common/kernel/cpufreq/sprd_sip_svc.c) | +823 / −0 | C05 |
+| 新增 | [device/linux_device_common/kernel/cpufreq/sprd_sip_svc.h](../device/linux_device_common/kernel/cpufreq/sprd_sip_svc.h) | +206 / −0 | C05 |
+| 新增 | [device/linux_device_t551m/make-boot.py](../device/linux_device_t551m/make-boot.py) | +73 / −0 | C01 |
+| 新增 | [device/linux_device_common/kernel/musb-sprd-host.h](../device/linux_device_common/kernel/musb-sprd-host.h) | +83 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/shared/network-startup-defaults](../device/openwrt_device_common/shared/network-startup-defaults) | +16 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/shared/network-startup.py](../device/openwrt_device_common/shared/network-startup.py) | +87 / −0 | C01, C02 |
+| 新增 | [device/openwrt_device_common/shared/nv-prepare.py](../device/openwrt_device_common/shared/nv-prepare.py) | +224 / −0 | C01, C02 |
+| 新增 | [device/openwrt_device_common/shared/nv-stop.py](../device/openwrt_device_common/shared/nv-stop.py) | +77 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/shared/nv-verify.py](../device/openwrt_device_common/shared/nv-verify.py) | +35 / −0 | C01, C02 |
+| 新增 | [device/linux_device_common/kernel/otg.py](../device/linux_device_common/kernel/otg.py) | +99 / −0 | C03 |
+| 新增 | [device/linux_device_t551m/prepare-kernel.py](../device/linux_device_t551m/prepare-kernel.py) | +227 / −0 | C01, C03, C05, C09 |
+| 新增 | [device/linux_device_t551m/t551m-backlight.h](../device/linux_device_t551m/t551m-backlight.h) | +49 / −0 | C01 |
+| 新增 | [device/openwrt_device_t551m/trial-service](../device/openwrt_device_t551m/trial-service) | +18 / −0 | C01 |
+| 新增 | [device/openwrt_device_t551m/trial.py](../device/openwrt_device_t551m/trial.py) | +89 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/shared/ui-cleanup.py](../device/openwrt_device_common/shared/ui-cleanup.py) | +49 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/shared/ui-compat.py](../device/openwrt_device_common/shared/ui-compat.py) | +31 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/shared/ui-defaults](../device/openwrt_device_common/shared/ui-defaults) | +29 / −0 | C01, C05 |
+| 新增 | [device/openwrt_device_common/shared/ui.py](../device/openwrt_device_common/shared/ui.py) | +133 / −0 | C01, C05 |
+| 新增 | [device/linux_device_common/kernel/usb-charge-role.h](../device/linux_device_common/kernel/usb-charge-role.h) | +23 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/shared/usb-host-network.modules](../device/openwrt_device_common/shared/usb-host-network.modules) | +8 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/shared/usb-host-storage.modules](../device/openwrt_device_common/shared/usb-host-storage.modules) | +3 / −0 | C03 |
+| 新增 | [device/linux_device_common/kernel/usb-policy.h](../device/linux_device_common/kernel/usb-policy.h) | +92 / −0 | C03 |
+| 新增 | [device/linux_device_common/kernel/usb-role.h](../device/linux_device_common/kernel/usb-role.h) | +103 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/shared/usb-service](../device/openwrt_device_common/shared/usb-service) | +19 / −0 | C01 |
+| 新增 | [device/linux_device_common/kernel/usb_charger.py](../device/linux_device_common/kernel/usb_charger.py) | +330 / −0 | C03 |
+| 新增 | [device/linux_device_common/kernel/usb_host.py](../device/linux_device_common/kernel/usb_host.py) | +74 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/shared/wifi-address-defaults](../device/openwrt_device_common/shared/wifi-address-defaults) | +28 / −0 | C01 |
+| 新增 | [device/linux_device_common/kernel/wifi.py](../device/linux_device_common/kernel/wifi.py) | +88 / −0 | C09 |
 
 #### 设备层：屏幕界面与电话（39 个文件）
 
 | 动作 | 文件 | 新增/删除行 | 涉及提交 |
 | --- | --- | ---: | --- |
-| 新增 | [devices/t551m/infoscreen/LICENSE](../devices/t551m/infoscreen/LICENSE) | +21 / −0 | C01 |
-| 新增 | [devices/t551m/infoscreen/README.md](../devices/t551m/infoscreen/README.md) | +391 / −0 | C01, C02, C03, C04, C05, C06, C07, C08 |
-| 新增 | [devices/t551m/infoscreen/base/api.uc](../devices/t551m/infoscreen/base/api.uc) | +1625 / −0 | C01, C03, C05 |
-| 新增 | [devices/t551m/infoscreen/base/app.js](../devices/t551m/infoscreen/base/app.js) | +2076 / −0 | C01, C03, C04, C05 |
-| 新增 | [devices/t551m/infoscreen/base/index.html](../devices/t551m/infoscreen/base/index.html) | +267 / −0 | C01, C03, C05, C06 |
-| 新增 | [devices/t551m/infoscreen/base/luci-settings.js](../devices/t551m/infoscreen/base/luci-settings.js) | +52 / −0 | C01, C05 |
-| 新增 | [devices/t551m/infoscreen/base/plugin](../devices/t551m/infoscreen/base/plugin) | +171 / −0 | C05 |
-| 新增 | [devices/t551m/infoscreen/base/sdk.js](../devices/t551m/infoscreen/base/sdk.js) | +181 / −0 | C02 |
-| 新增 | [devices/t551m/infoscreen/base/service](../devices/t551m/infoscreen/base/service) | +69 / −0 | C05 |
-| 新增 | [devices/t551m/infoscreen/base/settings.uc](../devices/t551m/infoscreen/base/settings.uc) | +587 / −0 | C01, C03, C05 |
-| 新增 | [devices/t551m/infoscreen/base/style.css](../devices/t551m/infoscreen/base/style.css) | +326 / −0 | C01 |
-| 新增 | [devices/t551m/infoscreen/base/update](../devices/t551m/infoscreen/base/update) | +127 / −0 | C05 |
-| 新增 | [devices/t551m/infoscreen/base/updates.uc](../devices/t551m/infoscreen/base/updates.uc) | +117 / −0 | C05 |
-| 新增 | [devices/t551m/infoscreen/calls.js](../devices/t551m/infoscreen/calls.js) | +55 / −0 | C02 |
-| 新增 | [devices/t551m/infoscreen/cpu-settings.uc](../devices/t551m/infoscreen/cpu-settings.uc) | +86 / −0 | C05 |
-| 新增 | [devices/t551m/infoscreen/details-radio.py](../devices/t551m/infoscreen/details-radio.py) | +91 / −0 | C01, C05 |
-| 新增 | [devices/t551m/infoscreen/details.uc](../devices/t551m/infoscreen/details.uc) | +18 / −0 | C01, C05 |
-| 新增 | [devices/t551m/infoscreen/mobile-phone.css](../devices/t551m/infoscreen/mobile-phone.css) | +65 / −0 | C01, C02 |
-| 新增 | [devices/t551m/infoscreen/mobile.css](../devices/t551m/infoscreen/mobile.css) | +376 / −0 | C01, C02, C03, C04, C05, C06 |
-| 新增 | [devices/t551m/infoscreen/mobile.js](../devices/t551m/infoscreen/mobile.js) | +629 / −0 | C01, C02, C03, C04, C05, C07 |
-| 新增 | [devices/t551m/infoscreen/navigation.js](../devices/t551m/infoscreen/navigation.js) | +20 / −0 | C01 |
-| 新增 | [devices/t551m/infoscreen/phone/LICENSE](../devices/t551m/infoscreen/phone/LICENSE) | +21 / −0 | C02 |
-| 新增 | [devices/t551m/infoscreen/phone/UPSTREAM.json](../devices/t551m/infoscreen/phone/UPSTREAM.json) | +13 / −0 | C02 |
-| 新增 | [devices/t551m/infoscreen/phone/backend.uc](../devices/t551m/infoscreen/phone/backend.uc) | +107 / −0 | C02, C03 |
-| 新增 | [devices/t551m/infoscreen/phone/index.html](../devices/t551m/infoscreen/phone/index.html) | +75 / −0 | C02, C03 |
-| 新增 | [devices/t551m/infoscreen/phone/manifest.json](../devices/t551m/infoscreen/phone/manifest.json) | +75 / −0 | C02, C05 |
-| 新增 | [devices/t551m/infoscreen/phone/phone.css](../devices/t551m/infoscreen/phone/phone.css) | +90 / −0 | C02, C03 |
-| 新增 | [devices/t551m/infoscreen/phone/phone.js](../devices/t551m/infoscreen/phone/phone.js) | +316 / −0 | C02, C03 |
-| 新增 | [devices/t551m/infoscreen/phone/voice.uc](../devices/t551m/infoscreen/phone/voice.uc) | +79 / −0 | C02 |
-| 新增 | [devices/t551m/infoscreen/power-menu.js](../devices/t551m/infoscreen/power-menu.js) | +116 / −0 | C01 |
-| 新增 | [devices/t551m/infoscreen/power-service](../devices/t551m/infoscreen/power-service) | +12 / −0 | C01 |
-| 新增 | [devices/t551m/infoscreen/screen-power.py](../devices/t551m/infoscreen/screen-power.py) | +105 / −0 | C01, C03 |
-| 新增 | [devices/t551m/infoscreen/sim-service](../devices/t551m/infoscreen/sim-service) | +12 / −0 | C03 |
-| 新增 | [devices/t551m/infoscreen/sim-status.py](../devices/t551m/infoscreen/sim-status.py) | +162 / −0 | C03, C08 |
-| 新增 | [devices/t551m/infoscreen/sims.uc](../devices/t551m/infoscreen/sims.uc) | +45 / −0 | C03 |
-| 新增 | [devices/t551m/infoscreen/stage.py](../devices/t551m/infoscreen/stage.py) | +339 / −0 | C01, C02, C03, C04, C05 |
-| 新增 | [devices/t551m/infoscreen/ui-settings.uc](../devices/t551m/infoscreen/ui-settings.uc) | +41 / −0 | C01 |
-| 新增 | [devices/t551m/infoscreen/wallpaper-rpc.py](../devices/t551m/infoscreen/wallpaper-rpc.py) | +199 / −0 | C01 |
-| 新增 | [devices/t551m/infoscreen/wallpapers.js](../devices/t551m/infoscreen/wallpapers.js) | +108 / −0 | C01 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/LICENSE.t551m](../ci/infoscreen/root/usr/share/e5-infoscreen/LICENSE.t551m) | +21 / −0 | C01 |
+| 新增 | [ci/infoscreen/docs/device-ui.zh-CN.md](../ci/infoscreen/docs/device-ui.zh-CN.md) | +391 / −0 | C01, C02, C03, C04, C05, C06, C07, C08 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/api.uc](../ci/infoscreen/root/usr/share/e5-infoscreen/api.uc) | +1625 / −0 | C01, C03, C05 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/www/app.js](../ci/infoscreen/root/usr/share/e5-infoscreen/www/app.js) | +2076 / −0 | C01, C03, C04, C05 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/www/index.html](../ci/infoscreen/root/usr/share/e5-infoscreen/www/index.html) | +267 / −0 | C01, C03, C05, C06 |
+| 新增 | [ci/infoscreen/root/www/luci-static/resources/view/e5-infoscreen/settings.js](../ci/infoscreen/root/www/luci-static/resources/view/e5-infoscreen/settings.js) | +52 / −0 | C01, C05 |
+| 新增 | [ci/infoscreen/root/usr/libexec/e5-infoscreen/plugin](../ci/infoscreen/root/usr/libexec/e5-infoscreen/plugin) | +171 / −0 | C05 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/www/sdk/e5.js](../ci/infoscreen/root/usr/share/e5-infoscreen/www/sdk/e5.js) | +181 / −0 | C02 |
+| 新增 | [ci/infoscreen/root/etc/init.d/e5-infoscreen](../ci/infoscreen/root/etc/init.d/e5-infoscreen) | +69 / −0 | C05 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/settings.uc](../ci/infoscreen/root/usr/share/e5-infoscreen/settings.uc) | +587 / −0 | C01, C03, C05 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/www/style.css](../ci/infoscreen/root/usr/share/e5-infoscreen/www/style.css) | +326 / −0 | C01 |
+| 新增 | [ci/infoscreen/root/usr/libexec/e5-infoscreen/update](../ci/infoscreen/root/usr/libexec/e5-infoscreen/update) | +127 / −0 | C05 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/updates.uc](../ci/infoscreen/root/usr/share/e5-infoscreen/updates.uc) | +117 / −0 | C05 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/www/calls.js](../ci/infoscreen/root/usr/share/e5-infoscreen/www/calls.js) | +55 / −0 | C02 |
+| 新增 | [ci/infoscreen/tests/fixtures/cpu-settings.uc](../ci/infoscreen/tests/fixtures/cpu-settings.uc) | +86 / −0 | C05 |
+| 新增 | [ci/infoscreen/root/usr/libexec/t551m-screen-details](../ci/infoscreen/root/usr/libexec/t551m-screen-details) | +91 / −0 | C01, C05 |
+| 新增 | [ci/infoscreen/tests/fixtures/details.uc](../ci/infoscreen/tests/fixtures/details.uc) | +18 / −0 | C01, C05 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/www/mobile-phone.css](../ci/infoscreen/root/usr/share/e5-infoscreen/www/mobile-phone.css) | +65 / −0 | C01, C02 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/www/mobile.css](../ci/infoscreen/root/usr/share/e5-infoscreen/www/mobile.css) | +376 / −0 | C01, C02, C03, C04, C05, C06 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/www/mobile.js](../ci/infoscreen/root/usr/share/e5-infoscreen/www/mobile.js) | +629 / −0 | C01, C02, C03, C04, C05, C07 |
+| 新增 | [ci/infoscreen/root/www/luci-static/resources/view/e5-infoscreen/navigation.js](../ci/infoscreen/root/www/luci-static/resources/view/e5-infoscreen/navigation.js) | +20 / −0 | C01 |
+| 新增 | [ci/infoscreen-plugins/plugins/phone/LICENSE](../ci/infoscreen-plugins/plugins/phone/LICENSE) | +21 / −0 | C02 |
+| 新增 | [ci/infoscreen-plugins/plugins/phone/UPSTREAM.json](../ci/infoscreen-plugins/plugins/phone/UPSTREAM.json) | +13 / −0 | C02 |
+| 新增 | [ci/infoscreen-plugins/plugins/phone/backend.uc](../ci/infoscreen-plugins/plugins/phone/backend.uc) | +107 / −0 | C02, C03 |
+| 新增 | [ci/infoscreen-plugins/plugins/phone/index.html](../ci/infoscreen-plugins/plugins/phone/index.html) | +75 / −0 | C02, C03 |
+| 新增 | [ci/infoscreen-plugins/plugins/phone/manifest.json](../ci/infoscreen-plugins/plugins/phone/manifest.json) | +75 / −0 | C02, C05 |
+| 新增 | [ci/infoscreen-plugins/plugins/phone/phone.css](../ci/infoscreen-plugins/plugins/phone/phone.css) | +90 / −0 | C02, C03 |
+| 新增 | [ci/infoscreen-plugins/plugins/phone/phone.js](../ci/infoscreen-plugins/plugins/phone/phone.js) | +316 / −0 | C02, C03 |
+| 新增 | [ci/infoscreen-plugins/plugins/phone/voice.uc](../ci/infoscreen-plugins/plugins/phone/voice.uc) | +79 / −0 | C02 |
+| 新增 | [ci/infoscreen/root/usr/share/e5-infoscreen/www/power-menu.js](../ci/infoscreen/root/usr/share/e5-infoscreen/www/power-menu.js) | +116 / −0 | C01 |
+| 新增 | [ci/infoscreen/root/etc/init.d/t551m-screen-power](../ci/infoscreen/root/etc/init.d/t551m-screen-power) | +12 / −0 | C01 |
+| 新增 | [ci/infoscreen/root/usr/libexec/t551m-screen-power](../ci/infoscreen/root/usr/libexec/t551m-screen-power) | +105 / −0 | C01, C03 |
+| 新增 | [ci/infoscreen/root/etc/init.d/t551m-sim-status](../ci/infoscreen/root/etc/init.d/t551m-sim-status) | +12 / −0 | C03 |
+| 新增 | [ci/infoscreen/root/usr/libexec/t551m-sim-status](../ci/infoscreen/root/usr/libexec/t551m-sim-status) | +162 / −0 | C03, C08 |
+| 新增 | [ci/infoscreen/tests/fixtures/sims.uc](../ci/infoscreen/tests/fixtures/sims.uc) | +45 / −0 | C03 |
+| 新增 | [ci/infoscreen/tools/stage.py](../ci/infoscreen/tools/stage.py) | +339 / −0 | C01, C02, C03, C04, C05 |
+| 新增 | [ci/infoscreen/tests/fixtures/ui-settings.uc](../ci/infoscreen/tests/fixtures/ui-settings.uc) | +41 / −0 | C01 |
+| 新增 | [ci/infoscreen/root/usr/libexec/rpcd/t551m-screen](../ci/infoscreen/root/usr/libexec/rpcd/t551m-screen) | +199 / −0 | C01 |
+| 新增 | [ci/infoscreen/root/www/luci-static/resources/view/e5-infoscreen/wallpapers.js](../ci/infoscreen/root/www/luci-static/resources/view/e5-infoscreen/wallpapers.js) | +108 / −0 | C01 |
 
 #### 设备层：回归测试（54 个文件）
 
 | 动作 | 文件 | 新增/删除行 | 涉及提交 |
 | --- | --- | ---: | --- |
-| 新增 | [devices/t551m/test_api_sync.py](../devices/t551m/test_api_sync.py) | +38 / −0 | C05 |
-| 新增 | [devices/t551m/test_at.py](../devices/t551m/test_at.py) | +145 / −0 | C01, C02 |
-| 新增 | [devices/t551m/test_at_client.py](../devices/t551m/test_at_client.py) | +87 / −0 | C01 |
-| 新增 | [devices/t551m/test_backlight.py](../devices/t551m/test_backlight.py) | +106 / −0 | C01 |
-| 新增 | [devices/t551m/test_boot_replay.py](../devices/t551m/test_boot_replay.py) | +87 / −0 | C02, C03, C05 |
-| 新增 | [devices/t551m/test_cell_progressive.py](../devices/t551m/test_cell_progressive.py) | +97 / −0 | C03, C08 |
-| 新增 | [devices/t551m/test_charge_mode.py](../devices/t551m/test_charge_mode.py) | +169 / −0 | C02 |
-| 新增 | [devices/t551m/test_charge_profile.py](../devices/t551m/test_charge_profile.py) | +70 / −0 | C03 |
-| 新增 | [devices/t551m/test_charge_screen.py](../devices/t551m/test_charge_screen.py) | +51 / −0 | C02 |
-| 新增 | [devices/t551m/test_charger.py](../devices/t551m/test_charger.py) | +146 / −0 | C01 |
-| 新增 | [devices/t551m/test_cpu_browser.py](../devices/t551m/test_cpu_browser.py) | +128 / −0 | C05 |
-| 新增 | [devices/t551m/test_cpu_control.py](../devices/t551m/test_cpu_control.py) | +242 / −0 | C05 |
-| 新增 | [devices/t551m/test_dashboard_rates.py](../devices/t551m/test_dashboard_rates.py) | +63 / −0 | C03 |
-| 新增 | [devices/t551m/test_dashboard_refresh.py](../devices/t551m/test_dashboard_refresh.py) | +64 / −0 | C03 |
-| 新增 | [devices/t551m/test_data_sim.py](../devices/t551m/test_data_sim.py) | +98 / −0 | C05 |
-| 新增 | [devices/t551m/test_data_sim_browser.py](../devices/t551m/test_data_sim_browser.py) | +76 / −0 | C05 |
-| 新增 | [devices/t551m/test_device_usb.py](../devices/t551m/test_device_usb.py) | +114 / −0 | C03 |
-| 新增 | [devices/t551m/test_device_usb_browser.py](../devices/t551m/test_device_usb_browser.py) | +63 / −0 | C03 |
-| 新增 | [devices/t551m/test_dual_traffic.py](../devices/t551m/test_dual_traffic.py) | +113 / −0 | C03, C05 |
-| 新增 | [devices/t551m/test_feature_i18n.js](../devices/t551m/test_feature_i18n.js) | +24 / −0 | C05 |
-| 新增 | [devices/t551m/test_host_dma.py](../devices/t551m/test_host_dma.py) | +144 / −0 | C03 |
-| 新增 | [devices/t551m/test_loading_browser.py](../devices/t551m/test_loading_browser.py) | +176 / −0 | C03, C04 |
-| 新增 | [devices/t551m/test_locks.py](../devices/t551m/test_locks.py) | +235 / −0 | C02, C03, C05 |
-| 新增 | [devices/t551m/test_locks_frontend.js](../devices/t551m/test_locks_frontend.js) | +95 / −0 | C02, C03 |
-| 新增 | [devices/t551m/test_network_startup.py](../devices/t551m/test_network_startup.py) | +126 / −0 | C01, C02 |
-| 新增 | [devices/t551m/test_nv.py](../devices/t551m/test_nv.py) | +131 / −0 | C01, C02 |
-| 新增 | [devices/t551m/test_operator_names.py](../devices/t551m/test_operator_names.py) | +56 / −0 | C08 |
-| 新增 | [devices/t551m/test_phone_browser.py](../devices/t551m/test_phone_browser.py) | +153 / −0 | C02, C03 |
-| 新增 | [devices/t551m/test_phone_voice.uc](../devices/t551m/test_phone_voice.uc) | +27 / −0 | C02 |
-| 新增 | [devices/t551m/test_screen.py](../devices/t551m/test_screen.py) | +93 / −0 | C01, C03 |
-| 新增 | [devices/t551m/test_screen_bands.uc](../devices/t551m/test_screen_bands.uc) | +34 / −0 | C03, C05 |
-| 新增 | [devices/t551m/test_screen_browser.py](../devices/t551m/test_screen_browser.py) | +472 / −0 | C01, C02, C03, C07 |
-| 新增 | [devices/t551m/test_screen_cpu.uc](../devices/t551m/test_screen_cpu.uc) | +26 / −0 | C05 |
-| 新增 | [devices/t551m/test_screen_details.py](../devices/t551m/test_screen_details.py) | +33 / −0 | C01, C05 |
-| 新增 | [devices/t551m/test_screen_sims.uc](../devices/t551m/test_screen_sims.uc) | +43 / −0 | C03 |
-| 新增 | [devices/t551m/test_screen_traffic.uc](../devices/t551m/test_screen_traffic.uc) | +21 / −0 | C05 |
-| 新增 | [devices/t551m/test_screen_usb.uc](../devices/t551m/test_screen_usb.uc) | +31 / −0 | C03, C05 |
-| 新增 | [devices/t551m/test_screen_usb_devices.py](../devices/t551m/test_screen_usb_devices.py) | +81 / −0 | C03 |
-| 新增 | [devices/t551m/test_settings_sync.uc](../devices/t551m/test_settings_sync.uc) | +21 / −0 | C05 |
-| 新增 | [devices/t551m/test_settings_sync_browser.py](../devices/t551m/test_settings_sync_browser.py) | +60 / −0 | C05 |
-| 新增 | [devices/t551m/test_sim_at_scope.py](../devices/t551m/test_sim_at_scope.py) | +27 / −0 | C03, C05 |
-| 新增 | [devices/t551m/test_sim_status.py](../devices/t551m/test_sim_status.py) | +78 / −0 | C03, C08 |
-| 新增 | [devices/t551m/test_traffic_browser.py](../devices/t551m/test_traffic_browser.py) | +100 / −0 | C05 |
-| 新增 | [devices/t551m/test_ui.py](../devices/t551m/test_ui.py) | +92 / −0 | C01 |
-| 新增 | [devices/t551m/test_unlock_browser.py](../devices/t551m/test_unlock_browser.py) | +107 / −0 | C07 |
-| 新增 | [devices/t551m/test_unlock_live.py](../devices/t551m/test_unlock_live.py) | +84 / −0 | C08 |
-| 新增 | [devices/t551m/test_update_compat.py](../devices/t551m/test_update_compat.py) | +105 / −0 | C05 |
-| 新增 | [devices/t551m/test_usb_charge_redetect.py](../devices/t551m/test_usb_charge_redetect.py) | +67 / −0 | C03 |
-| 新增 | [devices/t551m/test_usb_charge_restart.py](../devices/t551m/test_usb_charge_restart.py) | +59 / −0 | C03 |
-| 新增 | [devices/t551m/test_usb_charge_transition.py](../devices/t551m/test_usb_charge_transition.py) | +71 / −0 | C03 |
-| 新增 | [devices/t551m/test_usb_charger.py](../devices/t551m/test_usb_charger.py) | +276 / −0 | C03 |
-| 新增 | [devices/t551m/test_wallpaper.py](../devices/t551m/test_wallpaper.py) | +80 / −0 | C01 |
-| 新增 | [devices/t551m/test_wifi_address.py](../devices/t551m/test_wifi_address.py) | +63 / −0 | C01 |
-| 新增 | [devices/t551m/test_wifi_tx.py](../devices/t551m/test_wifi_tx.py) | +105 / −0 | C09 |
+| 新增 | [ci/infoscreen/tests/device/test_api_sync.py](../ci/infoscreen/tests/device/test_api_sync.py) | +38 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/tests/test_at.py](../device/openwrt_device_common/tests/test_at.py) | +145 / −0 | C01, C02 |
+| 新增 | [device/openwrt_device_common/tests/test_at_client.py](../device/openwrt_device_common/tests/test_at_client.py) | +87 / −0 | C01 |
+| 新增 | [device/linux_device_t551m/test_backlight.py](../device/linux_device_t551m/test_backlight.py) | +106 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/tests/test_boot_replay.py](../device/openwrt_device_common/tests/test_boot_replay.py) | +87 / −0 | C02, C03, C05 |
+| 新增 | [device/openwrt_device_common/tests/test_cell_progressive.py](../device/openwrt_device_common/tests/test_cell_progressive.py) | +97 / −0 | C03, C08 |
+| 新增 | [device/openwrt_device_common/tests/test_charge_mode.py](../device/openwrt_device_common/tests/test_charge_mode.py) | +169 / −0 | C02 |
+| 新增 | [device/linux_device_t551m/test_charge_profile.py](../device/linux_device_t551m/test_charge_profile.py) | +70 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/tests/test_charge_screen.py](../device/openwrt_device_common/tests/test_charge_screen.py) | +51 / −0 | C02 |
+| 新增 | [device/linux_device_t551m/test_charger.py](../device/linux_device_t551m/test_charger.py) | +146 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/tests/test_cpu_browser.py](../device/openwrt_device_common/tests/test_cpu_browser.py) | +128 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/tests/test_cpu_control.py](../device/openwrt_device_common/tests/test_cpu_control.py) | +242 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/tests/test_dashboard_rates.py](../device/openwrt_device_common/tests/test_dashboard_rates.py) | +63 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/tests/test_dashboard_refresh.py](../device/openwrt_device_common/tests/test_dashboard_refresh.py) | +64 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/tests/test_data_sim.py](../device/openwrt_device_common/tests/test_data_sim.py) | +98 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/tests/test_data_sim_browser.py](../device/openwrt_device_common/tests/test_data_sim_browser.py) | +76 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/tests/test_device_usb.py](../device/openwrt_device_common/tests/test_device_usb.py) | +114 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/tests/test_device_usb_browser.py](../device/openwrt_device_common/tests/test_device_usb_browser.py) | +63 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/tests/test_dual_traffic.py](../device/openwrt_device_common/tests/test_dual_traffic.py) | +113 / −0 | C03, C05 |
+| 新增 | [device/openwrt_device_common/tests/test_feature_i18n.js](../device/openwrt_device_common/tests/test_feature_i18n.js) | +24 / −0 | C05 |
+| 新增 | [device/linux_device_t551m/test_host_dma.py](../device/linux_device_t551m/test_host_dma.py) | +144 / −0 | C03 |
+| 新增 | [ci/infoscreen/tests/device/test_loading_browser.py](../ci/infoscreen/tests/device/test_loading_browser.py) | +176 / −0 | C03, C04 |
+| 新增 | [device/openwrt_device_common/tests/test_locks.py](../device/openwrt_device_common/tests/test_locks.py) | +235 / −0 | C02, C03, C05 |
+| 新增 | [device/openwrt_device_common/tests/test_locks_frontend.js](../device/openwrt_device_common/tests/test_locks_frontend.js) | +95 / −0 | C02, C03 |
+| 新增 | [device/openwrt_device_common/tests/test_network_startup.py](../device/openwrt_device_common/tests/test_network_startup.py) | +126 / −0 | C01, C02 |
+| 新增 | [device/openwrt_device_common/tests/test_nv.py](../device/openwrt_device_common/tests/test_nv.py) | +131 / −0 | C01, C02 |
+| 新增 | [ci/infoscreen/tests/device/test_operator_names.py](../ci/infoscreen/tests/device/test_operator_names.py) | +56 / −0 | C08 |
+| 新增 | [ci/infoscreen/tests/device/test_phone_browser.py](../ci/infoscreen/tests/device/test_phone_browser.py) | +153 / −0 | C02, C03 |
+| 新增 | [ci/infoscreen/tests/device/test_phone_voice.uc](../ci/infoscreen/tests/device/test_phone_voice.uc) | +27 / −0 | C02 |
+| 新增 | [ci/infoscreen/tests/device/test_screen.py](../ci/infoscreen/tests/device/test_screen.py) | +93 / −0 | C01, C03 |
+| 新增 | [ci/infoscreen/tests/device/test_screen_bands.uc](../ci/infoscreen/tests/device/test_screen_bands.uc) | +34 / −0 | C03, C05 |
+| 新增 | [ci/infoscreen/tests/device/test_screen_browser.py](../ci/infoscreen/tests/device/test_screen_browser.py) | +472 / −0 | C01, C02, C03, C07 |
+| 新增 | [ci/infoscreen/tests/device/test_screen_cpu.uc](../ci/infoscreen/tests/device/test_screen_cpu.uc) | +26 / −0 | C05 |
+| 新增 | [ci/infoscreen/tests/device/test_screen_details.py](../ci/infoscreen/tests/device/test_screen_details.py) | +33 / −0 | C01, C05 |
+| 新增 | [ci/infoscreen/tests/device/test_screen_sims.uc](../ci/infoscreen/tests/device/test_screen_sims.uc) | +43 / −0 | C03 |
+| 新增 | [ci/infoscreen/tests/device/test_screen_traffic.uc](../ci/infoscreen/tests/device/test_screen_traffic.uc) | +21 / −0 | C05 |
+| 新增 | [ci/infoscreen/tests/device/test_screen_usb.uc](../ci/infoscreen/tests/device/test_screen_usb.uc) | +31 / −0 | C03, C05 |
+| 新增 | [ci/infoscreen/tests/device/test_screen_usb_devices.py](../ci/infoscreen/tests/device/test_screen_usb_devices.py) | +81 / −0 | C03 |
+| 新增 | [ci/infoscreen/tests/device/test_settings_sync.uc](../ci/infoscreen/tests/device/test_settings_sync.uc) | +21 / −0 | C05 |
+| 新增 | [ci/infoscreen/tests/device/test_settings_sync_browser.py](../ci/infoscreen/tests/device/test_settings_sync_browser.py) | +60 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/tests/test_sim_at_scope.py](../device/openwrt_device_common/tests/test_sim_at_scope.py) | +27 / −0 | C03, C05 |
+| 新增 | [ci/infoscreen/tests/device/test_sim_status.py](../ci/infoscreen/tests/device/test_sim_status.py) | +78 / −0 | C03, C08 |
+| 新增 | [device/openwrt_device_common/tests/test_traffic_browser.py](../device/openwrt_device_common/tests/test_traffic_browser.py) | +100 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/tests/test_ui.py](../device/openwrt_device_common/tests/test_ui.py) | +92 / −0 | C01 |
+| 新增 | [ci/infoscreen/tests/device/test_unlock_browser.py](../ci/infoscreen/tests/device/test_unlock_browser.py) | +107 / −0 | C07 |
+| 新增 | [ci/infoscreen/tests/device/test_unlock_live.py](../ci/infoscreen/tests/device/test_unlock_live.py) | +84 / −0 | C08 |
+| 新增 | [ci/infoscreen/tests/device/test_update_compat.py](../ci/infoscreen/tests/device/test_update_compat.py) | +105 / −0 | C05 |
+| 新增 | [device/linux_device_t551m/test_usb_charge_redetect.py](../device/linux_device_t551m/test_usb_charge_redetect.py) | +67 / −0 | C03 |
+| 新增 | [device/linux_device_t551m/test_usb_charge_restart.py](../device/linux_device_t551m/test_usb_charge_restart.py) | +59 / −0 | C03 |
+| 新增 | [device/linux_device_t551m/test_usb_charge_transition.py](../device/linux_device_t551m/test_usb_charge_transition.py) | +71 / −0 | C03 |
+| 新增 | [device/linux_device_t551m/test_usb_charger.py](../device/linux_device_t551m/test_usb_charger.py) | +276 / −0 | C03 |
+| 新增 | [ci/infoscreen/tests/device/test_wallpaper.py](../ci/infoscreen/tests/device/test_wallpaper.py) | +80 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/tests/test_wifi_address.py](../device/openwrt_device_common/tests/test_wifi_address.py) | +63 / −0 | C01 |
+| 新增 | [device/linux_device_t551m/test_wifi_tx.py](../device/linux_device_t551m/test_wifi_tx.py) | +105 / −0 | C09 |
 
 #### OpenWrt：镜像构建与依赖（5 个文件）
 
@@ -604,101 +604,101 @@ Wi-Fi 补丁也依赖匹配的 SDIO 驱动代码和内核配置；**代码可复
 
 | 动作 | 文件 | 新增/删除行 | 涉及提交 |
 | --- | --- | ---: | --- |
-| 新增 | [openwrt/luci-app-t551m/Makefile](../openwrt/luci-app-t551m/Makefile) | +91 / −0 | C01, C02, C05 |
-| 新增 | [openwrt/luci-app-t551m/README.md](../openwrt/luci-app-t551m/README.md) | +56 / −0 | C01, C05 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/mu300/common.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/mu300/common.js) | +1839 / −0 | C01, C02, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/mu300/data-sim.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/mu300/data-sim.js) | +85 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/at.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/at.js) | +137 / −0 | C01, C03 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/cpu.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/cpu.js) | +175 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/device.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/device.js) | +220 / −0 | C01, C03 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/forward.css](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/forward.css) | +68 / −0 | C01, C03 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/forward.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/forward.js) | +166 / −0 | C01, C03 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/home.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/home.js) | +618 / −0 | C01, C02, C03 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/locks.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/locks.js) | +429 / −0 | C01, C02, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/settings.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/settings.js) | +60 / −0 | C01, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sim.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sim.js) | +34 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sms.css](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sms.css) | +60 / −0 | C02 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sms.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sms.js) | +296 / −0 | C01, C02 |
-| 新增 | [openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/traffic.js](../openwrt/luci-app-t551m/htdocs/luci-static/resources/view/mu300/traffic.js) | +165 / −0 | C01, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/lmo/mu300.en.lmo](../openwrt/luci-app-t551m/lmo/mu300.en.lmo) | 二进制 | C01, C05 |
-| 新增 | [openwrt/luci-app-t551m/lmo/mu300.tr.lmo](../openwrt/luci-app-t551m/lmo/mu300.tr.lmo) | 二进制 | C01, C05 |
-| 新增 | [openwrt/luci-app-t551m/po/en/mu300.po](../openwrt/luci-app-t551m/po/en/mu300.po) | +37 / −0 | C01, C05 |
-| 新增 | [openwrt/luci-app-t551m/po/tr/mu300.po](../openwrt/luci-app-t551m/po/tr/mu300.po) | +37 / −0 | C01, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/etc/config/unisoc_modem](../openwrt/luci-app-t551m/root/etc/config/unisoc_modem) | +22 / −0 | C01, C02, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/etc/hotplug.d/iface/90-unisoc-usb-host](../openwrt/luci-app-t551m/root/etc/hotplug.d/iface/90-unisoc-usb-host) | +5 / −0 | C01 |
-| 新增 | [openwrt/luci-app-t551m/root/etc/hotplug.d/net/90-unisoc-usb-host](../openwrt/luci-app-t551m/root/etc/hotplug.d/net/90-unisoc-usb-host) | +6 / −0 | C01 |
-| 新增 | [openwrt/luci-app-t551m/root/etc/init.d/e5-cpu](../openwrt/luci-app-t551m/root/etc/init.d/e5-cpu) | +11 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/root/etc/init.d/unisoc-modem-ui](../openwrt/luci-app-t551m/root/etc/init.d/unisoc-modem-ui) | +20 / −0 | C01, C02 |
-| 新增 | [openwrt/luci-app-t551m/root/etc/init.d/unisoc-traffic](../openwrt/luci-app-t551m/root/etc/init.d/unisoc-traffic) | +18 / −0 | C01 |
-| 新增 | [openwrt/luci-app-t551m/root/lib/upgrade/keep.d/e5-cpu](../openwrt/luci-app-t551m/root/lib/upgrade/keep.d/e5-cpu) | +3 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/root/lib/upgrade/keep.d/unisoc-traffic](../openwrt/luci-app-t551m/root/lib/upgrade/keep.d/unisoc-traffic) | +1 / −0 | C01 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/rpcd/e5-cpu](../openwrt/luci-app-t551m/root/usr/libexec/rpcd/e5-cpu) | +8 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/rpcd/mu300dash](../openwrt/luci-app-t551m/root/usr/libexec/rpcd/mu300dash) | +393 / −0 | C01, C02, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/action](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/action) | +101 / −0 | C01, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/at](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/at) | +70 / −0 | C01, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/boot-replay](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/boot-replay) | +61 / −0 | C01, C02, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/cell](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/cell) | +493 / −0 | C01, C03, C08 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/cpu-control](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/cpu-control) | +439 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/dashboard-info](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/dashboard-info) | +382 / −0 | C01, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/data-sim](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/data-sim) | +151 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/device-usb](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/device-usb) | +417 / −0 | C01, C03 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/hotspot](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/hotspot) | +7 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/hotspot.uc](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/hotspot.uc) | +23 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/lock](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/lock) | +3 / −0 | C01, C02 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/lock-control](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/lock-control) | +454 / −0 | C02, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/operator.uc](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/operator.uc) | +25 / −0 | C08 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-at](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-at) | +5 / −0 | C01 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-radio-restart](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-radio-restart) | +19 / −0 | C01, C03 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-registration](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-registration) | +26 / −0 | C01, C03 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-sms](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-sms) | +117 / −0 | C01, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic) | +165 / −0 | C01, C03, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic-core.uc](../openwrt/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic-core.uc) | +142 / −0 | C01, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/share/luci/menu.d/e5-cpu.json](../openwrt/luci-app-t551m/root/usr/share/luci/menu.d/e5-cpu.json) | +8 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/share/luci/menu.d/luci-app-mu300.json](../openwrt/luci-app-t551m/root/usr/share/luci/menu.d/luci-app-mu300.json) | +124 / −0 | C01, C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/share/rpcd/acl.d/e5-cpu.json](../openwrt/luci-app-t551m/root/usr/share/rpcd/acl.d/e5-cpu.json) | +7 / −0 | C05 |
-| 新增 | [openwrt/luci-app-t551m/root/usr/share/rpcd/acl.d/luci-app-mu300.json](../openwrt/luci-app-t551m/root/usr/share/rpcd/acl.d/luci-app-mu300.json) | +43 / −0 | C01, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/Makefile](../device/openwrt_device_common/luci-app-t551m/Makefile) | +91 / −0 | C01, C02, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/README.md](../device/openwrt_device_common/luci-app-t551m/README.md) | +56 / −0 | C01, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/mu300/common.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/mu300/common.js) | +1839 / −0 | C01, C02, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/mu300/data-sim.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/mu300/data-sim.js) | +85 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/at.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/at.js) | +137 / −0 | C01, C03 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/cpu.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/cpu.js) | +175 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/device.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/device.js) | +220 / −0 | C01, C03 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/forward.css](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/forward.css) | +68 / −0 | C01, C03 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/forward.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/forward.js) | +166 / −0 | C01, C03 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/home.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/home.js) | +618 / −0 | C01, C02, C03 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/locks.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/locks.js) | +429 / −0 | C01, C02, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/settings.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/settings.js) | +60 / −0 | C01, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sim.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sim.js) | +34 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sms.css](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sms.css) | +60 / −0 | C02 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sms.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/sms.js) | +296 / −0 | C01, C02 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/traffic.js](../device/openwrt_device_common/luci-app-t551m/htdocs/luci-static/resources/view/mu300/traffic.js) | +165 / −0 | C01, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/lmo/mu300.en.lmo](../device/openwrt_device_common/luci-app-t551m/lmo/mu300.en.lmo) | 二进制 | C01, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/lmo/mu300.tr.lmo](../device/openwrt_device_common/luci-app-t551m/lmo/mu300.tr.lmo) | 二进制 | C01, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/po/en/mu300.po](../device/openwrt_device_common/luci-app-t551m/po/en/mu300.po) | +37 / −0 | C01, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/po/tr/mu300.po](../device/openwrt_device_common/luci-app-t551m/po/tr/mu300.po) | +37 / −0 | C01, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/etc/config/unisoc_modem](../device/openwrt_device_common/luci-app-t551m/root/etc/config/unisoc_modem) | +22 / −0 | C01, C02, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/etc/hotplug.d/iface/90-unisoc-usb-host](../device/openwrt_device_common/luci-app-t551m/root/etc/hotplug.d/iface/90-unisoc-usb-host) | +5 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/etc/hotplug.d/net/90-unisoc-usb-host](../device/openwrt_device_common/luci-app-t551m/root/etc/hotplug.d/net/90-unisoc-usb-host) | +6 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/etc/init.d/e5-cpu](../device/openwrt_device_common/luci-app-t551m/root/etc/init.d/e5-cpu) | +11 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/etc/init.d/unisoc-modem-ui](../device/openwrt_device_common/luci-app-t551m/root/etc/init.d/unisoc-modem-ui) | +20 / −0 | C01, C02 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/etc/init.d/unisoc-traffic](../device/openwrt_device_common/luci-app-t551m/root/etc/init.d/unisoc-traffic) | +18 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/lib/upgrade/keep.d/e5-cpu](../device/openwrt_device_common/luci-app-t551m/root/lib/upgrade/keep.d/e5-cpu) | +3 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/lib/upgrade/keep.d/unisoc-traffic](../device/openwrt_device_common/luci-app-t551m/root/lib/upgrade/keep.d/unisoc-traffic) | +1 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/rpcd/e5-cpu](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/rpcd/e5-cpu) | +8 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/rpcd/mu300dash](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/rpcd/mu300dash) | +393 / −0 | C01, C02, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/action](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/action) | +101 / −0 | C01, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/at](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/at) | +70 / −0 | C01, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/boot-replay](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/boot-replay) | +61 / −0 | C01, C02, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/cell](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/cell) | +493 / −0 | C01, C03, C08 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/cpu-control](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/cpu-control) | +439 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/dashboard-info](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/dashboard-info) | +382 / −0 | C01, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/data-sim](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/data-sim) | +151 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/device-usb](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/device-usb) | +417 / −0 | C01, C03 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/hotspot](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/hotspot) | +7 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/hotspot.uc](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/hotspot.uc) | +23 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/lock](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/lock) | +3 / −0 | C01, C02 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/lock-control](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/lock-control) | +454 / −0 | C02, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/operator.uc](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/operator.uc) | +25 / −0 | C08 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-at](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-at) | +5 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-radio-restart](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-radio-restart) | +19 / −0 | C01, C03 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-registration](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-registration) | +26 / −0 | C01, C03 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-sms](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/t551m-sms) | +117 / −0 | C01, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic) | +165 / −0 | C01, C03, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic-core.uc](../device/openwrt_device_common/luci-app-t551m/root/usr/libexec/unisoc-modem/traffic-core.uc) | +142 / −0 | C01, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/share/luci/menu.d/e5-cpu.json](../device/openwrt_device_common/luci-app-t551m/root/usr/share/luci/menu.d/e5-cpu.json) | +8 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/share/luci/menu.d/luci-app-mu300.json](../device/openwrt_device_common/luci-app-t551m/root/usr/share/luci/menu.d/luci-app-mu300.json) | +124 / −0 | C01, C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/share/rpcd/acl.d/e5-cpu.json](../device/openwrt_device_common/luci-app-t551m/root/usr/share/rpcd/acl.d/e5-cpu.json) | +7 / −0 | C05 |
+| 新增 | [device/openwrt_device_common/luci-app-t551m/root/usr/share/rpcd/acl.d/luci-app-mu300.json](../device/openwrt_device_common/luci-app-t551m/root/usr/share/rpcd/acl.d/luci-app-mu300.json) | +43 / −0 | C01, C05 |
 
 #### OpenWrt：系统服务与配置（17 个文件）
 
 | 动作 | 文件 | 新增/删除行 | 涉及提交 |
 | --- | --- | ---: | --- |
-| 修改 | [openwrt/overlay/etc/config/e5-audio](../openwrt/overlay/etc/config/e5-audio) | +1 / −0 | C03 |
-| 新增 | [openwrt/overlay/etc/init.d/e5-hfp](../openwrt/overlay/etc/init.d/e5-hfp) | +13 / −0 | C03 |
-| 修改 | [openwrt/overlay/etc/init.d/e5-pulseaudio](../openwrt/overlay/etc/init.d/e5-pulseaudio) | +15 / −0 | C01 |
-| 新增 | [openwrt/overlay/etc/sysctl.d/10-e5-printk.conf](../openwrt/overlay/etc/sysctl.d/10-e5-printk.conf) | +6 / −0 | C03 |
-| 新增 | [openwrt/overlay/usr/lib/e5/e5_call_volume.py](../openwrt/overlay/usr/lib/e5/e5_call_volume.py) | +74 / −0 | C03 |
-| 修改 | [openwrt/overlay/usr/lib/e5/sms_pdu.py](../openwrt/overlay/usr/lib/e5/sms_pdu.py) | +2 / −2 | C03 |
-| 新增 | [openwrt/overlay/usr/lib/e5/vendor/README](../openwrt/overlay/usr/lib/e5/vendor/README) | +8 / −0 | C03 |
-| 新增 | [openwrt/overlay/usr/lib/e5/vendor/dbus-next.LICENSE](../openwrt/overlay/usr/lib/e5/vendor/dbus-next.LICENSE) | +19 / −0 | C03 |
-| 新增 | [openwrt/overlay/usr/lib/e5/vendor/dbus_next-0.2.3-py3-none-any.whl](../openwrt/overlay/usr/lib/e5/vendor/dbus_next-0.2.3-py3-none-any.whl) | 二进制 | C03 |
-| 新增 | [openwrt/overlay/usr/libexec/e5-call-volume](../openwrt/overlay/usr/libexec/e5-call-volume) | +34 / −0 | C03 |
-| 新增 | [openwrt/overlay/usr/libexec/e5-container-setup](../openwrt/overlay/usr/libexec/e5-container-setup) | +89 / −0 | C03 |
-| 新增 | [openwrt/overlay/usr/libexec/e5-dockerd](../openwrt/overlay/usr/libexec/e5-dockerd) | +27 / −0 | C03 |
-| 新增 | [openwrt/overlay/usr/libexec/e5-hfp](../openwrt/overlay/usr/libexec/e5-hfp) | +463 / −0 | C03 |
-| 修改 | [openwrt/overlay/usr/libexec/e5-sms](../openwrt/overlay/usr/libexec/e5-sms) | +8 / −2 | C05 |
-| 修改 | [openwrt/overlay/usr/libexec/e5-sms-receive](../openwrt/overlay/usr/libexec/e5-sms-receive) | +54 / −2 | C03 |
-| 修改 | [openwrt/overlay/usr/libexec/e5-voice-audio](../openwrt/overlay/usr/libexec/e5-voice-audio) | +437 / −12 | C02, C03 |
-| 修改 | [openwrt/overlay/usr/libexec/e5-volume](../openwrt/overlay/usr/libexec/e5-volume) | +31 / −11 | C01, C03 |
+| 修改 | [device/openwrt_device_common/overlay/etc/config/e5-audio](../device/openwrt_device_common/overlay/etc/config/e5-audio) | +1 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/overlay/etc/init.d/e5-hfp](../device/openwrt_device_common/overlay/etc/init.d/e5-hfp) | +13 / −0 | C03 |
+| 修改 | [device/openwrt_device_common/overlay/etc/init.d/e5-pulseaudio](../device/openwrt_device_common/overlay/etc/init.d/e5-pulseaudio) | +15 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/overlay/etc/sysctl.d/10-e5-printk.conf](../device/openwrt_device_common/overlay/etc/sysctl.d/10-e5-printk.conf) | +6 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/overlay/usr/lib/e5/e5_call_volume.py](../device/openwrt_device_common/overlay/usr/lib/e5/e5_call_volume.py) | +74 / −0 | C03 |
+| 修改 | [device/openwrt_device_common/overlay/usr/lib/e5/sms_pdu.py](../device/openwrt_device_common/overlay/usr/lib/e5/sms_pdu.py) | +2 / −2 | C03 |
+| 新增 | [device/openwrt_device_common/overlay/usr/lib/e5/vendor/README](../device/openwrt_device_common/overlay/usr/lib/e5/vendor/README) | +8 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/overlay/usr/lib/e5/vendor/dbus-next.LICENSE](../device/openwrt_device_common/overlay/usr/lib/e5/vendor/dbus-next.LICENSE) | +19 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/overlay/usr/lib/e5/vendor/dbus_next-0.2.3-py3-none-any.whl](../device/openwrt_device_common/overlay/usr/lib/e5/vendor/dbus_next-0.2.3-py3-none-any.whl) | 二进制 | C03 |
+| 新增 | [device/openwrt_device_common/overlay/usr/libexec/e5-call-volume](../device/openwrt_device_common/overlay/usr/libexec/e5-call-volume) | +34 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/overlay/usr/libexec/e5-container-setup](../device/openwrt_device_common/overlay/usr/libexec/e5-container-setup) | +89 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/overlay/usr/libexec/e5-dockerd](../device/openwrt_device_common/overlay/usr/libexec/e5-dockerd) | +27 / −0 | C03 |
+| 新增 | [device/openwrt_device_common/overlay/usr/libexec/e5-hfp](../device/openwrt_device_common/overlay/usr/libexec/e5-hfp) | +463 / −0 | C03 |
+| 修改 | [device/openwrt_device_common/overlay/usr/libexec/e5-sms](../device/openwrt_device_common/overlay/usr/libexec/e5-sms) | +8 / −2 | C05 |
+| 修改 | [device/openwrt_device_common/overlay/usr/libexec/e5-sms-receive](../device/openwrt_device_common/overlay/usr/libexec/e5-sms-receive) | +54 / −2 | C03 |
+| 修改 | [device/openwrt_device_common/overlay/usr/libexec/e5-voice-audio](../device/openwrt_device_common/overlay/usr/libexec/e5-voice-audio) | +437 / −12 | C02, C03 |
+| 修改 | [device/openwrt_device_common/overlay/usr/libexec/e5-volume](../device/openwrt_device_common/overlay/usr/libexec/e5-volume) | +31 / −11 | C01, C03 |
 
 #### OpenWrt：回归测试（5 个文件）
 
 | 动作 | 文件 | 新增/删除行 | 涉及提交 |
 | --- | --- | ---: | --- |
-| 新增 | [openwrt/tests/call-volume.py](../openwrt/tests/call-volume.py) | +74 / −0 | C03 |
-| 修改 | [openwrt/tests/dual-sms.py](../openwrt/tests/dual-sms.py) | +44 / −1 | C03 |
-| 新增 | [openwrt/tests/hfp.py](../openwrt/tests/hfp.py) | +266 / −0 | C03 |
-| 修改 | [openwrt/tests/voice-audio.py](../openwrt/tests/voice-audio.py) | +124 / −1 | C02, C03 |
-| 新增 | [openwrt/tests/volume.py](../openwrt/tests/volume.py) | +48 / −0 | C01 |
+| 新增 | [device/openwrt_device_common/tests/call-volume.py](../device/openwrt_device_common/tests/call-volume.py) | +74 / −0 | C03 |
+| 修改 | [device/openwrt_device_common/tests/dual-sms.py](../device/openwrt_device_common/tests/dual-sms.py) | +44 / −1 | C03 |
+| 新增 | [device/openwrt_device_common/tests/hfp.py](../device/openwrt_device_common/tests/hfp.py) | +266 / −0 | C03 |
+| 修改 | [device/openwrt_device_common/tests/voice-audio.py](../device/openwrt_device_common/tests/voice-audio.py) | +124 / −1 | C02, C03 |
+| 新增 | [device/openwrt_device_common/tests/volume.py](../device/openwrt_device_common/tests/volume.py) | +48 / −0 | C01 |
 
 #### 通用 rootfs 与厂商适配（10 个文件）
 
 | 动作 | 文件 | 新增/删除行 | 涉及提交 |
 | --- | --- | ---: | --- |
-| 修改 | [rootfs/overlay/opt/e5/android-run](../rootfs/overlay/opt/e5/android-run) | +7 / −1 | C01 |
-| 修改 | [rootfs/overlay/opt/e5/e5-at](../rootfs/overlay/opt/e5/e5-at) | +13 / −0 | C01 |
-| 修改 | [rootfs/overlay/opt/e5/e5-call-audio.py](../rootfs/overlay/opt/e5/e5-call-audio.py) | +312 / −38 | C03 |
-| 修改 | [rootfs/overlay/opt/e5/e5-modem-coldboot](../rootfs/overlay/opt/e5/e5-modem-coldboot) | +20 / −5 | C01 |
-| 修改 | [rootfs/overlay/opt/e5/vendor-start.sh](../rootfs/overlay/opt/e5/vendor-start.sh) | +8 / −2 | C01 |
+| 修改 | [device/linux_device_common/overlay/opt/e5/android-run](../device/linux_device_common/overlay/opt/e5/android-run) | +7 / −1 | C01 |
+| 修改 | [device/linux_device_common/overlay/opt/e5/e5-at](../device/linux_device_common/overlay/opt/e5/e5-at) | +13 / −0 | C01 |
+| 修改 | [device/linux_device_common/overlay/opt/e5/e5-call-audio.py](../device/linux_device_common/overlay/opt/e5/e5-call-audio.py) | +312 / −38 | C03 |
+| 修改 | [device/linux_device_common/overlay/opt/e5/e5-modem-coldboot](../device/linux_device_common/overlay/opt/e5/e5-modem-coldboot) | +20 / −5 | C01 |
+| 修改 | [device/linux_device_common/overlay/opt/e5/vendor-start.sh](../device/linux_device_common/overlay/opt/e5/vendor-start.sh) | +8 / −2 | C01 |
 | 修改 | [rootfs/pull-audio-firmware.sh](../rootfs/pull-audio-firmware.sh) | +2 / −1 | C03 |
 | 修改 | [rootfs/tests/modem-coldboot.py](../rootfs/tests/modem-coldboot.py) | +23 / −8 | C01 |
 | 新增 | [rootfs/tests/voice-controls.py](../rootfs/tests/voice-controls.py) | +76 / −0 | C03 |

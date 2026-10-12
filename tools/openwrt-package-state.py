@@ -15,9 +15,9 @@ def checksum(path):
 
 
 def sources(version):
-    files = [TOP / 'openwrt/build-modemmanager.sh', TOP / 'openwrt/tests/voice-identity.py',
-             TOP / 'openwrt/tests/sim-power.py', TOP / 'openwrt/tests/voice-urc.py',
-             TOP / 'openwrt/tests/voice-recovery.py', TOP / 'openwrt/tests/data-priority-hook.py',
+    files = [TOP / 'openwrt/build-modemmanager.sh', TOP / 'device/openwrt_device_common/tests/voice-identity.py',
+             TOP / 'device/openwrt_device_common/tests/sim-power.py', TOP / 'device/openwrt_device_common/tests/voice-urc.py',
+             TOP / 'device/openwrt_device_common/tests/voice-recovery.py', TOP / 'device/openwrt_device_common/tests/data-priority-hook.py',
              Path(__file__).resolve()]
     files += sorted((TOP / 'rootfs/deb-patches').glob('modemmanager-[0-9][0-9]-*.patch'))
     files += sorted((TOP / 'openwrt/patches').glob('modemmanager-package-*.patch'))

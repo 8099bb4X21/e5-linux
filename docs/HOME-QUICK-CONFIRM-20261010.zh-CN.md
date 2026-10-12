@@ -14,7 +14,7 @@
 验证：
 
 - 两份 JavaScript 语法检查通过。
-- `node openwrt/tests/luci-home-confirm.cjs` 覆盖六个按钮、切换的两个方向、取消、重复点击、请求期间防重、页面卸载/移除及禁用按钮。
+- `node device/openwrt_device_common/tests/luci-home-confirm.cjs` 覆盖六个按钮、切换的两个方向、取消、重复点击、请求期间防重、页面卸载/移除及禁用按钮。
 - 已部署到身份核对通过的 E5；HTTP 返回的两份资源与源码 SHA-256 一致，并同步 E5 离线根目录。
 - 实机浏览器逐一打开六个确认框并按 Escape 取消，没有控制 RPC，也没有 JavaScript 异常。
 - 随后已部署到 T551M：核对设备 profile 为 `t551m`、eMMC CID 为 `f4012241524a3131581450cc084bca00` 后更新两份网页资源，HTTP 返回内容的 SHA-256 与源码一致。

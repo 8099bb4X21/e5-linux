@@ -244,7 +244,7 @@ CONFIG_LEGACY_PTYS=y
 # Nothing in module-order.stock asks for mali_kbase, so the initramfs leaves it
 # alone, which is the point -- and it also means `modprobe mali_kbase` (or
 # putting this back to =y) returns the device to the vendor blob path
-# (rootfs/overlay/opt/e5/gpu-mali-setup) without a rebuild.
+# (device/linux_device_common/overlay/opt/e5/gpu-mali-setup) without a rebuild.
 #
 # See docs/FINDINGS.md section 20.7: panfrost_sprd.c replays the power and
 # clock sequencing that kbase's platform code used to do, and this is what

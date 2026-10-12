@@ -26,7 +26,7 @@ CME ERROR，以及 CLCC/CPIN 等查询正文；未知响应不被笼统忽略。
 未修改通话控制、SIM 网络模式、NV、音频路由、轮询间隔或屏幕布局。
 
 OpenWrt 构建修订号 E5REV 升至 11，源码校验清单和构建流程加入 URC 回归测试。
-新增 `openwrt/tests/voice-urc.py` 使用实际插件正则与 GLib，覆盖捕获到的失败
+新增 `device/openwrt_device_common/tests/voice-urc.py` 使用实际插件正则与 GLib，覆盖捕获到的失败
 响应、混合 CDU、忙线/挂断/错误、查询正文、分段和未知通知共 9 个样本。
 原双卡通话身份匹配、拨号中快照保护及 SIM 上电计划测试也通过。
 

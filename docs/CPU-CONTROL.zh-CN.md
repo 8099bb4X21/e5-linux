@@ -47,7 +47,7 @@
 每次启动只允许初始化一次，没有运行中重置 DVFS、卸载或重新绑定的入口。
 底层 ABI 只对已核验的 SoC 和 SML 固件开放；更换未知固件会拒绝应用自定义电压。
 M8 的三簇为 CPU 0–3、4–6、7，使用独立核验的 UMS9620 SML，详情见
-[M8 CPU 电压与温控](../devices/m8/cpu-controls.md)。PMIC 电源轨映射未核验时
+[M8 CPU 电压与温控](../device/linux_device_m8/cpu-controls.md)。PMIC 电源轨映射未核验时
 不显示瞬时供电读数，固件频率/电压表仍可查看。
 
 ## 温控
@@ -75,9 +75,9 @@ M8 的三簇为 CPU 0–3、4–6、7，使用独立核验的 UMS9620 SML，详�
 ## 验证命令
 
 ```sh
-python3 devices/t551m/test_cpu_control.py
-ucode devices/t551m/test_screen_cpu.uc <已生成的 settings.uc>
-python devices/t551m/test_cpu_browser.py --fixtures work/t551m/screen-fixtures.json --webroot work/t551m/cpu-screen/www
+python3 device/openwrt_device_common/tests/test_cpu_control.py
+ucode ci/infoscreen/tests/device/test_screen_cpu.uc <已生成的 settings.uc>
+python device/openwrt_device_common/tests/test_cpu_browser.py --fixtures work/t551m/screen-fixtures.json --webroot work/t551m/cpu-screen/www
 ```
 
 后端测试覆盖不支持的频率、非法调速器、路径输入、上下限交叉、温控保护、
@@ -137,7 +137,7 @@ E5 内核 `6.18.54-e5-mobile1-g020b970e351e-dirty` 已包含同一调压驱动�
 此前只因双槽 SML 的 SHA-256 未在已验证清单中，网页与屏幕显示不支持。
 对照本机固件的 DVFS 初始化、参数解码及 CPU/SRAM 表更新路径后，确认使用
 同一原生 ABI，新增精确固件校验，无需替换安全固件或重刷内核。
-具体固件指纹和函数地址见 [驱动说明](../devices/t551m/cpufreq/README.md)。
+具体固件指纹和函数地址见 [驱动说明](../device/linux_device_common/kernel/cpufreq/README.md)。
 
 真实重启应用三个域各 −3.125 mV：全部 31 个固件频率档位同步减少 3125 µV。
 在原厂最高频率连续采样五次，PMIC 结果一致：

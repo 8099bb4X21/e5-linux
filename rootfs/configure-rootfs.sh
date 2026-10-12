@@ -2,7 +2,12 @@
 # Stage 3: turn the installed Debian tree into an e5-linux system.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
+TOP="$(cd "$HERE/.." && pwd)"
 ROOT="${E5_ROOT:-$HERE/../work/rootfs-build/rootfs}"
+OVERLAY_ARGS=()
+PRIVATE_OVERLAY="$TOP/work/device-files/e5/overlay"
+[ ! -d "$PRIVATE_OVERLAY" ] || OVERLAY_ARGS+=(--private-overlay "$PRIVATE_OVERLAY")
+OVERLAY=$(python3 "$TOP/tools/device-layout.py" overlay --system debian --model e5 "${OVERLAY_ARGS[@]}")
 
 echo "=== overlay ==="
 # The base image is usrmerge: /lib is a symlink to usr/lib, and cp refuses to
@@ -10,7 +15,7 @@ echo "=== overlay ==="
 # it).  Merge those entries under /usr instead -- on the running system that is
 # the same path.  Device-built trees whose tar pass materialised the symlinks
 # take the plain branch.
-for entry in "$HERE/overlay"/*; do
+for entry in "$OVERLAY"/*; do
     [ -e "$entry" ] || continue
     name=$(basename "$entry")
     if [ -L "$ROOT/$name" ] && [ -d "$entry" ]; then

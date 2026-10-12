@@ -167,7 +167,7 @@ def main():
         'bin/sh': (b'busybox', stat.S_IFLNK | 0o777),
         'etc/misc-bc-slot-a.bin': (slot_a_bc, stat.S_IFREG | 0o644),
         'etc/misc-bc-slot-b-trial.bin': (slot_b_bc, stat.S_IFREG | 0o644),
-        'etc/sd-registry.sh': ((HERE.parent / 'rootfs/overlay/opt/e5/e5-sd-registry').read_bytes(), stat.S_IFREG | 0o644),
+        'etc/sd-registry.sh': ((HERE.parent / 'device/linux_device_common/overlay/opt/e5/e5-sd-registry').read_bytes(), stat.S_IFREG | 0o644),
         'etc/f2fs-repair.sh': ((HERE / 'f2fs-repair.sh').read_bytes(), stat.S_IFREG | 0o644),
     }
     dirs = {'bin', 'sbin', 'etc', 'proc', 'sys', 'dev', 'run', 'tmp', 'root', 'config', 'linux-modules'}

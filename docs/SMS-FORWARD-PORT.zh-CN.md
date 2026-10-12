@@ -47,10 +47,10 @@
 ## 验证与部署
 
 ```sh
-python3 devices/t551m/test_forward_native.py
-python devices/t551m/test_forward_browser.py
+python3 device/openwrt_device_common/tests/test_forward_native.py
+python device/openwrt_device_common/tests/test_forward_browser.py
 # 在具有 jshn、ucode、openssl 的 OpenWrt 上，使用复制到临时目录的三个后端文件：
-python3 devices/t551m/test_forward_transport.py --tools /tmp/forward-test-tools
+python3 device/openwrt_device_common/tests/test_forward_transport.py --tools /tmp/forward-test-tools
 ```
 
 测试覆盖迁移幂等性、两个来源卡、去重、迟到分段、历史基线、黑名单、模板转义、

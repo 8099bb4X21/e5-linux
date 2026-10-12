@@ -25,7 +25,7 @@
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # (E5_OVERLAY: somewhere else, e.g. the flash package collecting one device's files)
-OVL="${E5_OVERLAY:-$HERE/overlay}"
+OVL="${E5_OVERLAY:-$HERE/../work/device-files/e5/overlay}"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 

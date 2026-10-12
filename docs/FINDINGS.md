@@ -489,7 +489,7 @@ Debian root filesystem is mounted.
 
 `rootfs/pull-wcn-firmware.sh` does the copy: it stages `/odm/firmware`'s WCN set,
 `/vendor/firmware/tsx_data` and the `/mnt/vendor` factory files into
-`rootfs/overlay/lib/firmware/` and `rootfs/overlay/mnt/vendor/` (which
+`device/linux_device_common/overlay/lib/firmware/` and `device/debian_device_common/overlay/mnt/vendor/` (which
 `device-finalize.sh` then applies like any other overlay file), skipping paths that
 do not exist. They are vendor blobs and stay out of the repository. On this unit
 `tsx_data` is skipped: `/vendor/firmware/tsx_data` is a symlink to
@@ -627,7 +627,7 @@ to come up in some sessions and GNSS never did.  The fix is the one
 initramfs's *early* overlay, not just in the root filesystem, so that
 `/lib/firmware` exists before the module pass (`boot/init` materialises
 `e5-overlay/lib/` first).  With `wcnmodem.bin`, `gnssmodem.bin` and
-`wifi_board_config*.ini` in `rootfs/overlay/lib/firmware/`:
+`wifi_board_config*.ini` in `device/linux_device_common/overlay/lib/firmware/`:
 
     [1.766] E5-LINUX: stage=overlay-early files=45 firmware=6
     [13.907] gnss_download_firmware successfully through request_firmware!
@@ -775,7 +775,7 @@ a rejection.  With it, `hciconfig hci0 up` succeeds, bluez reports
 `Controller 27:93:31:14:22:11` with `Powered: yes`, and an inquiry lists nearby
 devices.
 
-`rootfs/overlay/etc/systemd/system/e5-bt-attach.service` keeps it that way.  It
+`device/debian_device_common/overlay/etc/systemd/system/e5-bt-attach.service` keeps it that way.  It
 has to be btattach rather than nothing at all because *opening* `/dev/ttyBT0` is
 what powers MARLIN_BLUETOOTH on (`mtty_open` -> `start_marlin`), and the tty has
 to stay open for the controller to exist.  The unit is deliberately not ordered
@@ -946,9 +946,9 @@ the host, point the device at it with `Acquire::http::Proxy` in
 correct.
 
 zram itself was 768 MB of lzo-rle and 94 % full.  It is now 4 GiB of zstd
-(`E5_ZRAM_SIZE` / `E5_ZRAM_COMP` in `rootfs/overlay/usr/local/sbin/e5-zram`), with
+(`E5_ZRAM_SIZE` / `E5_ZRAM_COMP` in `device/debian_device_common/overlay/usr/local/sbin/e5-zram`), with
 `vm.swappiness=100` and `vm.page-cluster=0`
-(`rootfs/overlay/etc/sysctl.d/10-e5-zram.conf`): swapping earlier costs less than
+(`device/debian_device_common/overlay/etc/sysctl.d/10-e5-zram.conf`): swapping earlier costs less than
 letting the anonymous set grow until the session has to reclaim synchronously, and one
 page at a time is the cheap case for a random-access device.  4 GiB is an overcommit on
 a 1.45 GiB machine and that is fine -- only the *compressed* pages occupy RAM, so what
@@ -1044,7 +1044,7 @@ latency at all:
 
 The keypad table also exposes the physical # key at matrix scancode 0x04. The image now declares `KEYBOARD_KEY_4=numericpound` explicitly so the dialer receives a stable numeric-pound key instead of relying on the raw numeric code.
 
-    # rootfs/overlay/etc/udev/hwdb.d/61-e5-keypad.hwdb
+    # device/debian_device_e5/overlay/etc/udev/hwdb.d/61-e5-keypad.hwdb
     evdev:input:b0000v0000p0000e0000*
      KEYBOARD_KEY_8=kpenter
 
@@ -1157,7 +1157,7 @@ AT channel is supposed to do.
 
 ### The data path: AT on /dev/stty_nr1, data on sipa_eth0
 
-`rootfs/overlay/opt/e5/mobile-data` implements up/down/status/watch/sim-reset with
+`device/linux_device_common/overlay/opt/e5/mobile-data` implements up/down/status/watch/sim-reset with
 nothing but shell and the AT channel:
 
     AT+SFUN=2                        SIM on
@@ -1314,7 +1314,7 @@ Installing it is where the mirror came in.  The device reaches the internet only
 its own bearer now, and the official `deb.debian.org` index is ~15 MB: apt worked but
 crawled, and any **https** fetch hangs (`openssl s_client` to :443 times out at every
 MTU from 1500 down to 1200, while :80 is fine), so the sources are the Nanjing
-University mirror over **http** (`rootfs/overlay/etc/apt/sources.list.d/debian.sources`)
+University mirror over **http** (`device/debian_device_common/overlay/etc/apt/sources.list.d/debian.sources`)
 -- 8 MB/s, which is what made the Phosh install take a minute instead of an hour.
 
 Verification without a second machine: a network namespace with a veth pair
@@ -1459,7 +1459,7 @@ the compositor:
   handler, is what made a held key do nothing).
 
 So the key is now logind's, via
-`rootfs/overlay/etc/systemd/logind.conf.d/20-e5-pwrkey.conf`:
+`device/debian_device_common/overlay/etc/systemd/logind.conf.d/20-e5-pwrkey.conf`:
 
 | press | action | who |
 |---|---|---|
@@ -1776,7 +1776,7 @@ Then phoc, with the dynamic loader pointed at the blob **for the compositor only
 **`/dev/dma_heap/*` is created 0600 root:root.**  The session user cannot open it,
 ARM's GBM allocates its buffers from a dma-buf heap, `gbm_create_device()` returns
 NULL, and wlroots quietly falls back to the CPU renderer instead of failing.  One
-udev rule later (`rootfs/overlay/etc/udev/rules.d/60-e5-dma-heap.rules`,
+udev rule later (`device/debian_device_common/overlay/etc/udev/rules.d/60-e5-dma-heap.rules`,
 `SUBSYSTEM=="dma_heap", MODE="0666"`) the same boot reports:
 
     [render/egl.c:354] Using EGL 1.4
@@ -1797,7 +1797,7 @@ Two details keep the rest of the session working:
 * `WLR_RENDERER=pixman` from `/etc/environment` is unset for phoc by the same
   wrapper, so wlroots gets to choose its GLES2 renderer.
 
-All of it is installed by `rootfs/overlay/opt/e5/gpu-mali-setup`: the
+All of it is installed by `device/linux_device_common/overlay/opt/e5/gpu-mali-setup`: the
 `/opt/mali/gbm/*` symlinks, the `/usr/bin/phoc` wrapper (the real binary stays as
 `/usr/bin/phoc.orig`), and the chmod that makes the current boot work before udev's
 rule is in place.
@@ -1909,7 +1909,7 @@ llvmpipe.  The display is being scanned out from a compositor buffer as well:
   `WLR_DRM_DEVICES` list written from those notes would name the wrong device.
 
 **What the blob path leaves behind.**  It is retired, not because it broke but
-because panfrost makes it pointless: `rootfs/overlay/opt/e5/gpu-mali-setup` is
+because panfrost makes it pointless: `device/linux_device_common/overlay/opt/e5/gpu-mali-setup` is
 gone, the session no longer installs a `/usr/bin/phoc` wrapper (an overlay copy
 of it would have to carry a copy of the binary), and the dma-heap udev rule is
 kept only because opening those heaps is not specific to Mali.
@@ -2004,7 +2004,7 @@ rootfs has no `/lib/modules` at all (the vendor modules live only in the initram
 request.
 
 The fix is in the image: `regulatory.db` and `regulatory.db.p7s` (from `wireless-regdb`,
-6 KiB together) now sit in `rootfs/overlay/lib/firmware/`, and `boot/init` copies the
+6 KiB together) now sit in `device/linux_device_common/overlay/lib/firmware/`, and `boot/init` copies the
 overlay's `lib/` to `/lib` *before* loading the WCN modules (`stage=overlay-early`), so
 cfg80211 finds them the moment it asks.  **The hotspot therefore needs a reflash** of the
 rebuilt image; the device currently runs the previous one.
@@ -2199,7 +2199,7 @@ AT's silence, not on the CP assert appearing in dmesg.
 
 ### The fix: a persistent, RIL-shaped AT channel
 
-`rootfs/overlay/opt/e5/atd.py` (`e5-atd.service`) is a small daemon that opens
+`device/linux_device_common/overlay/opt/e5/atd.py` (`e5-atd.service`) is a small daemon that opens
 `nr0` and `nr1` **once** and keeps them open for the whole boot:
 
 * it drains `nr0` continuously into `/var/log/e5-atd.urc` (rotated at 256 KiB)
@@ -2232,7 +2232,7 @@ the RIL does.)
 There is no userspace modem reset on this board: `/sys/class/misc` has no modem
 node and restarting `e5-vendor.service` sends `cmd 0x43c84e06`, which only
 re-triggers the same assert 19 s later.  So the honest recovery for a silent AT
-channel is a reboot, done by `rootfs/overlay/opt/e5/cp-watchdog`
+channel is a reboot, done by `device/linux_device_common/overlay/opt/e5/cp-watchdog`
 (`e5-cp-watchdog.service`, `/etc/e5/cp-watchdog.conf`):
 
 * dead = the daemon's `last_ok` is older than `DEAD_AFTER` (default 120 s);
@@ -2251,7 +2251,7 @@ channel is a reboot, done by `rootfs/overlay/opt/e5/cp-watchdog`
 
 ## 23. The two open documentation debts, paid
 
-* **Identity strings.**  `rootfs/overlay/etc/machine-info` sets `PRETTY_HOSTNAME=
+* **Identity strings.**  `device/debian_device_e5/overlay/etc/machine-info` sets `PRETTY_HOSTNAME=
   Rongyue E5` (the static hostname cannot contain a space, so the login prompt
   keeps `e5-linux`).  `HARDWARE_VENDOR`/`HARDWARE_MODEL` are deliberately unset --
   they fill the "Hardware Model" row, while the part name belongs in "Processor",
@@ -2842,7 +2842,7 @@ at least a session.
   an older copy (files the image does not carry at all survive).  That is how the
   hotspot came back on 2.4 GHz channel 6, how the device's `sddm.conf.d` kept naming
   `plasma-mobile.desktop`, and how a power-key drop-in "disappeared".  Edit
-  `rootfs/overlay/`, rebuild with `boot/build-boot-image.py --overlay rootfs/overlay`,
+  `device/debian_device_common/overlay/`, rebuild with `boot/build-boot-image.py --overlay device/debian_device_common/overlay`,
   flash.  (`/var/lib/*` is the exception since 2026-09-25: it is state, so the overlay
   only seeds it when the file is missing -- UFI-TOOLS' token lives there.)  The copy is `find -type f`: symlinks in the overlay are dropped, so a
   `/dev/null` mask has to be a regular shadow unit instead.
@@ -3208,7 +3208,7 @@ reads 0x000f: the AO buffer DC calibration never completed.  The boot log said w
 udev autoloads the codec by modalias; the codec power regulators (`SRG_*`, instantiated
 by `-power-dev`, which has no modalias of its own) come 2.5 s later.  The calibration
 enables `DAHPL_CHN` around its poll, and a dummy enables nothing.  Fix, in the native
-place: `rootfs/overlay/etc/modprobe.d/e5-audio.conf`, a `softdep ... pre:` on the codec
+place: `device/debian_device_common/overlay/etc/modprobe.d/e5-audio.conf`, a `softdep ... pre:` on the codec
 for both power modules.  After it the codec holds `SRG_DAHPL_CHN`, the calibration
 passes and `ANA_CDC7` reads 0x000f while playing.
 
@@ -3892,7 +3892,7 @@ Debian root (bound in, section 39), and so did the info screen's CJK font.
 The standalone form is a root image of its own on userdata,
 `e5linux/openwrt.ext4` (1 GiB ext4, about 330 MB used), built by
 `E5_STANDALONE=1 openwrt/build-rootfs.sh` with those files inside:
-`/lib/firmware` from `rootfs/overlay/lib/firmware`, `/opt/e5/android` (chowned
+`/lib/firmware` from `device/linux_device_common/overlay/lib/firmware`, `/opt/e5/android` (chowned
 to root: bionic, section 13), `/lib/modules/<release>/modem` from `out_linux`
 (the vermagic has to be the boot image's kernel's), Noto Sans CJK in
 `/usr/share/fonts/e5-noto` (where the directory form binds it).  `mke2fs -d`
@@ -3983,7 +3983,7 @@ at 12.7 s), and the hotspot came up.
 * **No alsaucm** in OpenWrt's alsa-utils: the route is the same UCM file's
   `cset` lines (the verb, Speaker, Mic), applied with amixer -- 48 controls.
 * **No Python**, so the DSP profile selects (above amixer's clamp) are written
-  by `openwrt/src/e5-ctl-raw.c`, the same ioctl as the Python tool.
+  by `device/openwrt_device_common/src/e5-ctl-raw.c`, the same ioctl as the Python tool.
 * **"The DSP is already running" was a powered domain**: the route's
   `agdsp_access_en` keeps the AGDSP domain up with no firmware in it, so a
   second `start` skipped the image and every open failed ("channel 0 not
@@ -4176,7 +4176,7 @@ it (the SIM holds no MSISDN), so ModemManager shows none.  Its ICCID has an `F` 
 ### 47.6 CP resets in seconds: `e5-modemd`
 
 `modem_control` waits for the CP log daemon's `SLOGMODEM DUMP COMPLETE` before it resets
-an asserted CP -- 300 s without one (section 30).  `openwrt/src/e5-modemd.c` is that
+an asserted CP -- 300 s without one (section 30).  `device/openwrt_device_common/src/e5-modemd.c` is that
 client on the abstract socket `@modemd`: it answers every `Modem Assert` (and `Modem
 State: Assert` for a client that connects during one) and `Modem Blocked`, which
 `modem_control` resets after the same dump ("block, later reset").  Reset to `Modem
@@ -4493,7 +4493,7 @@ The parser now strips the exact ModemManager SMS path prefix and validates the
 remaining decimal ID. The command-line and RPC lists both read the real test
 message, with its text and sender matching ModemManager. The RPC wrapper keeps
 stderr in failures instead of returning only "e5-sms failed"; the frontend no
-longer labels every failure as a missing SIM. `openwrt/tests/sms-list.sh` uses a
+longer labels every failure as a missing SIM. `device/openwrt_device_common/tests/sms-list.sh` uses a
 private fake mmcli to cover a nonempty and empty inbox, object paths including
 ID zero, UTF-8 text with quotes/newlines, directions and newest-first sorting.
 
@@ -5601,7 +5601,7 @@ byte-level scope, native maximum, restart idempotence and route-specific caps.
 
 ## 2026-10-12: M8 热点 IPv6 与公共中文 SSID 核查
 
-热点客户端没有 IPv6 的原因是 `devices/m8/prepare-trial-root.py` 为避免开发
+热点客户端没有 IPv6 的原因是 `device/openwrt_device_m8/prepare-trial-root.py` 为避免开发
 电脑改变上网路径，误把整个 LAN 的 RA 和 DHCPv6 都禁用了。实机 `wan_6`
 已经通过 extendprefix 获得联通 /64，并分配到 br-lan；路由器直连 IPv6
 外网三次 ping 均成功，不是基带、APN 或无线驱动缺少 IPv6。

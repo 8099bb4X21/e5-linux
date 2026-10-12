@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 TOP = Path(__file__).resolve().parents[2]
-loader = importlib.machinery.SourceFileLoader('coldboot', str(TOP / 'rootfs/overlay/opt/e5/e5-modem-coldboot'))
+loader = importlib.machinery.SourceFileLoader('coldboot', str(TOP / 'device/linux_device_common/overlay/opt/e5/e5-modem-coldboot'))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 cold = importlib.util.module_from_spec(spec); loader.exec_module(cold)
 CHARGER = 'console=tty0 modem=shutdown sprdboot.mode=charger'

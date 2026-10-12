@@ -18,7 +18,7 @@ UFI-TOOLS/
 # upstream/ builds it.
 /linux-lts-e5/
 
-# Separate source repositories checked out by GitHub Actions.
+# Independent screen repositories, tracked through explicit submodule gitlinks.
 /ci/
 
 # build trees / outputs
@@ -49,8 +49,8 @@ rootfs/*.ext4
 
 # WCN factory data pulled off the device by rootfs/pull-wcn-firmware.sh (vendor
 # blobs, never committed; the firmware/ rule above already covers /lib/firmware)
-rootfs/overlay/mnt/vendor/wifimac.txt
-rootfs/overlay/mnt/vendor/btmac.txt
+device/debian_device_common/overlay/mnt/vendor/wifimac.txt
+device/debian_device_common/overlay/mnt/vendor/btmac.txt
 
 # Vendor blob bundles fetched from upstream (e.g. CoreELEC opengl-meson):
 # 100 MB of GPU binaries that the repo must never carry.
@@ -64,3 +64,7 @@ out-release/
 
 # python bytecode left by running the tools
 __pycache__/
+
+# Older checkouts may still hold private firmware and identity in these retired paths.
+/rootfs/overlay/
+/openwrt/overlay/

@@ -29,9 +29,9 @@
 
 ## 验证（2026-10-12）
 
-- `python3 openwrt/tests/notification-sounds.py`：6 项测试，覆盖格式/长度、上传边界、独立来电/短信资源、失败回退、恢复默认保留开关、静音与通话抑制。
-- `python3 openwrt/tests/voice-audio.py`：声音路由及来电进程组终止回归通过。
-- `python3 openwrt/tests/dual-sms.py`：19 项测试通过，包含旧消息静默和双卡新消息只提醒一次。
+- `python3 device/openwrt_device_common/tests/notification-sounds.py`：6 项测试，覆盖格式/长度、上传边界、独立来电/短信资源、失败回退、恢复默认保留开关、静音与通话抑制。
+- `python3 device/openwrt_device_common/tests/voice-audio.py`：声音路由及来电进程组终止回归通过。
+- `python3 device/openwrt_device_common/tests/dual-sms.py`：19 项测试通过，包含旧消息静默和双卡新消息只提醒一次。
 - E5 实机 LuCI：两类声音的上传、转换、试听、停止、恢复默认通过；1280 px / 390 px 页面无横向溢出及 JavaScript 异常。
 - 已部署到 E5 和 T551M，短信声音已开启；保留网络、Wi-Fi、电话和屏幕的其他设置。
 - T551M 实机 LuCI：两类声音的上传、试听、停止、恢复默认及开关刷新后保持状态通过；1280 px / 390 px 页面无横向溢出及 JavaScript 异常。385 项部署文件校验一致，屏幕、通话、短信及网络服务正常，媒体音量保留原来的 6 档。

@@ -5,7 +5,7 @@ import importlib.util
 from pathlib import Path
 import threading
 
-source = Path(__file__).resolve().parents[1] / 'overlay/opt/e5/e5-call-audio.py'
+source = Path(__file__).resolve().parents[2] / 'device/linux_device_common/overlay/opt/e5/e5-call-audio.py'
 spec = importlib.util.spec_from_file_location('audio', source)
 audio = importlib.util.module_from_spec(spec); spec.loader.exec_module(audio)
 mixer = audio.AlsaControl.__new__(audio.AlsaControl)

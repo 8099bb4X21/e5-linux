@@ -88,6 +88,6 @@ compile time precise to a second. First boot starts ModemManager, the vendor
 CP runtime and the audio services; network availability follows registration.
 
 Hardware/service implementation lives in `overlay/`, the shared scripts in
-`../rootfs/overlay/opt/e5/`, and the Unisoc MM patches in `../rootfs/deb-patches/`.
+`../device/linux_device_common/overlay/opt/e5/`, and the Unisoc MM patches in `../rootfs/deb-patches/`.
 The older 5.15/vendor and userdata directory forms are retained compatibility
 paths; the current one-click bundle uses mainline and SD installation.

@@ -4,7 +4,7 @@ from pathlib import Path
 import struct
 import tempfile
 
-source=Path(__file__).resolve().parents[1]/'overlay/opt/e5/e5-call-audio.py'
+source=Path(__file__).resolve().parents[2]/'device/linux_device_common/overlay/opt/e5/e5-call-audio.py'
 spec=importlib.util.spec_from_file_location('hardware',source)
 module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 with tempfile.TemporaryDirectory() as directory:

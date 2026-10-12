@@ -29,7 +29,7 @@ TCP 压测，共约 5.09 GiB；平均速率依次为 258、308、308 Mbit/s，�
 
 ## 改动
 
-`devices/t551m/wifi.py` 由 `prepare-kernel.py` 调用，重复执行不重复打补丁。
+`device/linux_device_common/kernel/wifi.py` 由 `prepare-kernel.py` 调用，重复执行不重复打补丁。
 
 1. 参考 MU300 的 `7e0acce0a01b` 和 `f4f5e760cfa6`：AP/GO 的 ARP、普通
    UDP DNS 回包走数据队列，避免它们占用固件命令通路。DNS 在修改校验和之前
@@ -90,7 +90,7 @@ TCP 压测，共约 5.09 GiB；平均速率依次为 258、308、308 Mbit/s，�
 无硬件测试可在 Linux 中执行：
 
 ```sh
-python3 devices/t551m/test_wifi_tx.py /path/to/prepared/kernel
+python3 device/linux_device_t551m/test_wifi_tx.py /path/to/prepared/kernel
 ```
 
 原始源码加 `--expect-bug` 可复现旧问题；运行 `wifi.py` 后再执行正常测试。

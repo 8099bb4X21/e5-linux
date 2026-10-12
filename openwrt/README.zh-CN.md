@@ -77,6 +77,6 @@ ModemManager APK；软件包构建运行通话身份与路由测试，不访问�
 GitHub Actions 编译并发布主线刷入包和 Magisk ZIP，编译时间为 UTC+8、精确到秒。
 启动后由 ModemManager、vendor CP 运行库和音频服务接管硬件，网络待注册完成后可用。
 
-硬件服务在 `overlay/`，共享脚本在 `../rootfs/overlay/opt/e5/`，Unisoc MM 补丁在
+硬件服务在 `overlay/`，共享脚本在 `../device/linux_device_common/overlay/opt/e5/`，Unisoc MM 补丁在
 `../rootfs/deb-patches/`。旧 5.15／vendor 和 userdata 目录安装保留作兼容路径，
 当前一键包使用主线内核、推荐 SD 安装。

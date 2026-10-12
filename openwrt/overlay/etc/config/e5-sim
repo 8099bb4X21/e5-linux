@@ -1,4 +1,0 @@
-config sim 'main'
-	# the SIM card the modem is for, and with it the data connection: 0 (the
-	# first slot) or 1 (the second).  `e5-sim <card>` switches.
-	option card '0'

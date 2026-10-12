@@ -1,3 +1,0 @@
-[D-BUS Service]
-Name=org.mobian_project.CallAudio
-Exec=/opt/e5/e5-callaudiod

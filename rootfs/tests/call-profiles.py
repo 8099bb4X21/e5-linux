@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / 'overlay/opt/e5/e5_call_profiles.py'
+SOURCE = Path(__file__).resolve().parents[2] / 'device/linux_device_common/overlay/opt/e5/e5_call_profiles.py'
 spec = importlib.util.spec_from_file_location('profiles', SOURCE)
 profiles = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(profiles)

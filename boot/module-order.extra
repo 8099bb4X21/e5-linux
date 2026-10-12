@@ -87,7 +87,7 @@ sprd_wlan_combo.ko
 # watchdog child (64400000.spi:pmic@0:watchdog@40), and LK arms that one too ("dswdt
 # was enabled by miscdata", androidboot.dswdten=enabled).  It was never staged here,
 # so nothing on the Linux side ever touched it.  It also gives systemd a watchdog
-# device to hold and ping (see rootfs/overlay/etc/systemd/system.conf.d).
+# device to hold and ping (see device/debian_device_common/overlay/etc/systemd/system.conf.d).
 sprd_pmic_wdt.ko
 
 # --- vibrator --------------------------------------------------------------------

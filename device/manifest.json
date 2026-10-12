@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "organization": "sprd-linux-devs",
+  "profiles": {
+    "debian": {
+      "e5": [
+        "linux_device_common",
+        "linux_device_e5",
+        "debian_device_common",
+        "debian_device_e5"
+      ]
+    },
+    "linux": {
+      "e5": [
+        "linux_device_common",
+        "linux_device_e5"
+      ],
+      "m8": [
+        "linux_device_common",
+        "linux_device_m8"
+      ],
+      "t551m": [
+        "linux_device_common",
+        "linux_device_t551m"
+      ]
+    },
+    "openwrt": {
+      "e5": [
+        "linux_device_common",
+        "linux_device_e5",
+        "openwrt_device_common",
+        "openwrt_device_e5"
+      ],
+      "m8": [
+        "linux_device_common",
+        "linux_device_m8",
+        "openwrt_device_common",
+        "openwrt_device_m8"
+      ],
+      "t551m": [
+        "linux_device_common",
+        "linux_device_t551m",
+        "openwrt_device_common",
+        "openwrt_device_t551m"
+      ]
+    }
+  }
+}

@@ -1,8 +1,0 @@
-{
-  "admin/modem/sounds": {
-    "title": "铃声与通知",
-    "order": 26,
-    "action": {"type": "view", "path": "mu300/sounds"},
-    "depends": {"acl": ["e5-sounds"]}
-  }
-}

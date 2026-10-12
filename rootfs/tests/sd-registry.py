@@ -6,8 +6,8 @@ import subprocess
 import tempfile
 
 TOP = Path(__file__).resolve().parents[2]
-SELECT = TOP / 'rootfs/overlay/opt/e5/e5-os'
-SHARED = TOP / 'rootfs/overlay/opt/e5/e5-sd-registry'
+SELECT = TOP / 'device/linux_device_common/overlay/opt/e5/e5-os'
+SHARED = TOP / 'device/linux_device_common/overlay/opt/e5/e5-sd-registry'
 
 with tempfile.TemporaryDirectory(prefix='e5-sd-check-') as directory:
     root = Path(directory)

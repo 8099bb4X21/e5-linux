@@ -1,0 +1,36 @@
+[submodule "device/debian_device_common"]
+	path = device/debian_device_common
+	url = https://github.com/sprd-linux-devs/debian_device_common.git
+[submodule "device/debian_device_e5"]
+	path = device/debian_device_e5
+	url = https://github.com/sprd-linux-devs/debian_device_e5.git
+[submodule "device/linux_device_common"]
+	path = device/linux_device_common
+	url = https://github.com/sprd-linux-devs/linux_device_common.git
+[submodule "device/linux_device_e5"]
+	path = device/linux_device_e5
+	url = https://github.com/sprd-linux-devs/linux_device_e5.git
+[submodule "device/linux_device_m8"]
+	path = device/linux_device_m8
+	url = https://github.com/sprd-linux-devs/linux_device_m8.git
+[submodule "device/linux_device_t551m"]
+	path = device/linux_device_t551m
+	url = https://github.com/sprd-linux-devs/linux_device_t551m.git
+[submodule "device/openwrt_device_common"]
+	path = device/openwrt_device_common
+	url = https://github.com/sprd-linux-devs/openwrt_device_common.git
+[submodule "device/openwrt_device_e5"]
+	path = device/openwrt_device_e5
+	url = https://github.com/sprd-linux-devs/openwrt_device_e5.git
+[submodule "device/openwrt_device_m8"]
+	path = device/openwrt_device_m8
+	url = https://github.com/sprd-linux-devs/openwrt_device_m8.git
+[submodule "device/openwrt_device_t551m"]
+	path = device/openwrt_device_t551m
+	url = https://github.com/sprd-linux-devs/openwrt_device_t551m.git
+[submodule "ci/infoscreen"]
+	path = ci/infoscreen
+	url = https://github.com/Enceka/infoscreen.git
+[submodule "ci/infoscreen-plugins"]
+	path = ci/infoscreen-plugins
+	url = https://github.com/Enceka/infoscreen-plugins.git

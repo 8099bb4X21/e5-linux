@@ -25,9 +25,9 @@
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "${1:-$HERE/../unisoc-cpd}" && pwd)
-OVL=$HERE/overlay
+OVL=$HERE/../device/debian_device_common/overlay
 ETC=$OVL/etc/unisoc-cpd
-UNITS=$OVL/etc/systemd/system
+UNITS=$HERE/../device/debian_device_e5/overlay/etc/systemd/system
 
 [ -f "$SRC/Cargo.toml" ] && [ -f "$SRC/platform/profiles/e5.toml" ] ||
     { echo "not a unisoc-cpd checkout: $SRC" >&2; exit 1; }
@@ -45,7 +45,8 @@ install -m 0644 "$SRC/README.md" "$ETC/README.md"
 install -m 0644 "$SRC/docs/BASEBAND-CONTRACTS.md" "$ETC/BASEBAND-CONTRACTS.md"
 install -m 0644 "$SRC/platform/profiles/mu300.toml" "$ETC/mu300.toml"
 
-python3 - "$SRC/platform/profiles/e5.toml" "$ETC/e5.toml" <<'EOF'
+mkdir -p "$HERE/../device/debian_device_e5/overlay/etc/unisoc-cpd"
+python3 - "$SRC/platform/profiles/e5.toml" "$HERE/../device/debian_device_e5/overlay/etc/unisoc-cpd/e5.toml" <<'EOF'
 import re, sys
 src, dst = sys.argv[1], sys.argv[2]
 s = open(src).read()

@@ -7,7 +7,7 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 cp "$TOP/magisk/e5-linux-switch/"* "$STAGE/"
 cp "$TOP/magisk/README.md" "$STAGE/README.md"
-cp "$TOP/rootfs/overlay/opt/e5/e5-sd-registry" "$STAGE/sd-registry.sh"
+cp "$TOP/device/linux_device_common/overlay/opt/e5/e5-sd-registry" "$STAGE/sd-registry.sh"
 # This arm64 static executable does not depend on Android's libc or Python.
 docker run --rm --platform linux/arm64 -v "$STAGE":/module "${E5_MAGISK_BUILD_IMAGE:-e5-mainline-build}" \
  sh -ec 'gcc -static -Os -s -Wall -Wextra -Werror -o /module/e5-bootctl /module/bootctl.c'

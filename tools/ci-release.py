@@ -50,16 +50,20 @@ def prepare():
     if not re.fullmatch(r'\d+\.\d+\.\d+', ver):
         raise ValueError('invalid OpenWrt version')
     sources = {name: {'repository': repo, 'revision': revision(path)} for name, repo, path in [
-        ('e5-linux', os.environ.get('GITHUB_REPOSITORY', 'Enceka/e5-linux'), TOP),
-        ('kernel', 'Enceka/linux-lts-e5', TOP / 'linux-lts-e5'),
+        ('e5-linux', os.environ.get('E5_SOURCE_REPOSITORY', 'sprd-linux-devs/e5-linux'), TOP),
+        ('kernel', 'sprd-linux-devs/linux', TOP / 'linux-lts-e5'),
         ('infoscreen', 'Enceka/infoscreen', TOP / 'ci/infoscreen'),
         ('plugins', 'Enceka/infoscreen-plugins', TOP / 'ci/infoscreen-plugins'),
     ]}
+    for path in sorted((TOP / 'device').glob('*_device_*')):
+        sources[path.name] = {'repository': 'sprd-linux-devs/' + path.name, 'revision': revision(path)}
     RELEASE.mkdir(parents=True, exist_ok=True)
     info = {'build_epoch': epoch, 'build_started_at': started.isoformat(timespec='seconds'),
             'timestamp': stamp, 'openwrt_version': ver, 'sources': sources,
             'bootstrap_sha256': os.environ.get('E5_CI_INPUTS_SHA256'),
-            'run_url': os.environ.get('E5_RUN_URL')}
+            'run_url': os.environ.get('E5_RUN_URL'),
+            'release_repository': os.environ.get('GITHUB_REPOSITORY'),
+            'release_revision': os.environ.get('GITHUB_SHA')}
     (RELEASE / 'build.json').write_text(json.dumps(info, indent=2) + '\n')
     env = os.environ.get('GITHUB_ENV')
     if env:
@@ -73,24 +77,30 @@ def prepare():
 def audit_root(info):
     expected = {}
     for source, root, relative, prefix in [
-        ('e5-linux', TOP, 'openwrt/overlay', ''),
+        ('openwrt-common', TOP / 'device/openwrt_device_common', 'overlay', ''),
+        ('openwrt-device', TOP / 'device/openwrt_device_e5', 'overlay', ''),
+        ('linux-device', TOP / 'device/linux_device_e5', 'overlay', ''),
         ('infoscreen', TOP / 'ci/infoscreen', 'root', ''),
         ('plugins', TOP / 'ci/infoscreen-plugins', 'plugins/phone', 'etc/e5-infoscreen/plugins/phone/'),
     ]:
         files = subprocess.check_output(['git', '-C', str(root), 'ls-files', relative], text=True).splitlines()
         for item in files:
+            if (root / item).is_symlink():
+                continue
             tail = Path(item).relative_to(relative).as_posix()
             # rc/config may change during assembly; verify runtime backend/UI files.
             if source != 'plugins' and not tail.startswith(('usr/', 'www/')):
                 continue
-            if source == 'e5-linux' and tail == 'usr/libexec/e5-sysupgrade':
+            if tail == 'usr/share/luci/menu.d/luci-app-e5-sms.json' or tail.startswith('www/luci-static/resources/view/e5-sms/'):
+                continue  # shared/ui-cleanup.py retires this legacy SMS view
+            if source == 'openwrt-common' and tail == 'usr/libexec/e5-sysupgrade':
                 # build-rootfs.sh installs this safety guard at /sbin/sysupgrade.
                 tail = 'sbin/sysupgrade'
             expected[prefix + tail] = file_digest(root / item)
     # These shared startup files are copied from the Debian overlay, rather
-    # than openwrt/overlay. Verify the selective cold-start adapter as well.
+    # than device/openwrt_device_common/overlay. Verify the selective cold-start adapter as well.
     for name in ('vendor-start.sh', 'e5-modem-coldboot'):
-        expected['opt/e5/' + name] = file_digest(TOP / 'rootfs/overlay/opt/e5' / name)
+        expected['opt/e5/' + name] = file_digest(TOP / 'device/linux_device_common/overlay/opt/e5' / name)
     found, versions, modules = {}, {}, set()
     rootfs = TOP / 'work/openwrt' / f'e5-openwrt-{info["openwrt_version"]}-generic-rootfs.tar.gz'
     if not rootfs.is_file():
@@ -98,7 +108,7 @@ def audit_root(info):
     forbidden = re.compile(r'^(?:lib/firmware/(?:wcnmodem|gnssmodem|l_agdsp|wifi_board|sprd/)|'
                            r'opt/e5/android/.+|etc/e5/install\.conf|etc/dropbear/dropbear_.+_host_key|etc/ssh/ssh_host_)')
     wanted = {'usr/share/e5-infoscreen/VERSION', 'etc/e5-infoscreen/plugins/phone/manifest.json',
-              'etc/e5/build-time', 'etc/machine-id'}
+              'etc/e5/build-time', 'etc/machine-id', 'usr/bin/openssl'}
     with tarfile.open(rootfs, 'r|gz') as archive:
         for entry in archive:
             name = entry.name.removeprefix('./')
@@ -123,6 +133,8 @@ def audit_root(info):
         raise ValueError('root modules do not all match the release kernel')
     if int(versions['etc/e5/build-time']) != info['build_epoch']:
         raise ValueError('root image build time differs from CI compile start')
+    if 'usr/bin/openssl' not in versions:
+        raise ValueError('OpenWrt image is missing openssl-util (/usr/bin/openssl)')
     if versions.get('etc/machine-id', b'').strip():
         raise ValueError('generic image has a machine ID')
     info.update({'kernel_release': kernel, 'infoscreen_version': versions['usr/share/e5-infoscreen/VERSION'].decode().strip(),
@@ -133,8 +145,10 @@ def verify():
     info = json.loads((RELEASE / 'build.json').read_text())
     audit_root(info)
     # Ensure nobody advanced one of the checkouts during the build.
-    for name, path in [('e5-linux', TOP), ('kernel', TOP / 'linux-lts-e5'),
-                       ('infoscreen', TOP / 'ci/infoscreen'), ('plugins', TOP / 'ci/infoscreen-plugins')]:
+    source_paths = [('e5-linux', TOP), ('kernel', TOP / 'linux-lts-e5'),
+                    ('infoscreen', TOP / 'ci/infoscreen'), ('plugins', TOP / 'ci/infoscreen-plugins')]
+    source_paths += [(p.name, p) for p in sorted((TOP / 'device').glob('*_device_*'))]
+    for name, path in source_paths:
         if revision(path) != info['sources'][name]['revision']:
             raise ValueError('source revision changed: ' + name)
     glob = f'e5-openwrt-flash-{info["openwrt_version"]}-mainline-{info["timestamp"]}-*.tar.gz'
@@ -192,7 +206,7 @@ def verify():
     with zipfile.ZipFile(module_path) as module:
         expected = {p.name: p.read_bytes() for p in (TOP / 'magisk/e5-linux-switch').iterdir() if p.name != 'bootctl.c'}
         expected['README.md'] = (TOP / 'magisk/README.md').read_bytes()
-        expected['sd-registry.sh'] = (TOP / 'rootfs/overlay/opt/e5/e5-sd-registry').read_bytes()
+        expected['sd-registry.sh'] = (TOP / 'device/linux_device_common/overlay/opt/e5/e5-sd-registry').read_bytes()
         if set(module.namelist()) != set(expected) | {'e5-bootctl'} or module.testzip() is not None:
             raise ValueError('Magisk module member or CRC mismatch')
         for name, content in expected.items():

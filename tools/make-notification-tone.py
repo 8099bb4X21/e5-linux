@@ -20,6 +20,6 @@ def make():
     return b'RIFF' + struct.pack('<I', len(pcm) + 36) + b'WAVEfmt ' + struct.pack('<IHHIIHH', 16, 1, 1, rate, rate * 2, 2, 16) + b'data' + struct.pack('<I', len(pcm)) + pcm
 
 if __name__ == '__main__':
-    output = Path(__file__).resolve().parents[1] / 'openwrt/overlay/usr/share/e5/ding.wav'
+    output = Path(__file__).resolve().parents[1] / 'device/openwrt_device_common/overlay/usr/share/e5/ding.wav'
     output.write_bytes(make())
     print(output)
