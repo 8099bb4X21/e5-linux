@@ -103,6 +103,49 @@ flash.cmd --boot-openwrt          (Windows；macOS / Linux：./flash.sh --boot-o
 本安装器仍要求 Android A、Linux B，不能在 Android B 下反向安装。
 TF 仍采用预留更新空间的 GPT 布局，不采用占满第一分区的安装方式。
 
+## 加密 userdata 的内置分区安装
+
+运行 `install-part.cmd`（Linux/macOS 用 `./install-part.sh`）。未加密 data 默认保留原有缩容安装流程；
+检测到 FBE、metadata 或块级加密，必须明确同意清空 Android 用户数据，改走两阶段安装：
+
+1. 选择 OpenWrt 分区大小。若需要用满，选择扩展整个文件系统，或传入 `--grow-fs`。
+2. 电脑保留设备身份、分区计划、原 boot_b、启动控制和启动链备份。initramfs 直接重建分区布局，
+   不读取旧 data，不执行保数据缩容；随后进入**原厂 recovery**，由原厂完成恢复出厂及加密初始化。
+3. 回到 Android 后完成首次设置，重新开启 USB 调试、授权电脑，恢复 Magisk/Shell root 权限。
+   如果 recovery 要求确认清空数据，需要在设备上确认。原厂 recovery 的实际行为仍需逐机型验证。
+4. 电脑确认设备和新分区边界一致，再直接写入独立 `e5root`，导入本机固件、设置，校验容量后切换启动目标。
+   安装完成后手动重启进入 OpenWrt。Android 即使重新启用加密也不影响独立根分区启动。
+
+电脑脚本会等待重新授权；也可以退出，稍后运行：
+
+```text
+flash.cmd --resume-part "backups/part-日期-标识/transaction.json"
+```
+
+保留原安装包及整个备份目录，不要再次从第一阶段开始。备份目录含设备镜像和热点设置，请勿公开。
+无人值守模式需显式 `--part --format-userdata -y`，单独 `-y` 不授权清空 Android。
+旧启动镜像不支持此流程，会在刷写前拒绝；需重新构建完整安装包。
+
+安装屏幕每 2 秒显示阶段和耗时，写镜像时显示实际写入量；文件系统检查、搬移不显示虚构百分比。
+选择用满空间时采用挂载前扩容，并读取 ext4 超级块验证；失败时保留载荷和日志，不报告安装完成。
+系统显示的可用容量会扣除文件系统元数据等开销，10 GiB 分区不会有整整 10 GiB 可用空间。
+
+## 覆盖重装（已装过的情况）
+
+已经装过内置分区系统的设备，再跑 `install-part` 会被拒绝（避免误动已建好的分区）。要换一套系统进去、但
+**保留 Android 用户数据、userdata 文件系统和分区表**，用覆盖重装：
+
+```text
+reinstall.cmd                       （等同于 flash.cmd --reinstall-part；macOS/Linux：./reinstall.sh）
+flash.cmd --reinstall-part          （交互：打印几何与热点设置，确认一次）
+flash.cmd --reinstall-part -y       （无人值守）
+```
+
+它会：读设备上现有的 userdata/e5root 几何 → 从 Android 拉取本机固件 → 把包里的新镜像写进 e5root
+（`e2fsck` 检查、扩到分区大小、写回原有热点/APN 设置与 `part-root`/`part-trial` 标记）→ 刷新 `boot_b`
+并按 B 槽武装 → 手动重启进入新系统。不重建分区、不清 Android 数据、不走第一阶段；e5root 里原有系统及其
+配置会被替换，事务记录留在 `backups/reinstalls/日期-标识/transaction.json`。
+
 ## 更新
 
 安装失败时请保留完整终端报错：程序会显示失败的步骤（分区、写镜像、挂载、

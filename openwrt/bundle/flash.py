@@ -32,6 +32,7 @@ import json
 import os
 import random
 import re
+import runpy
 import shutil
 import socket
 import string
@@ -43,9 +44,10 @@ import threading
 import time
 import struct
 import zlib
+import uuid  # also bundled for the runtime two-stage installer in flash.exe
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
-B = os.path.dirname(os.path.abspath(__file__))
+B = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 F = os.path.join(B, 'files')
 SCRIPTS = os.path.join(B, 'scripts')
 D = '/data/e5linux'
@@ -435,12 +437,12 @@ def pull_device_files(work, out=None):
                 (n.startswith('wifi_board_config') and n.endswith('.ini')):
             shutil.copy(os.path.join(raw, n), fw)
     tools = os.path.join(SCRIPTS, 'tools')
-    subprocess.run([sys.executable, os.path.join(tools, 'sprd-bt-config.py'),
+    subprocess.run(python_tool(os.path.join(tools, 'sprd-bt-config.py'),
                     os.path.join(raw, 'bt_configure_pskey.xpe.ini'), os.path.join(raw, 'bt_configure_rf.xpe.ini'),
-                    os.path.join(raw, 'btmac.txt'), os.path.join(fw, 'sprd')], check=True)
-    subprocess.run([sys.executable, os.path.join(tools, 'vbc-profile', 'vbc-profile.py'),
+                    os.path.join(raw, 'btmac.txt'), os.path.join(fw, 'sprd')), check=True)
+    subprocess.run(python_tool(os.path.join(tools, 'vbc-profile', 'vbc-profile.py'),
                     os.path.join(raw, 'dsp_vbc.xml'), os.path.join(raw, 'audio_structure.xml'),
-                    os.path.join(raw, 'cvs.xml'), '-o', fw], check=True, stdout=subprocess.DEVNULL)
+                    os.path.join(raw, 'cvs.xml'), '-o', fw), check=True, stdout=subprocess.DEVNULL)
     for n in ('sprd/marlin3lite_pskey.bin', 'sprd/marlin3lite_rf.bin', 'audio_structure', 'dsp_vbc', 'cvs'):
         if not os.path.isfile(os.path.join(fw, *n.split('/'))):
             die(f'converting the firmware made no {n}')
@@ -463,6 +465,18 @@ def pull_device_files(work, out=None):
 
 
 # ------------------------------------------------------------------ modes
+
+def python_tool(*argv):
+    """A command that runs one of the package's helper scripts.
+
+    Frozen (flash.exe) there is no Python on the machine, so the executable
+    re-enters itself: --run-tool executes the bundled script with its own
+    interpreter and passes the remaining arguments through.
+    """
+    if getattr(sys, 'frozen', False):
+        return [sys.executable, '--run-tool', *argv]
+    return [sys.executable, argv[0], *argv[1:]]
+
 
 def ask(prompt, default=''):
     try:
@@ -903,10 +917,8 @@ def part_userdata_policy(a):
         # for a newly detected destructive operation.
         if a.y and not getattr(a, 'format_userdata', False):
             die('encrypted userdata requires --format-userdata as explicit erase consent; -y alone is insufficient')
-    if metadata:
-        die('data uses block/metadata encryption: the initramfs cannot read staged payloads. '
-            'This installer cannot safely format it yet; nothing was erased. '
-            '需要 USB/RAM 载荷交接，不能直接使用 userdata 上的安装文件。')
+    if wipe:
+        print('   两阶段安装：重建分区 → 原厂 recovery 清空数据 → Android 重新授权 → 安装 OpenWrt。')
     a.format_userdata = wipe
     return wipe
 
@@ -931,8 +943,9 @@ def part_target(a, raw_size):
         elif len(fields) >= 4 and fields[3].isdigit():
             used_mib = int(fields[2]) // 1024
     if existing:
-        die(f'the internal partition {existing} (e5root) already exists; use device-install-part.sh '
-            'from the running OpenWrt to reinstall or resize it')
+        die(f'the internal partition {existing} (e5root) already exists; run this installer with '
+            '--reinstall-part to write a new system into it (userdata and the partition table stay, '
+            'nothing is erased)')
     if not node or not data_sectors.isdigit() or int(data_sectors) == 0:
         die('userdata is not in the partition table of this device')
     udata_mib = int(data_sectors) // 2048
@@ -1009,6 +1022,10 @@ def install_part(a):
     if not 8 <= len(key) <= 63 or "'" in key or "'" in ssid or "'" in apn:
         die("the hotspot key must have 8-63 characters, and no ' anywhere")
 
+    if wipe:
+        part_two_stage('start', a, node, part_mib, data_mib, grow, raw_size, apn, ssid, key)
+        return
+
     with tempfile.TemporaryDirectory() as work:
         firmware = f'{TMP}/e5-data-device-files.tar'
         size = pull_device_files(work, firmware)
@@ -1030,6 +1047,7 @@ def install_part(a):
                    f'mv {D}/part-install.conf.tmp {D}/part-install.conf; '
                    f'chmod 600 {D}/part-install.conf {D}/part-install.settings {D}/device-files.tar; sync')
 
+    bootchain('sync')
     say('写入启动镜像 / boot image -> boot_b')
     with busy('写入并校验 boot_b / writing and verifying boot_b'):
         su_checked('写入 boot_b / writing boot_b',
@@ -1051,6 +1069,13 @@ def install_part(a):
   管理 / admin:    http://192.168.9.1  (LuCI, root / root -- 请改密码 / change it)
   回 Android:      e5-next-boot android（或删掉 {D}/boot-os）后重启；首启是试启动，
   失败会回到 Android。If the first boot fails, the next one falls back.''')
+
+
+def part_two_stage(action, *args):
+    try:
+        runpy.run_path(os.path.join(B, 'part-two-stage.py'))[action](globals(), *args)
+    except (ValueError, OSError) as error:
+        die(str(error))
 
 
 def check(a):
@@ -1140,7 +1165,7 @@ def update(a):
         u = f'http://{ip}:{srv.server_address[1]}'
         say(f'更新 / updating {host}')
         env = dict(os.environ, E5_TELNET_HOST=host, E5_TELNET_PASS=pw, E5_TELNET_WAIT='1800')
-        telnet = [sys.executable, os.path.join(SCRIPTS, 'tools', 'e5-telnet.py')]
+        telnet = python_tool(os.path.join(SCRIPTS, 'tools', 'e5-telnet.py'))
         # The steps as a script the device fetches: a long command line typed over
         # telnet gets lost (the 80-column pty's line editing), so only a short one is.
         steps_sh = f"""set -e
@@ -1207,6 +1232,11 @@ def main():
     g.add_argument('--part', action='store_true',
                    help="install to an internal eMMC partition, without an SD card; "
                         "the next boot shrinks userdata and creates it")
+    g.add_argument('--resume-part', metavar='TRANSACTION_JSON',
+                   help='continue the encrypted-data installation after Android setup/root authorization')
+    g.add_argument('--reinstall-part', action='store_true',
+                   help='rewrite an existing internal partition system: userdata, its filesystem and '
+                        'the partition table stay, e5root and boot_b are replaced (no wipe, no stage one)')
     ap.add_argument('--apn')
     ap.add_argument('--ssid', help='hotspot name; defaults to the package device model plus -OpenWrt')
     ap.add_argument('--wifi-key')
@@ -1226,10 +1256,16 @@ def main():
         ap.error('--grow-fs requires --part / install-part')
     if a.format_userdata and not a.part:
         ap.error('--format-userdata requires --part / install-part')
+    if a.reinstall_part and (a.part or a.format_userdata):
+        ap.error('--reinstall-part keeps userdata and the partition table; it is not --part')
     if sys.version_info < (3, 8):
         die('Python 3.8 or newer is needed')
     check_package()
-    if a.update:
+    if a.resume_part:
+        part_two_stage('resume', a)
+    elif a.reinstall_part:
+        part_two_stage('reinstall', a)
+    elif a.update:
         update(a)
     elif a.boot_openwrt:
         boot_openwrt(a)
@@ -1244,6 +1280,13 @@ def main():
 
 
 if __name__ == '__main__':
+    # A frozen build has no Python beside it: the executable re-enters itself
+    # to run the package's helper scripts with its bundled interpreter.
+    if len(sys.argv) > 2 and sys.argv[1] == '--run-tool':
+        _tool = sys.argv[2]
+        sys.argv = [os.path.basename(_tool), *sys.argv[3:]]
+        runpy.run_path(_tool, run_name='__main__')
+        sys.exit(0)
     try:
         main()
     except KeyboardInterrupt:

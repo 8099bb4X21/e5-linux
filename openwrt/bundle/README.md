@@ -135,6 +135,54 @@ messages. Content verification lists the missing, empty or non-executable
 files. Capacity and write protection are checked before repartitioning; an
 Android volume that remains mounted stops installation before the GPT changes.
 
+## Encrypted userdata: two-stage internal partition installation
+
+`install-part` keeps the legacy preserve-and-shrink path for unencrypted data.
+Encrypted data requires explicit consent to erase Android user data. The PC
+saves a transaction and boot backups; initramfs rebuilds the userdata/e5root
+layout, then requests a stock recovery factory reset. Stock recovery owns
+Android's formatting and encryption initialization, including any on-device
+confirmation. This handoff still needs hardware validation for each model.
+
+Complete Android setup, enable/authorize ADB again, and restore Magisk/Shell
+root. The PC waits for authorization, then verifies device identity and the
+prepared layout before writing directly to the independent e5root partition.
+To continue after closing the script, keep the same package and run:
+
+```
+flash.cmd --resume-part "backups/part-DATE-ID/transaction.json"
+```
+
+Do not repeat stage one. Backups contain device images and hotspot settings;
+keep them private. Unattended erasure requires `--part --format-userdata -y`.
+Use `--grow-fs` (or select full allocation interactively) to use the allocated
+partition capacity. Filesystem growth is offline and size-verified; a failed
+resize is no longer reported as a successful installation. Progress is shown
+every two seconds, with actual bytes during image writing and elapsed time
+during filesystem checks/migration. Rebuild old packages before using this path.
+
+## Re-installing over an existing installation
+
+A device that already has an internal partition system refuses `install-part`
+again (so a working partition is never touched by accident). To put a new system
+into it while keeping Android's user data, the userdata filesystem and the
+partition table, use the rewrite:
+
+```text
+reinstall.cmd                       (the same as flash.cmd --reinstall-part; POSIX: ./reinstall.sh)
+flash.cmd --reinstall-part          (interactive: prints the geometry and the settings, one confirmation)
+flash.cmd --reinstall-part -y       (unattended)
+```
+
+It reads the device's current userdata/e5root geometry, pulls this unit's own
+firmware from Android, writes the package's image into e5root (e2fsck, grow to
+the partition size, keep the existing hotspot/APN settings and the
+`part-root`/`part-trial` markers), replaces `boot_b` and arms slot B, then says
+to reboot. No repartitioning, no wiping of Android data, no stage one; the
+system that was in e5root and its configuration are replaced. The transaction is
+recorded under `backups/reinstalls/DATE-ID/transaction.json`.
+
+
 ## Update
 
 With the E5 running OpenWrt and connected over USB, run the new package's:

@@ -121,4 +121,25 @@ with tempfile.TemporaryDirectory(prefix='e5-gpt-plan-') as directory:
     assert over.returncode != 0 and 'overlaps partition' in over.stdout + over.stderr
     print('resize-real PASS')
 
+    image = root / 'carve.img'
+    disk(image, 16384, [(1, 1, 8192, 'userdata'), (2, 12288, 2048, 'tail')])
+    before = metadata(image)
+    for target, size, old in [('4194304', '12584960', '16777216'),
+                              ('4194304', '4194304', '99'), ('1', '4194304', '16777216')]:
+        result = run('carve-userdata', '/test/carve.img', target, size, old)
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        assert metadata(image) == before, 'rejected carve modified the disk'
+    result = run('carve-userdata', '/test/carve.img', '8388608', '8388608', '16777216')
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    rows = {r.split()[3]: r.split() for r in run('list', '/test/carve.img').stdout.splitlines()}
+    assert rows['userdata'][1:3] == ['2048', '8390655'], rows
+    assert rows['e5root'][1:3] == ['8390656', '16779263'], rows
+    assert rows['tail'][1:3] == ['25165824', '29360127'], rows
+    before = metadata(image)
+    assert run('carve-userdata', '/test/carve.img', '4194304', '4194304', '8388608').returncode != 0
+    assert metadata(image) == before, 'repeated carve changed metadata'
+    # A plan reload validates primary AND backup tables after the joint commit.
+    assert run('plan', '/test/carve.img', 'resize:userdata:8388608').returncode == 0
+    print('destructive-carve PASS')
+
 print('All GPT allocation plans preserved disk metadata')

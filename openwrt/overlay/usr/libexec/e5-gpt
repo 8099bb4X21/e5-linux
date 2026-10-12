@@ -49,9 +49,9 @@ function put(s, off, bytes) {
 }
 
 let cmd = ARGV[0], disk = ARGV[1];
-if (!(cmd in ['list', 'add', 'uuid', 'plan', 'resize']) || !disk)
+if (!(cmd in ['list', 'add', 'uuid', 'plan', 'resize', 'carve-userdata']) || !disk)
 	die('usage: e5-gpt list DISK | uuid DISK N | add DISK NAME SECTORS | resize DISK NAME SECTORS | plan DISK NAME:SECTORS ...');
-let h = fs.open(disk, (cmd == 'add' || cmd == 'resize') ? 'r+' : 'r') || die(`${disk}: ${fs.error()}`);
+let h = fs.open(disk, (cmd == 'add' || cmd == 'resize' || cmd == 'carve-userdata') ? 'r+' : 'r') || die(`${disk}: ${fs.error()}`);
 function rd(lba, count) {
 	h.seek(lba * 512, 0);
 	let s = h.read(count * 512);
@@ -244,7 +244,27 @@ if (cmd == 'resize') {
 
 if (empty < 0)
 	die('the GPT has no free entry; nothing was written');
-let name = ARGV[2], want = +ARGV[3], range = allocation(name, want);
+let carve = null;
+if (cmd == 'carve-userdata') {
+	// Destructive prepare only: caller authorizes discarding userdata and checks
+	// that it is unmounted. Commit both geometry edits in one GPT generation.
+	let length = +ARGV[2], root_size = +ARGV[3], previous = +ARGV[4];
+	let r = resize_range('userdata', length), original = null;
+	for (let x in parts) {
+		if (x.name == 'e5root') die('e5root already exists');
+		if (x.n == r[2]) original = x;
+	}
+	if (!original || original.end - original.start + 1 != previous ||
+	    length < 4194304 || root_size < 4194304 || length % 2048 || root_size % 2048 ||
+	    type(root_size) != 'int' || r[1] + root_size > original.end || (r[1] + 1) % 2048)
+		die('invalid destructive userdata allocation');
+	available();
+	carve = [r[1] + 1, r[1] + root_size];
+	let entry = substr(p.tab, (r[2] - 1) * 128, 128);
+	p.tab = put(p.tab, (r[2] - 1) * 128, put(entry, 40, lebytes(r[1], 8)));
+}
+let name = carve ? 'e5root' : ARGV[2], want = +ARGV[3];
+let range = carve || allocation(name, want);
 let start = range[0], end = range[1];
 
 let guid = fs.readfile('/dev/urandom', 16) || die('no /dev/urandom');

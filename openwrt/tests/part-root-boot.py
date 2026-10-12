@@ -123,11 +123,11 @@ class PartRoot(unittest.TestCase):
         self.assertIn('part-root-dev', SOURCE)
         boot_ok = (TOP / 'openwrt/overlay/etc/init.d/e5-boot-ok').read_text()
         self.assertIn('rm -f /etc/e5/part-trial', boot_ok)
-        # on-screen progress: a five-second heartbeat names the step; the
+        # on-screen progress: a shared heartbeat names the step; the
         # framebuffer console font has no CJK, so console lines stay ASCII,
         # and the backlight is not touched
         install = (TOP / 'boot/install-part.sh').read_text()
-        self.assertIn('installing, step', install)
+        self.assertIn('part_progress_start', install)
         # the install boot consumes one of slot b's two tries and LK treats a
         # single remaining try as failure: the trial must be refilled before
         # the restart into the new system (found on the M8, 2026-10-13)

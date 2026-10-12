@@ -175,7 +175,7 @@ persist_job=$!
 # supposed to survive, and a reboot with no recorded reason is impossible to
 # diagnose after the fact.
 (sleep 600
- while [ -e /run/f2fs-repair.running ]; do sleep 5; done
+ while [ -e /run/f2fs-repair.running ] || [ -e /run/part-install.running ]; do sleep 5; done
  if [ -e /run/stay ] || [ -e /data/e5linux/stay ]; then log "stage=timer-skipped"; persist; exit 0; fi
  log "stage=timer-reboot"
  echo "<3>E5-LINUX: safety timer expired, no /run/stay -- rebooting to slot a" > /dev/kmsg
@@ -288,6 +288,27 @@ early_device_firmware() {
         [ -n "$dev" ] || { n=$((n + 1)); mdev -s; sleep 1; }
     done
     emmc=${dev#/dev/}; emmc=${emmc%%p*}
+    # A system installed in its own partition keeps its firmware on e5root, and
+    # by then the payload on userdata is gone (install-part.sh removes it), so
+    # this is the only source.  It cannot be gated on the two-stage marker in
+    # the command line: the plain internal-partition install (boot-os=part) has
+    # no marker either, and without the firmware in the initramfs the WCN's GNSS
+    # half fails its single request_firmware, never powers the chip on and Wi-Fi
+    # is gone (measured on all three models, 2026-10-13).  Probing is cheap and
+    # harmless when there is no e5root or no firmware there, and the search does
+    # not wait for userdata -- mdev may not have settled it yet.
+    mkdir -p /tmp/part-fw /lib/firmware
+    for u in /sys/class/block/mmcblk*p*/uevent; do
+        grep -qx PARTNAME=e5root "$u" 2>/dev/null || continue
+        if mount -t ext4 -o ro,noload /dev/$(basename "$(dirname "$u")") /tmp/part-fw; then
+            if [ -f /tmp/part-fw/etc/e5/part-root ] && [ -s /tmp/part-fw/lib/firmware/wcnmodem.bin ]; then
+                cp -a /tmp/part-fw/lib/firmware/. /lib/firmware/
+                log "stage=device-firmware-source e5root"
+            fi
+            umount /tmp/part-fw
+            [ ! -s /lib/firmware/wcnmodem.bin ] || return 0
+        fi
+    done
     # An explicit image already bypasses SD root selection below. Read its
     # userdata firmware first instead of spending ten seconds searching a card.
     # Ordinary/TF boots keep SD-first discovery, including the full card wait.
@@ -426,6 +447,12 @@ if [ -n "$udc" ]; then
 fi
 ifconfig usb0 up 2>/dev/null
 persist
+
+. /etc/part-prepare.sh
+if ! part_prepare; then
+    part_fail 'partition preparation stopped; inspect /run/part-carve.log'
+    while :; do sleep 10; done
+fi
 
 # ------------------------------------------------------- root filesystem
 # The E5 has no unallocated eMMC space (userdata runs to the last usable LBA),
@@ -657,6 +684,7 @@ part_root() {
 # system removes it once it is up (e5-boot-ok).  A failed trial, a missing
 # partition or an unreadable one drops the choice for this boot only -- the
 # chain below (card, then image) still gets its turn.
+grep -q ' e5.root=part\( \|$\)' /proc/cmdline && want=part
 if [ -z "$e5_trial" ] && [ "$want" = part ]; then
     if part_root && [ "$PARTTRIAL" != 0 ] &&
        mount -t ext4 -o noatime "$PARTROOT" /disk 2>>/run/rootmount.err; then
@@ -683,7 +711,7 @@ if [ -z "$rootdir" ] && [ -z "$e5_trial" ] && sd_wait 8 &&
                            mount -t f2fs -o ro,norecovery,noatime,nodiratime "$data" /data 2>>/run/datamount.err; }; then
         data_mounted=1
     fi
-elif [ -z "$e5_trial" ] && [ "$want" = part ] && part_root &&
+elif [ -z "$rootdir" ] && [ -z "$e5_trial" ] && [ "$want" = part ] && part_root && [ "$PARTTRIAL" != 0 ] &&
      mount -t ext4 -o noatime "$PARTROOT" /disk 2>>/run/rootmount.err; then
     log "stage=openwrt-part $PARTROOT"
     rootdir=/disk on_part=1
@@ -724,7 +752,7 @@ elif [ -z "$rootdir" ] && [ -z "$SDMETA" ] && [ -z "$SDMETA_INVALID" ] && [ -n "
             rootdir=
         fi
     fi
-elif [ -z "$card" ]; then
+elif [ -z "$rootdir" ] && [ -z "$card" ]; then
     log "stage=data-mount-fail $(cat /run/datamount.err 2>/dev/null)"
 fi
 

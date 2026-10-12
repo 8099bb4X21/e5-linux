@@ -31,6 +31,35 @@ class Diagnostics(unittest.TestCase):
         self.assertTrue(part.rstrip().endswith("falls back.''')"), part[-160:])
         self.assertTrue(inspect.getsource(flash.check).lstrip().startswith('def check(a):\n    steps(3)'))
 
+    def test_frozen_build_runs_the_package_scripts_with_its_own_interpreter(self):
+        # flash.exe has no Python beside it: the firmware conversion and the
+        # telnet helper must be reachable through --run-tool, and the bundle
+        # path must come from the executable, not from __file__.
+        import inspect
+        source = inspect.getsource(flash)
+        self.assertIn("getattr(sys, 'frozen', False)", source)
+        self.assertIn('def python_tool(', source)
+        self.assertIn("sys.argv[1] == '--run-tool'", source)
+        self.assertIn("runpy.run_path(_tool, run_name='__main__')", source)
+        self.assertIn("sys.executable if getattr(sys, 'frozen', False) else __file__", source)
+        for call in ("python_tool(os.path.join(tools, 'sprd-bt-config.py')",
+                     "python_tool(os.path.join(tools, 'vbc-profile', 'vbc-profile.py')",
+                     "python_tool(os.path.join(SCRIPTS, 'tools', 'e5-telnet.py'))"):
+            self.assertIn(call, source, call)
+
+    def test_reinstall_launchers_ship_with_the_package(self):
+        # Every other install has a one-word launcher next to flash.cmd
+        # (install-part.cmd / install-part.sh); the rewrite needs the same, and
+        # both packaging paths have to copy them or they never leave the tree.
+        openwrt = Path(__file__).parents[1]
+        for name in ('reinstall.cmd', 'reinstall.sh'):
+            launcher = (openwrt / 'bundle' / name).read_text(encoding='utf-8')
+            self.assertIn('--reinstall-part', launcher, name)
+            self.assertIn(name, (openwrt / 'build-profile-tf.py').read_text(encoding='utf-8'), name)
+            self.assertIn(name, (openwrt / 'make-flash-bundle.sh').read_text(encoding='utf-8'), name)
+        import inspect
+        self.assertIn("'--reinstall-part'", inspect.getsource(flash))
+
     def test_wrong_profile_is_rejected_before_partition_commands(self):
         for profile, model, wrong in (('e5', 'E5', 'T551M'),
                                      ('t551m', 'T551M', 'VIPME M8'),
@@ -78,7 +107,10 @@ class Diagnostics(unittest.TestCase):
                 command = command.replace('/dev/block/by-name/misc', str(misc))
                 command = command.replace('/data/adb/e5-boot-control', str(root / 'backups'))
                 command = command.replace('/data/local/tmp', str(root))
-                result = subprocess.run(['sh', '-ec', command], text=True, capture_output=True)
+                # This fixture owns regular files only. dd still fsyncs those;
+                # do not flush unrelated Docker/Windows mounts via global sync.
+                result = subprocess.run(['sh', '-ec', 'sync() { :; }; ' + command],
+                                        text=True, capture_output=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 return result.stdout
             with patch.object(flash, 'od_hex', return_value=self.control().hex()), \

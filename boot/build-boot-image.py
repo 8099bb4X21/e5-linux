@@ -47,7 +47,7 @@ MISC_BC_OFFSET = 0x800
 PERSIST_LOG_OFFSET = 56 << 20
 
 BOOT_CMDLINE = (
-    b'console=tty0 console=ttyGS0,115200 loglevel=7 '
+    b'console=tty0 console=ttyGS0,115200 loglevel=7 e5.part_v=2 '
     b'selinux=0 androidboot.selinux=permissive enforcing=0 '
     # CONFIG_PANIC_ON_OOPS=y in this kernel, and the E5 has a pre-existing
     # vsprintf/uevent oops about 25 s into every boot, so panic=10 alone turns
@@ -157,6 +157,8 @@ def main():
     slot_a_bc, slot_b_bc = bootloader_control(a.misc_head.read_bytes())
     print('misc: slot_a=%s slot_b_trial=%s' % (slot_a_bc.hex(), slot_b_bc.hex()))
 
+    if 'e5.part_v=2' not in a.cmdline.split():
+        a.cmdline = (a.cmdline + ' e5.part_v=2').strip()
     cmdline = a.cmdline.encode()
     if len(cmdline) >= 1536:
         sys.exit('command line too long for a boot header v4 (max 1535 bytes)')
@@ -195,6 +197,8 @@ def main():
     for name in repair_names:
         files[name] = ((a.f2fs_tools / name).read_bytes(), stat.S_IFREG | 0o755)
     files['etc/install-part.sh'] = ((HERE / 'install-part.sh').read_bytes(), stat.S_IFREG | 0o644)
+    files['etc/part-progress.sh'] = ((HERE / 'part-progress.sh').read_bytes(), stat.S_IFREG | 0o644)
+    files['etc/part-prepare.sh'] = ((HERE / 'part-prepare.sh').read_bytes(), stat.S_IFREG | 0o644)
     files['usr/share/e5-gpt'] = ((HERE.parent / 'openwrt/overlay/usr/libexec/e5-gpt').read_bytes(),
                                  stat.S_IFREG | 0o755)
     dirs.update({'usr', 'usr/bin', 'usr/lib', 'usr/lib/ucode', 'usr/share', 'usr/sbin'})

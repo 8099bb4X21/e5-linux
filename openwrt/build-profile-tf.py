@@ -139,7 +139,7 @@ def main():
         '--modules', a.kernel / 'modules', '--module-order', a.kernel / 'module-order.txt',
         '--busybox', a.busybox, '--init', init, '--cmdline', '', '--out', files / 'boot.img')
     boot = json.loads((files / 'boot.json').read_text())
-    assert boot['overlay_files'] == 0 and boot['cmdline'] == ''
+    assert boot['overlay_files'] == 0 and boot['cmdline'] == 'e5.part_v=2'
     (files / 'boot.misc-slot-b-trial.bin').rename(files / 'boot-misc-slot-b.bin')
     sources = {}
     # Includes uncommitted source fixes, so HEAD alone cannot misidentify a build.
@@ -175,10 +175,17 @@ def main():
     with (files / 'openwrt.ext4.gz').open('wb') as out:
         run('gzip', '-1', '-c', image, stdout=out)
     runpy.run_path(str(TOP / 'openwrt/prepare-ext4-tools.py'))['build'](root, files / 'ext4-tools.tar')
-    for n in ('flash.py', 'flash.cmd', 'flash.sh', 'install-part.cmd', 'install-part.sh', 'README.md', 'README.zh-CN.md'):
+    for n in ('flash.py', 'flash.cmd', 'flash.sh', 'install-part.cmd', 'install-part.sh',
+              'reinstall.cmd', 'reinstall.sh', 'part-two-stage.py', 'README.md', 'README.zh-CN.md'):
         shutil.copy2(TOP / 'openwrt/bundle' / n, package / n)
+    # A Windows build of the flasher (work/build-flash-exe.cmd) ships with the
+    # package when it is there: users without Python run flash.exe instead.
+    exe = TOP / 'openwrt/bundle/flash.exe'
+    if exe.is_file():
+        shutil.copy2(exe, package / 'flash.exe')
     for n in ('device-install-image.sh', 'device-flash-boot.sh', 'device-install-part.sh'):
         shutil.copy2(TOP / 'openwrt' / n, files / n)
+    (files / 'part-write.sh').write_bytes((TOP / 'openwrt/bundle/part-write.sh').read_bytes().replace(b'\r\n', b'\n'))
     for src in ('openwrt/bundle/collect-device-files.sh', 'openwrt/overlay/usr/libexec/e5-gpt', 'tools/android-bootchain.sh'):
         target = files / Path(src).name
         target.write_bytes((TOP / src).read_bytes().replace(b'\r\n', b'\n'))
