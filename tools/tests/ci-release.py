@@ -73,7 +73,7 @@ class Bootstrap(unittest.TestCase):
 
 
 class RootAudit(unittest.TestCase):
-    def audit(self, files):
+    def audit(self, files, staged_vendor=None, kernel_out=None):
         with tempfile.TemporaryDirectory() as temp:
             top = Path(temp)
             (top / 'work/openwrt').mkdir(parents=True)
@@ -83,13 +83,25 @@ class RootAudit(unittest.TestCase):
             for name in ('vendor-start.sh', 'e5-modem-coldboot'):
                 (top / 'device/linux_device_common/overlay/opt/e5' / name).write_bytes(b'startup fixture')
                 files = {**files, 'opt/e5/' + name: b'startup fixture'}
+            if staged_vendor is not None:
+                files.update({'etc/e5/feature-port.json': b'{"profile":"e5"}',
+                              'opt/e5/vendor-start.sh': staged_vendor})
+            if kernel_out:
+                (top / kernel_out).mkdir(parents=True)
+                (top / kernel_out / 'kernel.release').write_text('6.18-e5\n')
+                (top / 'upstream/out-release/kernel.release').write_text('wrong-default\n')
             path = top / 'work/openwrt/e5-openwrt-25.12.5-generic-rootfs.tar.gz'
             with tarfile.open(path, 'w:gz') as archive:
                 for name, data in files.items():
                     entry = tarfile.TarInfo(name); entry.size = len(data)
                     archive.addfile(entry, io.BytesIO(data))
             info = {'openwrt_version': '25.12.5', 'build_epoch': 123}
-            with patch.object(release, 'TOP', top), patch.object(release.subprocess, 'check_output', return_value=''):
+            def stage_nv(root):
+                (root / 'opt/e5/vendor-start.sh').write_bytes(b'isolated NV fixture')
+            env = {'E5_UPSTREAM_OUT': str(top / kernel_out)} if kernel_out else {}
+            with patch.object(release, 'TOP', top), patch.object(release.subprocess, 'check_output', return_value=''), \
+                 patch.object(release.runpy, 'run_path', return_value={'stage_nv': stage_nv}), \
+                 patch.dict(release.os.environ, env):
                 release.audit_root(info)
             return info
 
@@ -100,6 +112,16 @@ class RootAudit(unittest.TestCase):
 
     def test_same_release_and_epoch_pass(self):
         self.assertEqual(self.audit(self.files())['phone_version'], '1.4')
+
+    def test_selected_kernel_output_pass(self):
+        self.assertEqual(self.audit(self.files(), kernel_out='out/e5/kernel')['kernel_release'], '6.18-e5')
+
+    def test_exact_nv_transformation_pass(self):
+        self.audit(self.files(), staged_vendor=b'isolated NV fixture')
+
+    def test_unexpected_nv_transformation_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'vendor-start'):
+            self.audit(self.files(), staged_vendor=b'unexpected vendor fixture')
 
     def test_missing_openssl_rejected(self):
         files = self.files(); files.pop('usr/bin/openssl')

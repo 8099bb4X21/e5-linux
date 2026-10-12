@@ -7,9 +7,11 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import subprocess
 import struct
 import tarfile
+import tempfile
 import time
 import zipfile
 
@@ -108,7 +110,7 @@ def audit_root(info):
     forbidden = re.compile(r'^(?:lib/firmware/(?:wcnmodem|gnssmodem|l_agdsp|wifi_board|sprd/)|'
                            r'opt/e5/android/.+|etc/e5/install\.conf|etc/dropbear/dropbear_.+_host_key|etc/ssh/ssh_host_)')
     wanted = {'usr/share/e5-infoscreen/VERSION', 'etc/e5-infoscreen/plugins/phone/manifest.json',
-              'etc/e5/build-time', 'etc/machine-id', 'usr/bin/openssl'}
+              'etc/e5/build-time', 'etc/machine-id', 'usr/bin/openssl', 'etc/e5/feature-port.json'}
     with tarfile.open(rootfs, 'r|gz') as archive:
         for entry in archive:
             name = entry.name.removeprefix('./')
@@ -124,6 +126,17 @@ def audit_root(info):
                     found[name] = hashlib.sha256(data).hexdigest()
                 else:
                     found[name] = digest(stream)
+    if 'etc/e5/feature-port.json' in versions:
+        # Feature staging deliberately rewrites vendor-start to preserve the
+        # isolated NV loops. Reproduce that exact transformation for the gate.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name in ('etc/init.d', 'etc/rc.d', 'opt/e5'):
+                (root / name).mkdir(parents=True, exist_ok=True)
+            vendor = root / 'opt/e5/vendor-start.sh'
+            vendor.write_bytes((TOP / 'device/linux_device_common/overlay/opt/e5/vendor-start.sh').read_bytes())
+            runpy.run_path(str(TOP / 'device/openwrt_device_common/shared/staging.py'))['stage_nv'](root)
+            expected['opt/e5/vendor-start.sh'] = file_digest(vendor)
     missing = set(expected) - set(found)
     different = [name for name in expected if name in found and expected[name] != found[name]]
     if missing or different:
