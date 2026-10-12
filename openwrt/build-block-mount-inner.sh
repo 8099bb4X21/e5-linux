@@ -34,7 +34,9 @@ cp /src/patches/fstools-probe-device-types.patch package/feeds/base/fstools/patc
     sed 's/^/+/' /src/block-probe-guard.h
 } > package/feeds/base/fstools/patches/901-e5-probe-guard-header.patch
 printf '%s\n' 'CONFIG_ALL_NONSHARED=n' 'CONFIG_ALL_KMODS=n' 'CONFIG_ALL=n' \
-    'CONFIG_PACKAGE_block-mount=m' 'CONFIG_SIGNED_PACKAGES=n' > .config
+    '# CONFIG_BUILDBOT is not set' '# CONFIG_SDK_LLVM_BPF is not set' \
+    'CONFIG_BPF_TOOLCHAIN_NONE=y' 'CONFIG_PACKAGE_block-mount=m' \
+    'CONFIG_SIGNED_PACKAGES=n' > .config
 make defconfig
 make package/fstools/clean
 make -j4 package/fstools/compile V=s
