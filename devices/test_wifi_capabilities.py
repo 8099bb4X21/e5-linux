@@ -20,6 +20,13 @@ with tempfile.TemporaryDirectory(prefix='wifi-cap-test-', dir=ROOT / 'tmp') as t
     first = target.read_bytes()
     module['patch_wifi_capabilities'](temp)
     assert first == target.read_bytes(), 'not idempotent'
+    legacy = '''// unisoc-driver-dfs-capabilities: previous policy.
+function device_no_dfs(config) { config.htmode = 'HT20'; }
+
+'''
+    target.write_text(target.read_text().replace(module['NO_DFS'], legacy))
+    module['patch_wifi_capabilities'](temp)
+    assert first == target.read_bytes(), 'existing roots did not migrate'
     script = temp / 'test.uc'
     script.write_text('let phy_features = {}, phy_capabilities = {};\nfunction log(s) {}\n' + module['NO_DFS'] + '''
 function check(value, message) { if (!value) die(message); }
@@ -35,12 +42,12 @@ function run(channel, mode, freqs, radar, band) {
 }
 let c=run(52,'VHT80',channels([36,40,44,48]));
 check(c.channel==36 && c.htmode=='VHT80','80 MHz fallback');
-c=run(52,'HE80',channels([149,153]));
-check(c.channel==149 && c.htmode=='HE40','40 MHz fallback');
-c=run(52,'VHT80',channels([165]));
-check(c.channel==165 && c.htmode=='VHT20','20 MHz fallback');
-c=run(52,'HT40',[{freq:5180,no_ir:true},{freq:5745,disabled:true},{freq:5825}]);
-check(c.channel==165 && c.htmode=='HT20','NO_IR/disabled exclusion');
+for (let mode in ['NOHT','HT20','HT40','VHT80','HE80','HE160','EHT80']) {
+    c=run(52,mode,channels([149,153,157,161]));
+    check(c.channel==36 && c.htmode==mode,'fixed 36, preserve '+mode);
+    c=run(52,mode,[]);
+    check(c.channel==36 && c.htmode==mode,'no fallback search with partial frequency data');
+}
 c=run(0,'VHT80',channels([36]));
 check(c.channel==0 && c.acs_exclude_dfs,'ACS filtering');
 c=run(52,'VHT80',channels([36]),true);
@@ -49,11 +56,11 @@ c=run(6,'HT40',[],false,'2g');
 check(c.channel==6 && c.htmode=='HT40','2.4 GHz unchanged');
 c=run(36,'VHT80',channels([36,40,44,48]));
 check(c.channel==36 && c.htmode=='VHT80','non-DFS selection unchanged');
-let rejected=false;
-try {run(52,'VHT80',[{freq:5180,no_ir:true},{freq:5745,disabled:true}]);}
-catch(e) {rejected=true;}
-check(rejected,'must not relax NO_IR if no legal fallback exists');
-print('PASS: actual ucode DFS capability/regulatory/width policy\\n');
+let restricted={freq:5180,no_ir:true,disabled:true};
+c=run(52,'VHT80',[restricted]);
+check(c.channel==36 && c.htmode=='VHT80' && restricted.no_ir && restricted.disabled,
+      'policy must not modify regulatory flags used by hostapd/nl80211');
+print('PASS: fixed channel 36, unchanged bandwidth, DFS/ACS scope and regulatory flags\\n');
 ''')
     def inside(path):
         return '/' + str(path.relative_to(ROOT))

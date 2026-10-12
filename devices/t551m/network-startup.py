@@ -9,18 +9,16 @@ from pathlib import Path
 import re
 
 
-# Based on mu300-linux 47d9463d. Unlike its fallback, never relax NO_IR.
-NO_DFS = '''// unisoc-driver-dfs-capabilities: obey both driver and regulatory data.
+# Based on mu300-linux 47d9463d; fixed channel fallback, no bandwidth changes.
+NO_DFS = '''// unisoc-driver-dfs-capabilities: fixed fallback preserving bandwidth.
 function device_no_dfs(config) {
 	if (config.band != '5g' || phy_features.radar_detect)
 		return;
-	let radar = {}, usable = [];
+	let radar = {};
 	for (let f in phy_capabilities.freqs) {
 		let chan = (f.freq - 5000) / 5;
 		if (f.radar)
 			radar[chan] = true;
-		else if (!f.disabled && !f.no_ir)
-			push(usable, chan);
 	}
 	if (!config.channel) {
 		config.acs_exclude_dfs = true;
@@ -28,24 +26,10 @@ function device_no_dfs(config) {
 	}
 	if (!radar[config.channel])
 		return;
-	let chan = filter([ 36, 149, ...usable ], (c) => c in usable)[0];
-	if (!chan)
-		die(`DFS channel ${config.channel} requires radar detection; no legal non-DFS 5 GHz channel is available`);
-	log(`driver lacks radar detection: using channel ${chan} instead of DFS channel ${config.channel}`);
-	config.channel = chan;
-	let m = match(config.htmode, /^(HT|VHT|HE|EHT)([0-9]+)$/);
-	if (!m)
-		return;
-	let width = min(+m[2], 80);
-	let fits = (list) => length(filter(list, (c) => !(c in usable))) == 0;
-	let off = (chan - (chan >= 149 ? 149 : 36)) % 16;
-	if (width == 80 && !fits(map([ 0, 4, 8, 12 ], (o) => chan - off + o)))
-		width = 40;
-	if (width == 40 && !fits(off % 8 < 4 ? [ chan, chan + 4 ] : [ chan - 4, chan ]))
-		width = 20;
-	if (m[1] == 'HT')
-		width = min(width, 40);
-	config.htmode = m[1] + width;
+	// Fixed fallback requested by the user: only replace the primary channel.
+	// hostapd/nl80211 retain their normal width and regulatory validation.
+	log(`driver lacks radar detection: using channel 36 instead of DFS channel ${config.channel}, preserving ${config.htmode}`);
+	config.channel = 36;
 }
 
 '''
@@ -56,7 +40,15 @@ def patch_wifi_capabilities(root):
     if not path.exists():
         return
     text = path.read_text()
-    if '// unisoc-driver-dfs-capabilities:' in text:
+    marker = '// unisoc-driver-dfs-capabilities:'
+    if marker in text:
+        # Upgrade roots carrying the earlier auto-shrink policy too. Keep
+        # imports/capability collection/call site intact and replace only our
+        # marked policy section, which immediately precedes generate().
+        start = text.index(marker)
+        end = text.index('function generate(config) {', start)
+        if text[start:end] != NO_DFS:
+            path.write_text(text[:start] + NO_DFS + text[end:])
         return
     replacements = [
         ('wiphy_info, wiphy_band\n', 'wiphy_info, wiphy_band, log\n'),
