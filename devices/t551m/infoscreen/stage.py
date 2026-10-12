@@ -208,6 +208,7 @@ def stage(root):
         dest.write_bytes(content.replace('\r\n', '\n').encode())
         dest.chmod(0o644)
     for source, name in [('screen-power.py', 'usr/libexec/t551m-screen-power'),
+                         ('base/session', 'usr/libexec/e5-infoscreen/session'),
                          ('base/update', 'usr/libexec/e5-infoscreen/update'),
                          ('base/service', 'etc/init.d/e5-infoscreen'),
                          ('base/plugin', 'usr/libexec/e5-infoscreen/plugin'),

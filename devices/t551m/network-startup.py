@@ -119,6 +119,16 @@ APN_SELECTION = '''\t# unisoc-apn-selection: shared by E5, T551M and M8 on every
 def patch_root(root, profile='t551m'):
     if profile not in ('t551m', 'e5', 'm8'):
         raise ValueError('Unknown device profile: ' + profile)
+    discovery = root / 'usr/libexec/e5-mm-report-ports'
+    discovery.parent.mkdir(parents=True, exist_ok=True)
+    source = Path(__file__).resolve().parents[2] / 'openwrt/overlay/usr/libexec/e5-mm-report-ports'
+    if source.is_file():
+        discovery.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
+    elif not discovery.is_file():
+        # On-device update hooks live in /opt/e5, outside the source tree.
+        # The helper is installed by the common overlay before these run.
+        raise ValueError('Missing shared SIPC port discovery helper')
+    discovery.chmod(0o755)
     patch_wifi_capabilities(root)
     config = root / 'etc/config/unisoc_modem'
     if config.exists() and profile == 't551m':
@@ -152,7 +162,14 @@ def patch_root(root, profile='t551m'):
 \tfi
 
 ''' + anchor)
-            wrapper.write_text(text)
+        if '# unisoc-port-discovery:' not in text:
+            anchor = '\tmm_report_events_from_cache\n'
+            if text.count(anchor) != 1:
+                raise ValueError('Unexpected ModemManager event replay location')
+            text = text.replace(anchor, anchor + '''\t# unisoc-port-discovery: recover a port created before MM started.
+\t[ ! -x /usr/libexec/e5-mm-report-ports ] || /usr/libexec/e5-mm-report-ports
+''')
+        wrapper.write_text(text)
 
     loader = root / 'etc/init.d/e5-sipc-wwan'
     if loader.exists():
@@ -163,7 +180,14 @@ def patch_root(root, profile='t551m'):
                 raise ValueError('Unexpected SIPC loader')
             text = text.replace(old, old + ' tx_gap_ms=100')
             text = text.replace('insmod $M/sipc_wwan.ko;', 'insmod $M/sipc_wwan.ko tx_gap_ms=100;')
-            loader.write_text(text)
+        if '# unisoc-port-discovery:' not in text:
+            anchor = '\t\techo "sipc_wwan loaded, SIM card $C"'
+            if text.count(anchor) != 1:
+                raise ValueError('Unexpected SIPC port discovery location')
+            text = text.replace(anchor, '''\t\t# unisoc-port-discovery: bypass the global hotplug queue after probe closes.
+\t\t[ ! -x /usr/libexec/e5-mm-report-ports ] || /usr/libexec/e5-mm-report-ports
+''' + anchor)
+        loader.write_text(text)
 
     proto = root / 'lib/netifd/proto/modemmanager.sh'
     if proto.exists():

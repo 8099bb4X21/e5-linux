@@ -82,6 +82,17 @@ def main():
         '-v', f'{root}:/target', '-v', f'{a.block_apk.resolve()}:/input/block.apk:ro',
         '--entrypoint', '/bin/sh', a.apk_image, '-ec',
         'apk --root /target --no-scripts --no-network add --allow-untrusted /input/block.apk')
+    # The SMS forward signs DingTalk webhooks with the openssl CLI and sends SMTP
+    # through msmtp; the clean base carries the backend files without the packages.
+    run('docker', 'run', '--rm', '--platform', 'linux/arm64',
+        '-v', f'{root}:/target', '--entrypoint', '/bin/sh', a.apk_image, '-ec',
+        'apk --root /target --no-scripts add openssl-util msmtp')
+    forward = {}
+    for pkg in ('openssl-util', 'msmtp'):
+        match = re.search(rf'^P:{pkg}$\n^V:(\S+)$', (root / 'lib/apk/db/installed').read_text(), re.M)
+        if not match:
+            raise ValueError(f'the TF image has no {pkg}: the SMS forward needs it')
+        forward[pkg] = match.group(1)
     (root / 'etc/e5/block-mount.build-id').write_bytes(Path(str(a.block_apk) + '.build-id').read_bytes())
     # Do not execute target init scripts on the build host.
     fstab = (root / 'etc/init.d/fstab').read_text()
@@ -138,6 +149,7 @@ def main():
             'build_type': 'incremental assembly; tested package binaries, current sources, rebuilt initramfs',
             'docker_preinstalled': False, 'root_image_bytes': 2147483648,
             'boot_sha256': boot['sha256'], 'block_mount_sha256': digest(a.block_apk),
+            'forward_packages': forward,
             'hardware_validation': 'TF installer and final image not flashed; offline checks only',
             'kernel_manifest': json.loads((a.kernel / 'container-support.json').read_text()),
             'compiled_helpers': helpers,
@@ -233,7 +245,8 @@ def audit(root, profile, release):
     assert (root / 'etc/shadow').read_text().startswith('root::')
     assert (root / 'etc/machine-id').read_text() == ''
     for name in ('sbin/block', 'lib/libblkid-tiny.so', 'etc/init.d/fstab',
-                 'usr/sbin/ModemManager', 'usr/libexec/e5-infoscreen/session'):
+                 'usr/sbin/ModemManager', 'usr/libexec/e5-infoscreen/session',
+                 'usr/bin/openssl', 'usr/bin/msmtp'):
         assert (root / name).stat().st_size, name
     modem = (root / 'etc/config/unisoc_modem').read_text()
     assert ('auto_work_mode' in modem) == (profile == 't551m')
