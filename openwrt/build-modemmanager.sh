@@ -63,11 +63,12 @@ done
 
 # the source patches, numbered after OpenWrt's own
 rm -rf "$WORK/patches" && mkdir -p "$WORK/patches/src" "$WORK/patches/pkg"
-cp "$HERE/tests/voice-identity.py" "$WORK/voice-identity.py"
-cp "$HERE/tests/sim-power.py" "$WORK/sim-power.py"
-cp "$HERE/tests/voice-urc.py" "$WORK/voice-urc.py"
-cp "$HERE/tests/voice-recovery.py" "$WORK/voice-recovery.py"
-cp "$HERE/tests/data-priority-hook.py" "$WORK/data-priority-hook.py"
+TESTS="$TOP/device/openwrt_device_common/tests"
+cp "$TESTS/voice-identity.py" "$WORK/voice-identity.py"
+cp "$TESTS/sim-power.py" "$WORK/sim-power.py"
+cp "$TESTS/voice-urc.py" "$WORK/voice-urc.py"
+cp "$TESTS/voice-recovery.py" "$WORK/voice-recovery.py"
+cp "$TESTS/data-priority-hook.py" "$WORK/data-priority-hook.py"
 n=900
 for p in "$TOP"/rootfs/deb-patches/modemmanager-[0-9][0-9]-*.patch; do
     cp "$p" "$WORK/patches/src/$n-e5-$(basename "$p" | sed 's/^modemmanager-//')"
