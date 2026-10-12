@@ -55,13 +55,27 @@ tools() { name=$1; shift; chroot "$stage" "/usr/sbin/$name" "$@"; }
 gzip -dc /data/local/tmp/openwrt.ext4.gz > "$image"
 [ "$(stat -c %s "$image")" = "$raw" ]
 chmod 600 "$image"
-# Write actual zeroes rather than promising capacity with a sparse file.
+# Reserve real blocks for the selected capacity. fallocate keeps the
+# allocation real without pushing the difference through page cache; the
+# zero-fill is only the fallback for toybox builds without it. Writing
+# gigabytes of zeroes here flooded the phone's page cache and the install
+# was killed mid-write (10 GiB choice, 2026-10-12); the read-back e2fsck
+# below never reads free data blocks, so their content does not matter.
 if [ "$selected_mib" -gt "$raw_mib" ]; then
-    dd if=/dev/zero of="$image" bs=1048576 seek="$raw_mib" \
-        count=$((selected_mib - raw_mib)) conv=notrunc,fsync
+    fallocate -l "$selected" "$image" 2>/dev/null ||
+        dd if=/dev/zero of="$image" bs=1048576 seek="$raw_mib" \
+            count=$((selected_mib - raw_mib)) conv=notrunc,fsync
 fi
 [ "$(stat -c %s "$image")" = "$selected" ] || {
     echo 'image allocation did not reach the selected capacity' >&2; exit 1;
+}
+# The file must own the blocks, not only promise them: f2fs keeps sparse
+# tails unallocated and a too-small /data would fail the write into a
+# promise that fsck had already accepted. MiB only: Android mksh compares
+# byte counts above 32 bits wrongly (the earlier resize2fs no-op).
+allocated_mib=$(( $(stat -c %b "$image") / 2048 ))
+[ "$allocated_mib" -ge "$selected_mib" ] || {
+    echo 'image capacity is not backed by allocated blocks' >&2; exit 1;
 }
 tools e2fsck -f -p /images/openwrt.ext4.part || { rc=$?; [ "$rc" = 1 ] || exit "$rc"; }
 tools resize2fs /images/openwrt.ext4.part "${selected_mib}M"
