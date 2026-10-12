@@ -128,7 +128,8 @@ def audit_root(info):
     different = [name for name in expected if name in found and expected[name] != found[name]]
     if missing or different:
         raise ValueError(f'root source mismatch: missing={sorted(missing)}, changed={different}')
-    kernel = (TOP / 'upstream/out-release/kernel.release').read_text().strip()
+    kernel_out = Path(os.environ.get('E5_UPSTREAM_OUT', TOP / 'upstream/out-release'))
+    kernel = (kernel_out / 'kernel.release').read_text().strip()
     if modules != {kernel}:
         raise ValueError('root modules do not all match the release kernel')
     if int(versions['etc/e5/build-time']) != info['build_epoch']:
