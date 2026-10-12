@@ -14,7 +14,7 @@
 
 Options for the first install (asked for when not given):
   --apn APN            the carrier's APN (default: automatic, from the SIM)
-  --ssid SSID          the hotspot's name (default E5-OpenWrt)
+  --ssid SSID          the hotspot's name (default: <device model>-OpenWrt)
   --wifi-key KEY       the hotspot's WPA2 key, 8-63 characters (default: random)
   -y                   no questions: the defaults, and yes to erasing the card
 
@@ -40,6 +40,7 @@ import threading
 import time
 import struct
 import zlib
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 
 B = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(B, 'files')
@@ -152,6 +153,13 @@ def package_profile():
     if value.get('profile') not in ('e5', 't551m', 'm8') or not value.get('android_models'):
         die('invalid package device profile')
     return value
+
+
+def default_hotspot_name():
+    profile = package_profile()
+    model = {'e5': 'E5', 't551m': 'T551M', 'm8': 'M8'}[
+        profile['profile'] if profile else 'e5']
+    return model + '-OpenWrt'
 
 
 def check_package():
@@ -564,7 +572,7 @@ def install_sd(a):
     if readonly != '0':
         die(f'{sd} is read-only (ro={readonly}); cannot install. Nothing was written.')
 
-    apn, ssid, key = a.apn, a.ssid, a.wifi_key
+    apn, ssid, key = a.apn, a.ssid if a.ssid is not None else default_hotspot_name(), a.wifi_key
     if not a.y:
         if apn is None:
             apn = ask('APN [自动识别 / automatic, from the SIM]: ')
@@ -711,6 +719,65 @@ def install_sd(a):
   若启动失败，设备会在两次尝试后自动回到 Android。
   If the boot fails, the E5 falls back to Android after two tries.''')
 
+DATA_RESERVE = 1 << 30
+DATA_FIRMWARE_BUDGET = 512 << 20
+DATA_ALIGNMENT = 1 << 20
+
+
+def userdata_free():
+    avail = su_checked('读取 userdata 可用空间 / reading userdata free space',
+                       'df -k /data | tail -1').split()
+    if len(avail) < 4 or not avail[3].isdigit():
+        die('cannot read free space on /data')
+    return int(avail[3]) * 1024
+
+
+def ensure_userdata_space(selected, free, uploads):
+    if selected + DATA_RESERVE + DATA_FIRMWARE_BUDGET + uploads > free:
+        die('userdata free space is insufficient for the new image, temporary payloads and '
+            '1 GiB Android reserve. Existing images are not deleted. Nothing was armed.')
+
+
+def choose_userdata_size(a, raw_size, free, uploads):
+    minimum = ((raw_size + DATA_ALIGNMENT - 1) // DATA_ALIGNMENT) * DATA_ALIGNMENT
+    maximum = ((free - DATA_RESERVE - DATA_FIRMWARE_BUDGET - uploads) // DATA_ALIGNMENT) * DATA_ALIGNMENT
+    print(f'   userdata 可用 / free: {free / (1 << 30):.2f} GiB; '
+          f'镜像范围 / image range: {minimum / (1 << 30):.2f}–{maximum / (1 << 30):.2f} GiB')
+    print('   保留至少 1 GiB 给 Android，并预留上传/固件空间；已有系统镜像不计作可回收空间。')
+    if maximum < minimum:
+        die('not enough userdata space for the image and safety reserve')
+    value = getattr(a, 'image_size', None)
+    if value is None and not a.y:
+        value = ask(f'镜像大小（GiB，可输入 4 或 6.5）/ image size '
+                    f'[{minimum / (1 << 30):g}]: ', str(minimum / (1 << 30)))
+    if value is None:
+        return minimum
+    try:
+        amount = Decimal(str(value))
+        if not amount.is_finite() or amount <= 0:
+            raise ValueError()
+        selected = int((amount * (1 << 30) / DATA_ALIGNMENT).to_integral_value(rounding=ROUND_CEILING)) * DATA_ALIGNMENT
+    except (InvalidOperation, ValueError, OverflowError):
+        die('image size must be a positive number in GiB, for example 4 or 6.5')
+    if not minimum <= selected <= maximum:
+        die(f'image size is outside the permitted range ({minimum / (1 << 30):g}–'
+            f'{maximum / (1 << 30):.3f} GiB)')
+    ensure_userdata_space(selected, free, uploads)
+    return selected
+
+
+def stage_userdata_image(raw_size, selected):
+    if raw_size % DATA_ALIGNMENT or selected % DATA_ALIGNMENT:
+        die('userdata image sizes must be aligned to MiB')
+    raw_mib, selected_mib = raw_size // DATA_ALIGNMENT, selected // DATA_ALIGNMENT
+    if not 0 < raw_mib <= selected_mib <= 2147483647:
+        die('userdata image size is outside the supported MiB range')
+    script = os.path.join(F, 'userdata-image.sh')
+    push(script, f'{TMP}/e5-userdata-image.sh', 'userdata-image.sh')
+    su_checked('扩容和只读检查 userdata 镜像 / resizing and verifying userdata image',
+               f'sh {TMP}/e5-userdata-image.sh {raw_size} {selected} {raw_mib} {selected_mib}', timeout=1800)
+
+
 def install(a):
     # checks, device files, OpenWrt, settings, boot image, reboot
     steps(6)
@@ -718,20 +785,27 @@ def install(a):
     android_checks()
     bj = boot_json()
     install_preflight()
-    avail = su('df -k /data | tail -1').split()
-    if len(avail) < 4 or int(avail[3]) < 2621440:
-        die("less than 2.5 GiB free on the phone's storage")
+    img = os.path.join(F, 'openwrt.ext4.gz')
+    raw_size = gz_usize(img)
+    selected = choose_userdata_size(a, raw_size, userdata_free(),
+                                    os.path.getsize(img) + os.path.getsize(os.path.join(F, 'boot.img')))
+    tools = os.path.join(F, 'ext4-tools.tar')
+    if not os.path.isfile(tools):
+        die('missing ext4-tools.tar: use the updated userdata installer package')
+    su_checked('检查已有安装和待提交升级 / checking existing install and pending upgrade',
+               f'test ! -L {D}; test ! -L {D}/openwrt.ext4; '
+               f'test ! -e {D}/openwrt.ext4.part; test ! -L {D}/openwrt.ext4.part; '
+               f'test ! -e {D}/openwrt.ext4.new; test ! -L {D}/openwrt.ext4.new')
     if not a.y:
         say("安装到 userdata（旧方式）/ installing to the phone's storage (userdata)")
-        print('   OpenWrt goes into a file on userdata (/data/e5linux), about 1.1 GiB of it,')
-        print('   the way it was before the SD card.  The SD card is the default install;')
-        print('   this form is the fallback, for a device whose slot is not usable.  It')
-        print("   writes to the phone's own storage, so it asks three times.")
+        print(f'   OpenWrt 镜像 / image: {selected / (1 << 30):.2f} GiB, /data/e5linux/openwrt.ext4')
+        print('   不格式化 userdata；安装完成后手动重启。已有镜像会保留为备份。')
+        print('   userdata is not formatted; an existing image is kept as a backup. Reboot manually.')
         for n in (1, 2, 3):
             if not confirm(f'   确认 {n}/3 -- 输入 yes 继续 / type yes to continue: '):
                 die('aborted: nothing was written')
 
-    apn, ssid, key = a.apn, a.ssid, a.wifi_key
+    apn, ssid, key = a.apn, a.ssid if a.ssid is not None else default_hotspot_name(), a.wifi_key
     if not a.y:
         if apn is None:
             apn = ask('APN [自动识别 / automatic, from the SIM]: ')
@@ -745,16 +819,22 @@ def install(a):
         die("the hotspot key must have 8-63 characters, and no ' anywhere")
 
     with tempfile.TemporaryDirectory() as work:
-        size = pull_device_files(work)
-        print(f'   device-files.tar: {size} bytes (stays on the device)')
-        bootchain('sync')
+        firmware = f'{TMP}/e5-data-device-files.tar'
+        size = pull_device_files(work, firmware)
+        print(f'   device-files.tar: {size} bytes')
+        push(img, f'{TMP}/openwrt.ext4.gz', 'openwrt.ext4.gz')
+        push(os.path.join(F, 'boot.img'), f'{TMP}/e5-boot.img', 'boot.img')
+        push(tools, f'{TMP}/e5-ext4-tools.tar', 'ext4-tools.tar')
+        # Recheck after uploads/firmware collection, so Android concurrent writes
+        # cannot turn the initial capacity estimate into a partial installation.
+        ensure_userdata_space(selected, userdata_free(), 0)
 
         say(f'写入 OpenWrt / OpenWrt -> {D}/openwrt.ext4')
-        push(os.path.join(F, 'openwrt.ext4.gz'), f'{TMP}/openwrt.ext4.gz', 'openwrt.ext4.gz')
-        with busy('解压到手机存储 / unpacking onto the phone (1 GiB)'):
-            su(f'gzip -dc {TMP}/openwrt.ext4.gz > {D}/openwrt.ext4.part && mv {D}/openwrt.ext4.part {D}/openwrt.ext4; '
-               f'rm -f {TMP}/openwrt.ext4.gz {D}/openwrt.ext4.new {D}/openwrt.ext4.old', timeout=900)
-        print('   ' + su(f'ls -l {D}/openwrt.ext4').split()[4] + ' bytes')
+        with busy('创建、扩容并检查镜像 / creating, resizing and checking image'):
+            stage_userdata_image(raw_size, selected)
+        # The completed image was mounted read-only and checked before any
+        # boot-chain write. No original Android/NV partition is formatted.
+        bootchain('sync')
 
         say('首次启动设置 / the first boot\'s settings')
         conf = os.path.join(work, 'install.conf')
@@ -763,18 +843,27 @@ def install(a):
                     f"E5_APN='{apn}'\nE5_WIFI_SSID='{ssid}'\nE5_WIFI_KEY='{key}'\n"
                     "E5_WIFI_CHANNEL='149'\nE5_DEFAULT_BOOT='linux'\n")
         adb('push', conf, f'{TMP}/e5-install.conf', check=True)
-        su(f'mv {TMP}/e5-install.conf {D}/openwrt-install.conf && chmod 600 {D}/openwrt-install.conf')
-        # OpenWrt from now on, also when an e5-linux Debian is installed as well
-        su(f'rm -f {D}/boot-os-next; echo openwrt > {D}/boot-os')
+        su_checked('提交用户态镜像 / committing userdata image',
+                   f'backup={D}/previous.$(date +%Y%m%d-%H%M%S).$$; '
+                   f'if [ -e {D}/openwrt.ext4 ]; then mkdir "$backup"; '
+                   f'mv {D}/openwrt.ext4 "$backup/openwrt.ext4"; '
+                   f'for n in device-files.tar openwrt-install.conf; do '
+                   f'[ ! -e {D}/$n ] || cp -p {D}/$n "$backup/$n"; done; fi; '
+                   f'mv {D}/openwrt.ext4.part {D}/openwrt.ext4; '
+                   f'mv {firmware} {D}/device-files.tar; '
+                   f'mv {TMP}/e5-install.conf {D}/openwrt-install.conf; '
+                   f'chmod 600 {D}/openwrt.ext4 {D}/device-files.tar {D}/openwrt-install.conf; sync')
 
     say('写入启动镜像 / boot image -> boot_b')
-    push(os.path.join(F, 'boot.img'), f'{TMP}/e5-boot.img', 'boot.img')
     with busy('写入并校验 boot_b / writing and verifying boot_b'):
-        su(f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M 2>/dev/null; sync')
+        su_checked('写入 boot_b / writing boot_b',
+                   f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M conv=fsync; sync')
         ok = su('sha256sum /dev/block/by-name/boot_b').split()[0:1] == [bj['sha256']]
     if not ok:
         die('boot_b did not verify; Android stays as it is')
     su(f'rm -f {TMP}/e5-boot.img')
+    su_checked('记录 userdata 启动目标 / saving userdata boot target',
+               f'rm -f {D}/boot-os-next; echo openwrt > {D}/boot-os; sync')
     arm_slot_b()
 
     say('安装完成，请手动重启进入 OpenWrt / installed; reboot manually to enter OpenWrt')
@@ -939,10 +1028,13 @@ def main():
     g.add_argument('--data', action='store_true',
                    help="install to the phone's storage (userdata) as before; the SD card is the default")
     ap.add_argument('--apn')
-    ap.add_argument('--ssid', default='E5-OpenWrt')
+    ap.add_argument('--ssid', help='hotspot name; defaults to the package device model plus -OpenWrt')
     ap.add_argument('--wifi-key')
+    ap.add_argument('--image-size', help='userdata image size in GiB (e.g. 4 or 6.5); requires --data')
     ap.add_argument('-y', action='store_true')
     a = ap.parse_args()
+    if a.image_size is not None and not a.data:
+        ap.error('--image-size requires --data / install-userdata')
     if sys.version_info < (3, 8):
         die('Python 3.8 or newer is needed')
     check_package()

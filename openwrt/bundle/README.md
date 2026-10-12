@@ -14,6 +14,15 @@ installs into the phone's storage instead -- the form before the card.
 
 ## You need
 
+For installation without an SD card, run `install-userdata.cmd` (Windows) or
+`bash install-userdata.sh` (Linux/macOS). The installer shows userdata free
+space and asks for an image size in GiB; `--image-size 4` selects 4 GiB.
+It reserves at least 1 GiB for Android plus temporary payload space, allocates
+and resizes a new ext4 file, then verifies it read-only before committing.
+userdata itself is not formatted. Existing images remain in a timestamped
+`/data/e5linux/previous.*` directory. A fresh install uses default OpenWrt
+settings; the previous image is kept as a backup. Reboot manually when done.
+
 * a matching device with an **unlocked bootloader** and Android rooted with **Magisk**;
 * Android running from slot a (as it comes from the factory);
 * an **SD card of 4 GB or more** (8 GB recommended): it is partitioned and erased, and

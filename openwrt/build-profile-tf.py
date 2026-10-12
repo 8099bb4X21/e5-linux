@@ -158,7 +158,8 @@ def main():
     run('e2fsck', '-fn', image)
     with (files / 'openwrt.ext4.gz').open('wb') as out:
         run('gzip', '-1', '-c', image, stdout=out)
-    for n in ('flash.py', 'flash.cmd', 'flash.sh', 'README.md', 'README.zh-CN.md'):
+    runpy.run_path(str(TOP / 'openwrt/prepare-ext4-tools.py'))['build'](root, files / 'ext4-tools.tar')
+    for n in ('flash.py', 'flash.cmd', 'flash.sh', 'install-userdata.cmd', 'install-userdata.sh', 'README.md', 'README.zh-CN.md'):
         shutil.copy2(TOP / 'openwrt/bundle' / n, package / n)
     for n in ('device-install-image.sh', 'device-flash-boot.sh'):
         shutil.copy2(TOP / 'openwrt' / n, files / n)
@@ -166,6 +167,7 @@ def main():
         target = files / Path(src).name
         target.write_bytes((TOP / src).read_bytes().replace(b'\r\n', b'\n'))
         target.chmod(0o755)
+    (files / 'userdata-image.sh').write_bytes((TOP / 'openwrt/bundle/userdata-image.sh').read_bytes().replace(b'\r\n', b'\n'))
     tools = package / 'scripts/tools'
     tools.mkdir(parents=True)
     for n in ('e5-telnet.py', 'sprd-bt-config.py'):

@@ -131,6 +131,10 @@ P=$S/$NAME
 mkdir -p "$P/files" "$P/scripts/tools"
 # the flasher: flash.py (Windows, macOS, Linux), started by flash.cmd / flash.sh
 cp "$HERE/bundle/flash.py" "$HERE/bundle/flash.sh" "$HERE/bundle/flash.cmd" "$P/"
+cp "$HERE/bundle/install-userdata.cmd" "$HERE/bundle/install-userdata.sh" "$P/"
+cp "$HERE/bundle/userdata-image.sh" "$P/files/"
+test -f "$OUT/ext4-tools.tar" || { echo 'Missing ext4-tools.tar: openwrt/prepare-ext4-tools.py --root CLEAN_ARM64_ROOT --out out/openwrt/ext4-tools.tar' >&2; exit 1; }
+cp "$OUT/ext4-tools.tar" "$P/files/"
 chmod 755 "$P/flash.py" "$P/flash.sh"
 cp "$HERE/bundle/README.md" "$HERE/bundle/README.zh-CN.md" "$P/"
 cp "$TOP/LICENSE" "$P/LICENSE"

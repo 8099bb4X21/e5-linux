@@ -48,7 +48,7 @@ set -euo pipefail
 # 12: confirm transient empty call lists and adopt existing outgoing CP calls.
 # 13: serialize hangup, settle before redial and ignore pre-hangup CLCC snapshots.
 # 14: detached, owner-aware CEUS/CEMODE confirmation with bounded retries.
-E5REV=14
+E5REV=15
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"

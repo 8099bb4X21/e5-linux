@@ -71,6 +71,20 @@
 
 ## 使用
 
+### 安装到 userdata（无需 TF 卡）
+
+Windows 双击 `install-userdata.cmd`，Linux/macOS 运行 `bash install-userdata.sh`。
+也可以运行 `flash.cmd --data` / `bash flash.sh --data`。
+脚本显示 `/data` 可用空间和镜像大小范围，让你输入 GiB 数值，例如 `4` 或 `6.5`。
+镜像至少为包内根镜像大小（本批为 2 GiB），至少为 Android 保留 1 GiB，另计临时上传和固件空间。
+命令行可指定 `install-userdata.cmd --image-size 4`；加 `-y` 且未指定大小时使用最小镜像。
+
+此安装只创建 `/data/e5linux/openwrt.ext4` 文件，不格式化 userdata。
+随包携带 ARM64/musl 的 ext4 扩容工具；先完整分配镜像空间，扩容、fsck、只读挂载检查，
+通过后才同步 B 槽启动链和提交系统。旧镜像保存在 `/data/e5linux/previous.<时间>.<进程号>/`，
+不自动删除，也不把它的空间算入可用空间。存在未完成 `.part` 或待提交 `.new` 时停止，请先检查。
+安装完成后手动重启。首次安装会使用新的 OpenWrt 默认配置，旧镜像作为备份保留。
+
 * 热点：用刷机时设置的名称和密码连接；或用 USB 线连接电脑（USB 网卡）。
 * 管理页面 LuCI（中文、Aurora 主题）：`http://192.168.9.1`，用户 `root`，密码 `root`，**请尽快修改**
   （LuCI → 系统 → 管理权，或 SSH 里运行 `passwd`）。

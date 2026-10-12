@@ -100,6 +100,7 @@ def sources():
 				resetIdle();
 			}
 			T551M.status(st);
+			stAPNSync(st);
 			applyTouch();''')
     app = replace(app, "\tpage = (n + pages.length) % pages.length;", "\tpage = (n + pages.length) % pages.length;\n\tT551M.page(page);")
     app = replace(app, '\t\tif (!st.screen.donate_seen) donateOnce();', '\t\tif (!st.screen.donate_seen) post(\'donate-seen\');')
@@ -185,6 +186,7 @@ async function loadAdvanced() {
     index = replace(index, '<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="style.css">\n<link rel="stylesheet" href="mobile.css">')
     index = replace(index, '<script src="app.js"></script>', '<script src="transport.js"></script>\n<script src="power-menu.js"></script>\n<script src="mobile.js"></script>\n<script src="calls.js"></script>\n<script src="app.js"></script>')
     index = replace(index, '<section class="page" data-title="adv_info">', '<section class="page" data-title="adv_info"><div id="ad-freshness" hidden></div>')
+    app += '\n' + (HERE / 'apn.js').read_text(encoding='utf-8')
     return {'www/app.js': app, 'api.uc': api, 'settings.uc': settings, 'www/index.html': index,
             'updates.uc': (HERE / 'base/updates.uc').read_text(encoding='utf-8'),
             'ADAPTATION': 'e5-device-ui-v1\n',
