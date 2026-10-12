@@ -14,36 +14,14 @@ import runpy
 import sys
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('root', type=Path)
-    ap.add_argument('--kernel', type=Path, required=True)
-    ap.add_argument('--credentials', type=Path, required=True)
-    ap.add_argument('--persistent', action='store_true', help='Use with the --persistent boot image')
-    a = ap.parse_args()
-    root = a.root.resolve()
-    if root == Path('/') or not (root / 'etc/openwrt_release').is_file():
-        raise SystemExit('Expected a mounted offline OpenWrt image')
-    if not (root / 'opt/e5/android/apex/com.android.runtime/bin/linker').is_file():
-        raise SystemExit('Extract T551M device-files.tar into this image first')
+def stage(root, persistent=True):
+    """Stage board programs without credentials, firmware or kernel changes."""
+    root = Path(root).resolve()
+    if root == Path('/'):
+        raise ValueError('Expected an offline root')
     top = Path(__file__).resolve().parents[2]
-    release = (a.kernel / 'kernel.release').read_text().strip()
-    if '-t551m' not in release:
-        raise SystemExit('Expected the T551M kernel build')
-    # Include on-demand virtualization/networking modules and their indexes,
-    # alongside the existing audio/modem aliases used by board services.
-    subprocess.run([sys.executable, str(top / 'upstream/stage-root-modules.py'),
-                    str(a.kernel), '--root', str(root)], check=True)
-    # OpenWrt has no generic modalias loader in this image. Load the host
-    # storage drivers once so later OTG attachments can bind automatically.
-    modules_d = root / 'etc/modules.d'
-    modules_d.mkdir(parents=True, exist_ok=True)
-    storage_modules = modules_d / '55-usb-host-storage'
-    shutil.copyfile(Path(__file__).with_name('usb-host-storage.modules'), storage_modules)
-    storage_modules.chmod(0o644)
-    network_modules = modules_d / '56-usb-host-network'
-    shutil.copyfile(Path(__file__).with_name('usb-host-network.modules'), network_modules)
-    network_modules.chmod(0o644)
+    from types import SimpleNamespace
+    a = SimpleNamespace(persistent=persistent)
     for name in ('vendor-start.sh', 'android-run', 'e5-modem-coldboot'):
         dst = root / 'opt/e5' / name
         shutil.copy2(top / 'rootfs/overlay/opt/e5' / name, dst)
@@ -116,30 +94,6 @@ service_stopped() {
         '[ "$(cat /etc/e5/device-profile 2>/dev/null)" = t551m ] && return 1; case')
     (root / 'opt/e5/e5-next-boot').write_text(next_boot)
     (root / 'opt/e5/e5-next-boot').chmod(0o755)
-    if a.credentials.exists():
-        credentials = json.loads(a.credentials.read_text())
-    else:
-        credentials = {'username': 'root', 'password': secrets.token_urlsafe(16),
-                       'ssid': 'OpenWrt', 'wifi_key': secrets.token_urlsafe(12)}
-        a.credentials.parent.mkdir(parents=True, exist_ok=True)
-        a.credentials.write_text(json.dumps(credentials, indent=2) + '\n')
-        a.credentials.chmod(0o600)
-    hashed = subprocess.check_output(['openssl', 'passwd', '-6', '-stdin'],
-                                    input=credentials['password'].encode()).decode().strip()
-    shadow = root / 'etc/shadow'
-    lines = shadow.read_text().splitlines()
-    shadow.write_text('\n'.join(':'.join([f[0], hashed, *f[2:]]) if f[0] == 'root' else ':'.join(f)
-                                for f in (l.split(':') for l in lines)) + '\n')
-    shadow.chmod(0o600)
-    install = root / 'etc/e5/install.conf'
-    install.write_text("E5_DEFAULT_BOOT=" + ('linux' if a.persistent else 'android') + "\nE5_WIFI_SSID='" + credentials['ssid']
-                       + "'\nE5_WIFI_KEY='" + credentials['wifi_key'] + "'\n")
-    install.chmod(0o600)
-    defaults = root / 'etc/uci-defaults/99-t551m'
-    defaults.write_text("#!/bin/sh\nuci set system.@system[0].hostname='OpenWrt'\n"
-                        "uci set system.@system[0].zonename='Asia/Singapore'\n"
-                        "uci set system.@system[0].timezone='SGT-8'\nuci commit system\n")
-    defaults.chmod(0o755)
     (root / 'etc/e5/device-profile').write_text('t551m\n')
     for source, target in [('charge-mode.py', 'usr/libexec/e5-charge-mode'),
                            ('charge-screen.py', 'usr/libexec/e5-charge-screen'),
@@ -168,6 +122,63 @@ service_stopped() {
     link = root / 'etc/rc.d/S25t551m-usb'
     if not link.is_symlink():
         link.symlink_to('../init.d/t551m-usb')
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('root', type=Path)
+    ap.add_argument('--kernel', type=Path, required=True)
+    ap.add_argument('--credentials', type=Path, required=True)
+    ap.add_argument('--persistent', action='store_true', help='Use with the --persistent boot image')
+    a = ap.parse_args()
+    root = a.root.resolve()
+    if root == Path('/') or not (root / 'etc/openwrt_release').is_file():
+        raise SystemExit('Expected a mounted offline OpenWrt image')
+    if not (root / 'opt/e5/android/apex/com.android.runtime/bin/linker').is_file():
+        raise SystemExit('Extract T551M device-files.tar into this image first')
+    top = Path(__file__).resolve().parents[2]
+    release = (a.kernel / 'kernel.release').read_text().strip()
+    if '-t551m' not in release:
+        raise SystemExit('Expected the T551M kernel build')
+    # Include on-demand virtualization/networking modules and their indexes,
+    # alongside the existing audio/modem aliases used by board services.
+    subprocess.run([sys.executable, str(top / 'upstream/stage-root-modules.py'),
+                    str(a.kernel), '--root', str(root)], check=True)
+    # OpenWrt has no generic modalias loader in this image. Load the host
+    # storage drivers once so later OTG attachments can bind automatically.
+    modules_d = root / 'etc/modules.d'
+    modules_d.mkdir(parents=True, exist_ok=True)
+    storage_modules = modules_d / '55-usb-host-storage'
+    shutil.copyfile(Path(__file__).with_name('usb-host-storage.modules'), storage_modules)
+    storage_modules.chmod(0o644)
+    network_modules = modules_d / '56-usb-host-network'
+    shutil.copyfile(Path(__file__).with_name('usb-host-network.modules'), network_modules)
+    network_modules.chmod(0o644)
+    stage(root, persistent=a.persistent)
+    if a.credentials.exists():
+        credentials = json.loads(a.credentials.read_text())
+    else:
+        credentials = {'username': 'root', 'password': secrets.token_urlsafe(16),
+                       'ssid': 'OpenWrt', 'wifi_key': secrets.token_urlsafe(12)}
+        a.credentials.parent.mkdir(parents=True, exist_ok=True)
+        a.credentials.write_text(json.dumps(credentials, indent=2) + '\n')
+        a.credentials.chmod(0o600)
+    hashed = subprocess.check_output(['openssl', 'passwd', '-6', '-stdin'],
+                                    input=credentials['password'].encode()).decode().strip()
+    shadow = root / 'etc/shadow'
+    lines = shadow.read_text().splitlines()
+    shadow.write_text('\n'.join(':'.join([f[0], hashed, *f[2:]]) if f[0] == 'root' else ':'.join(f)
+                                for f in (l.split(':') for l in lines)) + '\n')
+    shadow.chmod(0o600)
+    install = root / 'etc/e5/install.conf'
+    install.write_text("E5_DEFAULT_BOOT=" + ('linux' if a.persistent else 'android') + "\nE5_WIFI_SSID='" + credentials['ssid']
+                       + "'\nE5_WIFI_KEY='" + credentials['wifi_key'] + "'\n")
+    install.chmod(0o600)
+    defaults = root / 'etc/uci-defaults/99-t551m'
+    defaults.write_text("#!/bin/sh\nuci set system.@system[0].hostname='OpenWrt'\n"
+                        "uci set system.@system[0].zonename='Asia/Singapore'\n"
+                        "uci set system.@system[0].timezone='SGT-8'\nuci commit system\n")
+    defaults.chmod(0o755)
     print('Prepared T551M ' + ('persistent' if a.persistent else 'trial') + ' root, kernel ' + release)
 
 

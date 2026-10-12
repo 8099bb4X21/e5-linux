@@ -141,6 +141,7 @@ cp "$BOOT.misc-slot-b-trial.bin" "$P/files/boot-misc-slot-b.bin"
 cp "$HERE/device-install-image.sh" "$HERE/device-flash-boot.sh" "$HERE/bundle/collect-device-files.sh" \
    "$HERE/overlay/usr/libexec/e5-gpt" "$P/files/"
 cp "$TOP/tools/e5-telnet.py" "$TOP/tools/sprd-bt-config.py" "$P/scripts/tools/"
+cp "$TOP/tools/android-bootchain.sh" "$P/files/android-bootchain.sh"
 cp -R "$TOP/tools/vbc-profile" "$P/scripts/tools/"
 find "$P" \( -name .DS_Store -o -name __pycache__ \) -prune -exec rm -rf {} +
 printf "e5-openwrt-flash %s (OpenWrt %s, e5-linux %s, kernel %s)\n" \

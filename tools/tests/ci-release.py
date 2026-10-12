@@ -80,6 +80,10 @@ class RootAudit(unittest.TestCase):
             (top / 'upstream/out-release').mkdir(parents=True)
             (top / 'upstream/out-release/kernel.release').write_text('6.18-e5\n')
             (top / 'rootfs/overlay/opt/e5').mkdir(parents=True)
+            for name in release.BLOCK_SOURCES:
+                target = top / 'openwrt' / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((TOP / 'openwrt' / name).read_bytes())
             for name in ('vendor-start.sh', 'e5-modem-coldboot'):
                 (top / 'rootfs/overlay/opt/e5' / name).write_bytes(b'startup fixture')
                 files = {**files, 'opt/e5/' + name: b'startup fixture'}
@@ -96,7 +100,9 @@ class RootAudit(unittest.TestCase):
     def files(self):
         return {'usr/share/e5-infoscreen/VERSION': b'1.6.3',
                 'etc/e5-infoscreen/plugins/phone/manifest.json': json.dumps({'version': '1.4'}).encode(),
-                'etc/e5/build-time': b'123', 'lib/modules/6.18-e5/modem/sipc_wwan.ko': b'module'}
+                'etc/e5/build-time': b'123', 'lib/modules/6.18-e5/modem/sipc_wwan.ko': b'module',
+                'etc/e5/block-mount.build-id': (release.block_build_id() + '\n').encode(),
+                'sbin/block': b'block', 'lib/libblkid-tiny.so': b'library', 'etc/init.d/fstab': b'init'}
 
     def test_same_release_and_epoch_pass(self):
         self.assertEqual(self.audit(self.files())['phone_version'], '1.4')
@@ -114,6 +120,18 @@ class RootAudit(unittest.TestCase):
     def test_device_firmware_rejected(self):
         files = self.files(); files['lib/firmware/wcnmodem.bin'] = b'device firmware'
         with self.assertRaisesRegex(ValueError, 'device-specific'):
+            self.audit(files)
+
+    def test_unguarded_mount_package_rejected(self):
+        files = self.files()
+        files['etc/e5/block-mount.build-id'] = b'old-package\n'
+        with self.assertRaisesRegex(ValueError, 'source mismatch'):
+            self.audit(files)
+
+    def test_missing_mount_package_payload_rejected(self):
+        files = self.files()
+        del files['sbin/block']
+        with self.assertRaisesRegex(ValueError, 'block-mount payload missing'):
             self.audit(files)
 
 

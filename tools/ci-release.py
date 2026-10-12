@@ -16,6 +16,15 @@ import zipfile
 TOP = Path(__file__).resolve().parents[1]
 UTC8 = timezone(timedelta(hours=8))
 RELEASE = TOP / 'out/release'
+BLOCK_SOURCES = ('block-mount.Dockerfile', 'build-block-mount.sh',
+                 'build-block-mount-inner.sh', 'block-probe-guard.h',
+                 'patches/fstools-probe-device-types.patch')
+
+
+def block_build_id():
+    # Same ordered input bytes as build-block-mount.sh's cache stamp.
+    return hashlib.sha256(b''.join((TOP / 'openwrt' / name).read_bytes()
+                                   for name in BLOCK_SOURCES)).hexdigest()
 
 
 def digest(stream):
@@ -91,6 +100,7 @@ def audit_root(info):
     # than openwrt/overlay. Verify the selective cold-start adapter as well.
     for name in ('vendor-start.sh', 'e5-modem-coldboot'):
         expected['opt/e5/' + name] = file_digest(TOP / 'rootfs/overlay/opt/e5' / name)
+    expected['etc/e5/block-mount.build-id'] = hashlib.sha256((block_build_id() + '\n').encode()).hexdigest()
     found, versions, modules = {}, {}, set()
     rootfs = TOP / 'work/openwrt' / f'e5-openwrt-{info["openwrt_version"]}-generic-rootfs.tar.gz'
     if not rootfs.is_file():
@@ -98,7 +108,8 @@ def audit_root(info):
     forbidden = re.compile(r'^(?:lib/firmware/(?:wcnmodem|gnssmodem|l_agdsp|wifi_board|sprd/)|'
                            r'opt/e5/android/.+|etc/e5/install\.conf|etc/dropbear/dropbear_.+_host_key|etc/ssh/ssh_host_)')
     wanted = {'usr/share/e5-infoscreen/VERSION', 'etc/e5-infoscreen/plugins/phone/manifest.json',
-              'etc/e5/build-time', 'etc/machine-id'}
+              'etc/e5/build-time', 'etc/machine-id',
+              'sbin/block', 'lib/libblkid-tiny.so', 'etc/init.d/fstab'}
     with tarfile.open(rootfs, 'r|gz') as archive:
         for entry in archive:
             name = entry.name.removeprefix('./')
@@ -118,6 +129,9 @@ def audit_root(info):
     different = [name for name in expected if name in found and expected[name] != found[name]]
     if missing or different:
         raise ValueError(f'root source mismatch: missing={sorted(missing)}, changed={different}')
+    for name in ('sbin/block', 'lib/libblkid-tiny.so', 'etc/init.d/fstab'):
+        if not versions.get(name):
+            raise ValueError('guarded block-mount payload missing: ' + name)
     kernel = (TOP / 'upstream/out-release/kernel.release').read_text().strip()
     if modules != {kernel}:
         raise ValueError('root modules do not all match the release kernel')
@@ -169,6 +183,8 @@ def verify():
     if listed != expected_members:
         raise ValueError('bundle SHA256SUMS mismatch')
     for name, path in [('files/boot.img', TOP / 'work/boot-linux-slotb-bundle-mainline.img'),
+                       ('files/android-bootchain.sh', TOP / 'tools/android-bootchain.sh'),
+                       ('flash.py', TOP / 'openwrt/bundle/flash.py'),
                        ('files/openwrt.ext4.gz', TOP / 'out/openwrt' / f'e5-openwrt-{info["openwrt_version"]}-generic.ext4.gz')]:
         if members[name] != file_digest(path):
             raise ValueError('bundle uses a different build output: ' + name)
@@ -193,6 +209,7 @@ def verify():
         expected = {p.name: p.read_bytes() for p in (TOP / 'magisk/e5-linux-switch').iterdir() if p.name != 'bootctl.c'}
         expected['README.md'] = (TOP / 'magisk/README.md').read_bytes()
         expected['sd-registry.sh'] = (TOP / 'rootfs/overlay/opt/e5/e5-sd-registry').read_bytes()
+        expected['bootchain.sh'] = (TOP / 'tools/android-bootchain.sh').read_bytes()
         if set(module.namelist()) != set(expected) | {'e5-bootctl'} or module.testzip() is not None:
             raise ValueError('Magisk module member or CRC mismatch')
         for name, content in expected.items():

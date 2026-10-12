@@ -1,18 +1,22 @@
-# OpenWrt for the Rongyue E5 -- one-click flash package
+# OpenWrt for E5 / T551M / VIPME M8 -- one-click flash package
 
 > 中文：[`README.zh-CN.md`](README.zh-CN.md)
 
+Use the package matching your device. `files/device-profile.json` identifies
+the target; installation and upgrades check it. Legacy packages without that
+file are for E5 only. Never flash a different model's package.
+
 Installs OpenWrt 25.12 (5G WAN, hotspot, LuCI and the info screen on the
-panel) on a Rongyue E5, next to its Android: Android stays as it is, OpenWrt
+panel) next to Android: Android stays as it is, OpenWrt
 goes onto the **SD card** (a partition of its own; the rest of the card is left
 free) and boots from `boot_b`.  Android is always one step away.  `--data`
 installs into the phone's storage instead -- the form before the card.
 
 ## You need
 
-* a Rongyue E5 with an **unlocked bootloader** and Android rooted with **Magisk**;
+* a matching device with an **unlocked bootloader** and Android rooted with **Magisk**;
 * Android running from slot a (as it comes from the factory);
-* an **SD card of 2 GB or more** in the slot: it is partitioned and erased, and
+* an **SD card of 4 GB or more** (8 GB recommended): it is partitioned and erased, and
   its free space stays free for more partitions later.  With `--data` instead,
   no card is needed and 2.5 GB must be free on the phone's storage;
 * a Windows, macOS or Linux computer with:
@@ -50,30 +54,35 @@ installs into the phone's storage instead -- the form before the card.
    `yes`.  Anything else, or no answer, stops it with the card untouched.  (-y
    skips the questions.)
 
-4. When it says done, the E5 reboots into OpenWrt; the first boot takes about
-   two minutes.
+4. When it says done, reboot manually into OpenWrt. Installation does not
+   automatically reboot; the first boot takes about two minutes.
 
 What it does:
 
 * checks the package, the device (root, slot a, unlocked, the boot control
-  block) and the free space;
+  block's live BCAB format/CRC and fallback state) and the free space;
 * **pulls this device's own** Wi-Fi/BT/audio firmware and the vendor files
   that boot the baseband off its Android, as `/data/e5linux/device-files.tar`.
   The package carries no device's firmware: those files are the vendor's, and
   they carry each unit's identity (BT address, serial number), so every
-  device uses its own;
+  device uses its own. Collection, conversion and payload uploads finish before
+  erasing the card;
+* after Android releases the card, backs up differing `uboot/sml/teecfg/trustos/vbmeta`
+  images from both slots under `/data/adb/e5-bootchain/`, then copies A to B and
+  verifies readback. Identical images are not rewritten. On failure it attempts
+  to restore changed B images and stops without switching slots. NV is excluded;
 * partitions the **SD card** (GPT, one Linux partition) and writes the OpenWrt
   image onto it: the partition *is* the root filesystem, which the initramfs
   mounts straight (the card is marked `/etc/e5/sd-root`).  The partition is only
   as large as the image, so the rest of the card stays free for more systems or
   a store of its own;
 * unpacks this device's files into it and writes the first boot's settings to
-  its `/etc/e5/install.conf`;
+  its `/etc/e5/install.conf`. Unmounts, flushes and remounts read-only to check
+  critical files and firmware hashes before writing boot;
 * writes the boot image to `boot_b`, verifies it, and points the next boot at
-  slot b.  **Slot a's Android is not touched.**  The only write outside the card
-  is `e5linux/boot-os` on userdata -- a few bytes recording that the card is the
-  system to boot (it is what makes a later `--data` install win over the card
-  again, and the card still boots when userdata cannot be written);
+  slot b. **Slot a's Android is not touched.** It also saves the boot target in
+  `e5linux/boot-os` on userdata. Finally it backs up the live 32-byte misc boot
+  control block, derives B's trial state from it and verifies the bounded write;
 * `--data` instead writes the image to `/data/e5linux/openwrt.ext4` and the
   first boot's settings to `/data/e5linux/openwrt-install.conf`, and asks three
   times before it writes anything.
@@ -101,6 +110,11 @@ flash.cmd --boot-openwrt          (Windows; macOS / Linux: ./flash.sh --boot-ope
 
 A failed OpenWrt boot falls back to Android on its
 own after two tries.
+
+`--boot-openwrt` and the Magisk switch module check/synchronize the chain before
+switching slots and rebooting. Android A/Linux B and the GPT layout with reserved
+update space remain required; reverse-slot installation and whole-partition
+formatting are not enabled by this change.
 
 If installation fails, keep the complete terminal error. It identifies the
 failed stage (partitioning, writing, mounting, extracting device files or

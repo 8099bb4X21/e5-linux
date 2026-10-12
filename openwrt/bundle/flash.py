@@ -38,6 +38,8 @@ import tarfile
 import tempfile
 import threading
 import time
+import struct
+import zlib
 
 B = os.path.dirname(os.path.abspath(__file__))
 F = os.path.join(B, 'files')
@@ -139,6 +141,17 @@ def gz_usize(path):
 def boot_json():
     with open(os.path.join(F, 'boot.json')) as f:
         return json.load(f)
+
+
+def package_profile():
+    path = os.path.join(F, 'device-profile.json')
+    if not os.path.isfile(path):
+        return None  # Legacy E5 packages did not carry a profile manifest.
+    with open(path, encoding='utf-8') as stream:
+        value = json.load(stream)
+    if value.get('profile') not in ('e5', 't551m', 'm8') or not value.get('android_models'):
+        die('invalid package device profile')
+    return value
 
 
 def check_package():
@@ -266,19 +279,79 @@ def od_hex(path_or_cmd):
 
 
 def arm_slot_b():
-    local = os.path.join(F, 'boot-misc-slot-b.bin')
-    adb('push', local, f'{TMP}/e5-bc-b.bin', check=True)
-    su(f'dd if={TMP}/e5-bc-b.bin of=/dev/block/by-name/misc bs=1 seek=2048 conv=notrunc 2>/dev/null; sync')
-    with open(local, 'rb') as f:
-        want = f.read().hex()
-    if od_hex(None) != want:
-        die('arming slot b failed')
-    su(f'rm -f {TMP}/e5-bc-b.bin')
+    # Derive metadata from this device, not the package author's misc snapshot.
+    before = read_boot_control()
+    trial = bytearray(before)
+    trial[:4] = b'_b\0\0'
+    trial[12] = (before[12] & 0xf0) | 14
+    trial[14] = 0x2f
+    trial[28:] = struct.pack('<I', zlib.crc32(trial[:28]))
+    with tempfile.TemporaryDirectory() as work:
+        local = os.path.join(work, 'trial.bin')
+        with open(local, 'wb') as stream:
+            stream.write(trial)
+        push(local, f'{TMP}/e5-bc-b.bin', 'boot control')
+    expected = hashlib.sha256(before).hexdigest()
+    wanted = hashlib.sha256(trial).hexdigest()
+    command = (
+        'umask 077; mkdir -p /data/adb/e5-boot-control; '
+        'backup=$(mktemp /data/adb/e5-boot-control/before.XXXXXX); '
+        'dd if=/dev/block/by-name/misc of="$backup" bs=1 skip=2048 count=32; '
+        f'[ "$(sha256sum "$backup" | cut -d " " -f1)" = {expected} ]; sync; '
+        'if dd if=/data/local/tmp/e5-bc-b.bin of=/dev/block/by-name/misc '
+        'bs=1 seek=2048 count=32 conv=notrunc,fsync && '
+        f'[ "$(dd if=/dev/block/by-name/misc bs=1 skip=2048 count=32 2>/dev/null | sha256sum | cut -d " " -f1)" = {wanted} ]; '
+        'then echo "Boot control backup: $backup"; '
+        'else dd if="$backup" of=/dev/block/by-name/misc bs=1 seek=2048 count=32 conv=notrunc,fsync; '
+        f'[ "$(dd if=/dev/block/by-name/misc bs=1 skip=2048 count=32 2>/dev/null | sha256sum | cut -d " " -f1)" = {expected} ] || '
+        'echo "RESTORE FAILED: do not reboot; inspect misc and $backup"; exit 1; fi; '
+        f'rm -f {TMP}/e5-bc-b.bin')
+    print(su_checked('设置 B 槽试启动 / arming slot B', command))
+
+
+def validate_boot_control(data):
+    if (len(data) != 32 or data[4:8] != b'BCAB' or data[8] != 1 or data[9] & 7 != 2
+            or struct.unpack('<I', data[28:])[0] != zlib.crc32(data[:28])):
+        raise ValueError('invalid BCAB format/version/CRC')
+    if not data[12] & 0x80 or not data[12] & 15 or data[13] & 1 or data[15] & 1:
+        raise ValueError('Android A is not successful or a slot has a verity error')
+    if (data[14] & 15) > (data[12] & 15):
+        raise ValueError('B has higher priority: finish or cancel the pending Android OTA first')
+    return data
+
+
+def read_boot_control():
+    try:
+        return validate_boot_control(bytes.fromhex(od_hex(None)))
+    except ValueError as error:
+        die(f'boot control check failed: {error}')
+
+
+def bootchain(mode):
+    if mode not in ('check', 'sync'):
+        raise ValueError(mode)
+    script = f'{TMP}/e5-android-bootchain.sh'
+    push(os.path.join(F, 'android-bootchain.sh'), script, 'boot-chain checks')
+    # Absolute BusyBox path avoids Android toybox differences and Magisk PATH.
+    result = su_checked('检查启动链 / checking boot chain' if mode == 'check' else
+                        '备份并同步启动链 / backing up and syncing boot chain',
+                        f'ASH_STANDALONE=1 /data/adb/magisk/busybox sh {script} {mode}', timeout=600)
+    print(result)
+
+
+def install_preflight():
+    read_boot_control()
+    image = os.path.join(F, 'boot.img')
+    if os.path.getsize(image) != device_size('/dev/block/by-name/boot_b'):
+        die('boot image/boot_b partition size mismatch; nothing formatted')
+    if sha256(image) != boot_json()['sha256']:
+        die('boot image does not match boot.json')
+    bootchain('check')
 
 
 def android_checks():
     global SU
-    say('连接设备 / looking for the E5 (Android, USB debugging on)')
+    say('连接设备 / looking for Android (USB debugging on)')
     devs = [l for l in adb('devices').splitlines()[1:] if l.strip().endswith('\tdevice')]
     if len(devs) != 1:
         die(f'need exactly one device in "adb devices" (found {len(devs)}; allow USB debugging on the phone)')
@@ -288,12 +361,18 @@ def android_checks():
             break
     if not SU:
         die('no root: install Magisk and grant Shell superuser access')
+    profile = package_profile()
+    if profile:
+        model = sh('getprop ro.product.model').strip()
+        if model not in profile['android_models']:
+            die(f"Wrong device: package is for {profile['profile']}, Android reports {model!r}. Nothing was written.")
     if sh('getprop ro.boot.slot_suffix').strip() != '_a':
         die('Android is not running from slot a')
     if sh('getprop ro.boot.verifiedbootstate').strip() != 'orange':
         die('the bootloader is locked (verifiedbootstate is not orange)')
     if 'ok' not in su('[ -e /dev/block/by-name/boot_b ] && [ -e /dev/block/by-name/l_agdsp_a ] && echo ok'):
         die('no boot_b or l_agdsp_a partition: not an E5?')
+    su_checked('检查 Magisk 工具 / checking Magisk tools', 'test -x /data/adb/magisk/busybox')
     print(f'   ok ({sh("getprop ro.product.model").strip()}, root via {SU})')
 
 
@@ -445,7 +524,8 @@ def unmount_android_sd(dev):
             su_checked(f'卸载 Android SD 卷 / unmounting {volume}', f'sm unmount {volume}')
     # mountinfo uses major:minor, while vold names volumes major,minor.
     remaining = []
-    for line in su_checked('检查 SD 卸载结果 / checking SD mounts', 'cat /proc/self/mountinfo').splitlines():
+    for line in su_checked('检查 SD 卸载结果 / checking SD mounts',
+                           'cat /proc/self/mountinfo /proc/1/mountinfo').splitlines():
         fields = line.split()
         if len(fields) >= 5 and fields[2] in numbers:
             remaining.append(fields[4])
@@ -462,17 +542,14 @@ def install_sd(a):
     image is written onto the partition -- the partition *is* the filesystem, so
     boot/init mounts it directly (the marked card, /etc/e5/sd-root) instead of a
     file on userdata.  The device's own firmware is unpacked into it, so the
-    card carries the whole system and userdata is not the root's home.  Only
-    boot_b and, to record the boot target, e5linux/boot-os on userdata are
-    written outside the card."""
-    steps(8)
+    card carries the whole system and userdata is not the root's home. The
+    differing B-slot boot chain is backed up and synchronized from Android A;
+    boot_b and the boot target/control are committed after root verification."""
+    steps(9)
     find_adb()
     android_checks()
     bj = boot_json()
-    live = od_hex(None)
-    if live != bj['misc_slot_a_hex']:
-        die(f'the boot control block is not the one this package expects ({live}): '
-            'boot Android normally once, then try again')
+    install_preflight()
     sd = device_sd()
     capacity = device_size(sd)
     img = os.path.join(F, 'openwrt.ext4.gz')
@@ -509,8 +586,16 @@ def install_sd(a):
             die('aborted: nothing was written, the card is untouched')
 
     with tempfile.TemporaryDirectory() as work:
+        # Complete firmware conversion and upload all payloads BEFORE erasing
+        # the card. A missing vendor file must not destroy a working SD install.
+        size = pull_device_files(work, f'{TMP}/e5-device-files.tar')
+        push(img, f'{TMP}/openwrt.ext4.gz', 'openwrt.ext4.gz')
+        push(os.path.join(F, 'boot.img'), f'{TMP}/e5-boot.img', 'boot.img')
+        su_checked('检查 SD 分区工具 / checking partition tools',
+                   'command -v sgdisk >/dev/null; command -v blockdev >/dev/null')
         say(f'分区并格式化 / partitioning and formatting the card')
         unmount_android_sd(sd)
+        bootchain('sync')
         # The root partition is only as large as the image: the rest of the card
         # stays free, for more systems (another partition the initramfs can be
         # pointed at) and a persistent store of its own.  So the filesystem is
@@ -534,7 +619,6 @@ def install_sd(a):
                 'The kernel may still hold the old partition table; no image was written.')
 
         say('写入 OpenWrt / OpenWrt -> the card')
-        push(img, f'{TMP}/openwrt.ext4.gz', 'openwrt.ext4.gz')
         with busy('解压到 SD 卡 / unpacking onto the card'):
             su_checked('解压并写入 SD / decompressing image onto card',
                        f'gzip -dc {TMP}/openwrt.ext4.gz > {part}; sync', timeout=1800)
@@ -544,7 +628,6 @@ def install_sd(a):
         # device's e2fsck calls an error.  The mount below is the check.)
 
         say('这台设备的文件和首次启动设置 / this device\'s files and the first boot\'s settings')
-        size = pull_device_files(work, f'{TMP}/e5-device-files.tar')
         conf = os.path.join(work, 'install.conf')
         with open(conf, 'w', newline='\n') as f:
             f.write('# the flash package (flash.py), for OpenWrt\'s first boot\n'
@@ -568,8 +651,18 @@ def install_sd(a):
                f'tar -xf {TMP}/e5-device-files.tar -C {m}; '
                f'sha256sum {TMP}/e5-device-files.tar | cut -c1-64 > {m}/etc/e5/device-files.stamp; '
                'sync', timeout=900)
+        checksums = f'{TMP}/e5-sd-files.sha256'
+        su_checked('记录固件校验 / hashing installed firmware',
+                   f'chroot {m} /bin/busybox find /lib/firmware /opt/e5/android -type f '
+                   f'-exec /bin/busybox sha256sum {{}} \\; > {checksums}; test -s {checksums}', timeout=900)
+        # Reopen after a real unmount; noload avoids writing journal state while
+        # verifying. Do not arm B based only on files in the writable mount.
+        su_checked('只读重新挂载 SD / reopening card read-only',
+                   f'sync; umount {m}; blockdev --flushbufs {part}; mount -t ext4 -o ro,noload {part} {m}')
         # Resolve absolute symlinks in the image's root, not Android's root.
         su_checked('检查镜像用户空间 / checking image userspace', f'chroot {m} /bin/busybox true')
+        su_checked('回读校验固件 / verifying firmware after remount',
+                   f'chroot {m} /bin/busybox sha256sum -c < {checksums}', timeout=900)
         missing = []
         for name in ('sbin/init', 'lib/firmware/wcnmodem.bin', 'opt/e5/android/vendor/bin/modem_control',
                      'etc/e5/install.conf', 'etc/e5/sd-root'):
@@ -585,14 +678,13 @@ def install_sd(a):
             su(f'umount {m}')
             die(f'SD content verification failed on {part}:\n' + '\n'.join(missing) + '\n' + details)
         su_checked('卸载并同步 SD / unmounting card', f'sync; umount {m}')
-        su(f'rm -f {TMP}/e5-device-files.tar')
+        su(f'rm -f {TMP}/e5-device-files.tar {checksums}')
         print(f'   OpenWrt and {size} bytes of device files are on the card')
         free = device_size(sd) - device_size(part)
         print(f'   {free >> 30}.{(free % (1 << 30)) * 10 // (1 << 30)} GiB of the card '
               'are left free, for more partitions (systems, a store)')
 
         say('写入启动镜像 / boot image -> boot_b')
-        push(os.path.join(F, 'boot.img'), f'{TMP}/e5-boot.img', 'boot.img')
         with busy('写入并校验 boot_b / writing and verifying boot_b'):
             su_checked('写入 boot_b / writing boot_b',
                        f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M; sync')
@@ -600,16 +692,16 @@ def install_sd(a):
         if not ok:
             die('boot_b did not verify; Android stays as it is')
         su(f'rm -f {TMP}/e5-boot.img')
-        arm_slot_b()
 
     # The boot target, explicit: e5linux/boot-os on userdata is a few bytes, and
     # it is what makes a later `--data` install win over the card again.  The root
-    # filesystem itself is not on userdata; if userdata cannot be written, the
-    # marked card boots anyway (boot/init).
-    su(f'mkdir -p {D}; rm -f {D}/boot-os-next; echo sd > {D}/boot-os')
+    # filesystem itself is not on userdata. Require recording the selector
+    # before arming B, rather than leaving an older userdata image selected.
+    su_checked('记录 SD 启动目标 / saving SD boot target',
+               f'mkdir -p {D}; rm -f {D}/boot-os-next; echo sd > {D}/boot-os; sync')
+    arm_slot_b()
 
-    say('完成，正在重启进 OpenWrt / done, rebooting into OpenWrt')
-    adb('reboot')
+    say('安装完成，请手动重启进入 OpenWrt / installed; reboot manually to enter OpenWrt')
     print(f'''
   第一次启动约 2 分钟 / the first boot takes about 2 minutes.
   OpenWrt 在 SD 卡上 / OpenWrt is on the SD card ({sd}p1).
@@ -625,10 +717,7 @@ def install(a):
     find_adb()
     android_checks()
     bj = boot_json()
-    live = od_hex(None)
-    if live != bj['misc_slot_a_hex']:
-        die(f'the boot control block is not the one this package expects ({live}): '
-            'boot Android normally once, then try again')
+    install_preflight()
     avail = su('df -k /data | tail -1').split()
     if len(avail) < 4 or int(avail[3]) < 2621440:
         die("less than 2.5 GiB free on the phone's storage")
@@ -658,6 +747,7 @@ def install(a):
     with tempfile.TemporaryDirectory() as work:
         size = pull_device_files(work)
         print(f'   device-files.tar: {size} bytes (stays on the device)')
+        bootchain('sync')
 
         say(f'写入 OpenWrt / OpenWrt -> {D}/openwrt.ext4')
         push(os.path.join(F, 'openwrt.ext4.gz'), f'{TMP}/openwrt.ext4.gz', 'openwrt.ext4.gz')
@@ -687,8 +777,7 @@ def install(a):
     su(f'rm -f {TMP}/e5-boot.img')
     arm_slot_b()
 
-    say('完成，正在重启进 OpenWrt / done, rebooting into OpenWrt')
-    adb('reboot')
+    say('安装完成，请手动重启进入 OpenWrt / installed; reboot manually to enter OpenWrt')
     print(f'''
   第一次启动约 2 分钟 / the first boot takes about 2 minutes.
   热点 / hotspot:  {ssid}   密码 / key:  {key}
@@ -702,8 +791,7 @@ def check(a):
     steps(3)
     find_adb()
     android_checks()
-    live = od_hex(None)
-    print('   boot control block: ' + ('as expected' if live == boot_json()['misc_slot_a_hex'] else 'NOT as expected: ' + live))
+    install_preflight()
     print('   free on /data: ' + su('df -k /data | tail -1').split()[3] + ' KiB')
     # packed as for an install, to see that it works, and deleted again: a
     # check leaves nothing on the device
@@ -711,7 +799,7 @@ def check(a):
         size = pull_device_files(work, f'{TMP}/e5-check-device-files.tar')
     su(f'rm -f {TMP}/e5-check-device-files.tar')
     print(f'   device-files.tar: {size} bytes (a trial, deleted again)')
-    say('检查完成，设备上什么都没有写入 / checked; nothing written to the device')
+    say('检查完成，未修改分区 / checked; no partitions changed (temporary staging files only)')
 
 
 def boot_openwrt(a):
@@ -725,6 +813,7 @@ def boot_openwrt(a):
     head = su(f'dd if=/dev/block/by-name/boot_b bs=1048576 count={mb} 2>/dev/null | sha256sum').split()[0:1]
     if head != [bj['sha256_head56m']]:
         die('boot_b holds another boot image: use the package it was flashed with, or a first install')
+    bootchain('sync')
     # OpenWrt the default again, not only for this boot (the screen's "boot
     # Android" made Android the default); /etc/init.d/e5-boot-ok takes it
     su(f'echo linux > {D}/openwrt-default-boot')
@@ -757,6 +846,11 @@ def update(a):
         import getpass
         pw = getpass.getpass('root password of the E5 [root]: ') or 'root'
     bj = boot_json()
+    profile = package_profile()
+    guard = ''
+    if profile:
+        guard = ('[ "$(cat /etc/e5/device-profile 2>/dev/null)" = ' + profile['profile'] +
+                 ' ] || { echo "error: package/device profile mismatch" >&2; exit 1; }\n')
     mb = bj['persist_log_offset'] // 1048576
     with tempfile.TemporaryDirectory() as td:
         head = os.path.join(td, 'boot-head.img')
@@ -784,6 +878,7 @@ def update(a):
         # The steps as a script the device fetches: a long command line typed over
         # telnet gets lost (the 80-column pty's line editing), so only a short one is.
         steps_sh = f"""set -e
+{guard}\
 cd /tmp
 wget -q -O dfb.sh {u}/dfb.sh
 wget -q -O dii.sh {u}/dii.sh

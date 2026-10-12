@@ -102,6 +102,10 @@ ANDROID=${E5_ANDROID_SUBSET:-$TOP/work/android-subset}
 KBUILD=${E5_KBUILD:-$TOP/out_linux}
 mkdir -p "$WORK" "$OUT"
 python3 "$TOP/tools/openwrt-package-state.py" check "$VER"
+# /dev/sd* also matches Unisoc communication channels. Install only the APK
+# whose probe filters device types before opening them (shared by all boards).
+BLOCK_APK="$OUT/block-mount-guarded.apk"
+E5_WRT_VER="$VER" sh "$HERE/build-block-mount.sh" "$BLOCK_APK"
 
 # the Argon theme: not in OpenWrt's feeds; its release's packages (arch all)
 ARGON_URL=https://github.com/jerrykuku/luci-theme-argon/releases/download/v2.4.7
@@ -277,12 +281,15 @@ docker run --rm --platform linux/arm64 \
     -v "$WORK/e5-ctl-raw":/in/e5-ctl-raw:ro -v "$TOP/rootfs/overlay/usr/share/alsa":/in/alsa:ro \
     -v "$WORK/e5-modemd":/in/e5-modemd:ro \
     -v "$WORK/e5-sim-probe":/in/e5-sim-probe:ro \
+    -v "$BLOCK_APK":/in/block-mount-guarded.apk:ro \
+    -v "$BLOCK_APK.build-id":/in/block-mount.build-id:ro \
     -v "$SA":/in/sa:ro -e STANDALONE="$STANDALONE" -v "$RM":/in/root-modules:ro \
     -v "$WORK/extra":/in/extra:ro -e EXTRA_LIST="$EXTRA_LIST" -v "$TP":/in/transplant:ro \
     -v "$TAROUT":/out -e NAME="$NAME" -e VERSION="$VERSION" -e E5_BUILD_EPOCH="${E5_BUILD_EPOCH:-}" -e CONTAINERS="$CONTAINERS" \
     e5-openwrt-base:$VER /bin/sh -euc '
 mkdir -p /var/lock /var/run /tmp
 apk update >/dev/null
+apk add --allow-untrusted /in/block-mount-guarded.apk >/dev/null
 # ModemManager first, from its local file (unsigned): its release is above the
 # repository one, so what depends on it takes this one and apk upgrade keeps it
 apk add --allow-untrusted /in/apk/modemmanager-1*.apk /in/apk/modemmanager-rpcd-*.apk >/dev/null
@@ -353,6 +360,11 @@ for e in /*; do
     cp -a "$e" $R/
 done
 mkdir -p $R/proc $R/sys $R/dev $R/tmp $R/mnt/e5-disk $R/opt/e5/android $R/opt/e5/bin $R/etc/e5linux
+mkdir -p $R/etc/e5
+cp /in/block-mount.build-id $R/etc/e5/block-mount.build-id
+for f in sbin/block lib/libblkid-tiny.so etc/init.d/fstab; do
+    [ -s "$R/$f" ] || { echo "guarded block-mount payload missing: $f" >&2; exit 1; }
+done
 # Docker bind-mounts these into the container, so the copy has the build host versions
 ln -sf /tmp/resolv.conf $R/etc/resolv.conf
 printf "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1\tip6-allnodes\nff02::2\tip6-allrouters\n" > $R/etc/hosts

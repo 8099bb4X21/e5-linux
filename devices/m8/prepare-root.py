@@ -12,7 +12,9 @@ TOP = Path(__file__).resolve().parents[2]
 source_bytes = runpy.run_path(str(TOP / 'devices/staging.py'))['source_bytes']
 
 
-def prepare(base, root, defaults):
+def prepare(base, root, defaults, profile='m8'):
+    if profile not in ('e5', 't551m', 'm8'):
+        raise ValueError('Unknown device profile')
     base, root = base.resolve(), root.resolve()
     if os.name == 'nt' or root.exists() or base == Path('/'):
         raise ValueError('Use Linux/WSL, a clean release base and a new destination')
@@ -56,32 +58,41 @@ def prepare(base, root, defaults):
             name = p.relative_to(TOP / 'openwrt/overlay').as_posix()
             executable = name.startswith(('etc/init.d/', 'etc/uci-defaults/', 'etc/hotplug.d/', 'usr/libexec/', 'sbin/'))
             put(name, source_bytes(p),
-                0o755 if executable else p.stat().st_mode & 0o777)
+                0o755 if executable else 0o644)
     put('etc/config/network', "config interface 'loopback'\n option device 'lo'\n option proto 'static'\n option ipaddr '127.0.0.1'\n option netmask '255.0.0.0'\n\nconfig device\n option name 'br-lan'\n option type 'bridge'\n option bridge_empty '1'\n\nconfig interface 'lan'\n option device 'br-lan'\n option proto 'static'\n option ipaddr '192.168.9.1'\n option netmask '255.255.255.0'\n")
     put('etc/config/system', "config system\n option hostname 'OpenWrt'\n option timezone 'CST-8'\n option zonename 'Asia/Shanghai'\n")
     put('etc/config/wireless', '')
     put('etc/config/e5-infoscreen', (root / 'usr/share/e5-infoscreen/default.config').read_bytes())
     # New credentials and machine identity; never copy a donor device's secrets.
-    password = subprocess.check_output(['openssl', 'passwd', '-6', '-stdin'], input=b'openwrt\n').decode().strip()
+    # Common first-boot hook sets root/root; no donor password hashes.
+    password = ''
     lines = []
     for line in (base / 'etc/shadow').read_text().splitlines():
         fields = line.split(':')
         fields[1] = password if fields[0] == 'root' else '!'
         lines.append(':'.join(fields))
     put('etc/shadow', '\n'.join(lines) + '\n', 0o600)
-    put('etc/hostname', 'VIPME-M8\n')
+    put('etc/hostname', {'e5': 'E5', 't551m': 'T551M', 'm8': 'VIPME-M8'}[profile] + '\n')
     put('etc/machine-id', '')
-    runpy.run_path(str(TOP / 'devices/m8/stage.py'))['stage'](root)
+    for p in (TOP / 'rootfs/overlay/opt/e5').iterdir():
+        if p.is_file():
+            put('opt/e5/' + p.name, source_bytes(p), 0o755)
+    for p in (TOP / 'rootfs/overlay/usr/share/alsa').rglob('*'):
+        if p.is_file():
+            put('usr/share/alsa/' + p.relative_to(TOP / 'rootfs/overlay/usr/share/alsa').as_posix(), source_bytes(p))
+    stage_path = 'devices/t551m/configure-rootfs.py' if profile == 't551m' else f'devices/{profile}/stage.py'
+    runpy.run_path(str(TOP / stage_path))['stage'](root)
     for path in (root / 'etc/uci-defaults/90-e5',):
-        path.write_text(path.read_text().replace("hostname='E5'", "hostname='VIPME-M8'"))
+        hostname = {'e5': 'E5', 't551m': 'T551M', 'm8': 'VIPME-M8'}[profile]
+        path.write_text(path.read_text().replace("hostname='E5'", "hostname='" + hostname + "'"))
     put('etc/e5/image-form', 'standalone\n')
-    put('etc/e5/image-version', 'm8-bringup\n')
+    put('etc/e5/image-version', profile + '-tf\n')
     # The base ships kernel Docker support only, not a Docker installation.
     if (root / 'usr/bin/dockerd').exists():
         raise ValueError('Unexpected preinstalled Docker')
     if any((root / 'opt/e5/android').iterdir()) or any((root / 'etc/dropbear').iterdir()):
         raise ValueError('Unexpected device data in new root')
-    print('Prepared clean M8 root:', root)
+    print('Prepared clean', profile, 'root:', root)
 
 
 if __name__ == '__main__':

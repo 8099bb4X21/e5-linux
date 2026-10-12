@@ -77,7 +77,13 @@ if [ "$root_found" = 0 ] && [ "$registered" = 0 ]; then
 fi
 [ "$root_found" = 1 ] || fail '未找到可启动的 Linux；检查 SD 卡或先安装 / No bootable Linux root; check the SD card or install Linux first'
 echo "Linux 已安装 / Linux is installed${wanted:+: $wanted}"
-[ "${1:-check}" = reboot ] || exit 0
+if [ "${1:-check}" = check ]; then
+ /data/adb/magisk/busybox sh "$MODDIR/bootchain.sh" check
+ exit $?
+fi
+# Android OTA can leave the other slot's chain stale. Only after verifying
+# the installed root, synchronize the five allowed partitions before arming B.
+/data/adb/magisk/busybox sh "$MODDIR/bootchain.sh" sync || exit 1
 backup="$MODDIR/boot-control-$(date +%Y%m%d-%H%M%S)-$$.bin"
 "$MODDIR/e5-bootctl" arm "$backup" || exit 1
 sync
