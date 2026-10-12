@@ -3,7 +3,7 @@
 #
 #   openwrt/build-modemmanager.sh        -> out/openwrt/modemmanager-*.apk
 #
-# OpenWrt 25.12 ships ModemManager 1.24.0, the version rootfs/deb-patches/
+# OpenWrt 25.12 ships ModemManager 1.24.0, the version device/debian_device_common/patches/
 # modemmanager source patches are written against, so the Debian image and the
 # OpenWrt one run the same plugin (docs/FINDINGS.md 37).  The patches go into
 # the feed package's patches/ after OpenWrt's own (0001-0004, which they stack
@@ -48,7 +48,8 @@ set -euo pipefail
 # 12: confirm transient empty call lists and adopt existing outgoing CP calls.
 # 13: serialize hangup, settle before redial and ignore pre-hangup CLCC snapshots.
 # 14: detached, owner-aware CEUS/CEMODE confirmation with bounded retries.
-E5REV=14
+# 15: apply PAP/CHAP credentials through the shared Unisoc AT owner.
+E5REV=15
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"
@@ -70,7 +71,7 @@ cp "$TESTS/voice-urc.py" "$WORK/voice-urc.py"
 cp "$TESTS/voice-recovery.py" "$WORK/voice-recovery.py"
 cp "$TESTS/data-priority-hook.py" "$WORK/data-priority-hook.py"
 n=900
-for p in "$TOP"/rootfs/deb-patches/modemmanager-[0-9][0-9]-*.patch; do
+for p in "$TOP"/device/debian_device_common/patches/modemmanager-[0-9][0-9]-*.patch; do
     cp "$p" "$WORK/patches/src/$n-e5-$(basename "$p" | sed 's/^modemmanager-//')"
     n=$((n + 1))
 done

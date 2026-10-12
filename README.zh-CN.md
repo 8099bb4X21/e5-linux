@@ -139,6 +139,8 @@ E5 默认 LAN 为 `192.168.9.1`。OpenWrt 通过 LuCI / SSH 管理，并提供�
 Debian 提供 Phosh。账户和热点配置以设备或刷入包说明为准，使用前修改初始密码。
 固件、Android 厂商组件、设备转储及每台设备的身份数据不进入源码仓库。
 
+APN 管理在 LuCI 与信息屏中共用，支持按 SIM 保存选择及 PAP/CHAP。长短信片段会持久保存，收齐后才显示、提醒和转发。设备专用 TF 打包入口为 `openwrt/build-profile-tf.py --profile e5|t551m|m8`，须提供匹配内核和不含私有数据的基础根文件系统；详见 [安装包构建](docs/PROFILE-PACKAGES.zh-CN.md)。Android 安装器先备份并校验 B 槽启动链，再完成系统及 boot_b 的写入。Debian 包源码补丁统一由 `device/debian_device_common/patches/` 提供。
+
 ## 许可与来源
 
 脚本、工具和文档使用 MIT，见 [LICENSE](LICENSE)。内核及导入的驱动按各文件的 GPL/SPDX 许可分发。

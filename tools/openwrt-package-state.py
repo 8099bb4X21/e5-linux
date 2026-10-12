@@ -19,7 +19,7 @@ def sources(version):
              TOP / 'device/openwrt_device_common/tests/sim-power.py', TOP / 'device/openwrt_device_common/tests/voice-urc.py',
              TOP / 'device/openwrt_device_common/tests/voice-recovery.py', TOP / 'device/openwrt_device_common/tests/data-priority-hook.py',
              Path(__file__).resolve()]
-    files += sorted((TOP / 'rootfs/deb-patches').glob('modemmanager-[0-9][0-9]-*.patch'))
+    files += sorted((TOP / 'device/debian_device_common/patches').glob('modemmanager-[0-9][0-9]-*.patch'))
     files += sorted((TOP / 'openwrt/patches').glob('modemmanager-package-*.patch'))
     return {'openwrt': version, 'files': {str(p.relative_to(TOP)): checksum(p) for p in files}}
 

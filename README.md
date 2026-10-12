@@ -144,6 +144,8 @@ Debian provides Phosh. Credentials and hotspot defaults are documented with the 
 change initial passwords before use. Device dumps, proprietary firmware, Android vendor components
 and per-unit identity data are not committed.
 
+LuCI and infoscreen share per-SIM APN selection, including PAP/CHAP. Multipart SMS fragments persist until a complete message can be displayed, notified and forwarded. `openwrt/build-profile-tf.py --profile e5|t551m|m8` packages an installer from an explicit matching kernel and sanitized base root; see [profile package inputs](docs/PROFILE-PACKAGES.zh-CN.md). Android installation backs up and verifies the B-slot boot chain before committing the system. Debian-origin package patches live in `device/debian_device_common/patches/`.
+
 ## License and sources
 
 Scripts, tools and documentation use MIT; see [LICENSE](LICENSE).

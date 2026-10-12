@@ -153,7 +153,7 @@ class Integration(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='e5-mm-policy-') as directory:
             root = Path(directory)
             subprocess.run(['git', 'init', '-q', str(root)], check=True)
-            for patchfile in sorted((TOP / 'rootfs/deb-patches').glob('modemmanager-*.patch')):
+            for patchfile in sorted((TOP / 'device/debian_device_common/patches').glob('modemmanager-*.patch')):
                 result = subprocess.run(['git', 'apply', '--include=src/plugins/unisoc/mm-broadband-modem-unisoc.c',
                                          str(patchfile)], cwd=root, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, str(patchfile) + ': ' + result.stderr)

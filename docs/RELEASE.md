@@ -76,3 +76,5 @@ ModemManager 构建结束后会生成 `out/openwrt/e5-modemmanager-build.json`�
 发布准备不属于此工作流。
 
 工作流的 tag 指向 release 仓库的提交；固件源码提交取自单独检出的 e5-linux，两者在构建说明中独立记录。旧源码仓库中的历史 Releases 保留。
+
+CI 同时检查长短信持久化、充电事件、APN、三机型干净根组装和 Android 启动链。ModemManager/BlueZ 补丁来自固定的 `device/debian_device_common/patches`；认证拨号版本为 ModemManager r923 或更高。防误探测的 block-mount APK 使用校验固定的 x86_64 SDK，ARM runner 启用 QEMU，并单独缓存 APK、构建来源标识和 SHA-256。根镜像同时导出 ext4 与早期 F2FS 工具；发布前拒绝来源不匹配、不可执行的信息屏脚本或未包含 guarded block-mount 的镜像。工作流保留递归子模块、UTC+8 编译时间及 release 仓库自己的 tag target。

@@ -104,12 +104,16 @@ class RootAudit(unittest.TestCase):
             env = {'E5_UPSTREAM_OUT': str(top / kernel_out)} if kernel_out else {}
             with patch.object(release, 'TOP', top), patch.object(release.subprocess, 'check_output', return_value=''), \
                  patch.object(release.runpy, 'run_path', return_value={'stage_nv': stage_nv}), \
+                 patch.object(release, 'block_build_id', return_value='fixture-block-build'), \
                  patch.dict(release.os.environ, env):
                 release.audit_root(info)
             return info
 
     def files(self):
-        return {'etc/init.d/e5-infoscreen': b'#!/bin/sh\n',
+        return {'etc/e5/block-mount.build-id': b'fixture-block-build\n',
+                'sbin/block': b'block fixture', 'lib/libblkid-tiny.so': b'probe fixture',
+                'etc/init.d/fstab': b'fstab fixture',
+                'etc/init.d/e5-infoscreen': b'#!/bin/sh\n',
                 'usr/libexec/e5-infoscreen/session': b'#!/bin/sh\n',
                 'usr/libexec/e5-infoscreen/plugin': b'#!/bin/sh\n',
                 'usr/libexec/e5-infoscreen/update': b'#!/bin/sh\n',
@@ -127,6 +131,17 @@ class RootAudit(unittest.TestCase):
     def test_nonexecutable_plugin_manager_rejected(self):
         with self.assertRaisesRegex(ValueError, 'not executable.*plugin'):
             self.audit(self.files(), nonexec=('usr/libexec/e5-infoscreen/plugin',))
+
+    def test_stale_block_mount_build_rejected(self):
+        files = self.files(); files['etc/e5/block-mount.build-id'] = b'stale\n'
+        with self.assertRaisesRegex(ValueError, 'block-mount'):
+            self.audit(files)
+
+    def test_missing_block_mount_payload_rejected(self):
+        for name in ('sbin/block', 'lib/libblkid-tiny.so', 'etc/init.d/fstab'):
+            files = self.files(); files.pop(name)
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'block-mount'):
+                self.audit(files)
 
     def test_selected_kernel_output_pass(self):
         self.assertEqual(self.audit(self.files(), kernel_out='out/e5/kernel')['kernel_release'], '6.18-e5')

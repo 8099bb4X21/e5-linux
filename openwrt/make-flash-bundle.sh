@@ -131,7 +131,13 @@ P=$S/$NAME
 mkdir -p "$P/files" "$P/scripts/tools"
 # the flasher: flash.py (Windows, macOS, Linux), started by flash.cmd / flash.sh
 cp "$HERE/bundle/flash.py" "$HERE/bundle/flash.sh" "$HERE/bundle/flash.cmd" "$P/"
-chmod 755 "$P/flash.py" "$P/flash.sh"
+cp "$HERE/bundle/install-userdata.cmd" "$HERE/bundle/install-userdata.sh" "$P/"
+cp "$HERE/bundle/userdata-image.sh" "$P/files/"
+test -f "$OUT/ext4-tools.tar" || { echo 'Missing ext4-tools.tar; build a fresh root image' >&2; exit 1; }
+cp "$OUT/ext4-tools.tar" "$P/files/"
+cp "$TOP/tools/android-bootchain.sh" "$P/files/android-bootchain.sh"
+printf '%s\n' '{"profile":"e5","android_models":["E5"]}' > "$P/files/device-profile.json"
+chmod 755 "$P/flash.py" "$P/flash.sh" "$P/install-userdata.sh"
 cp "$HERE/bundle/README.md" "$HERE/bundle/README.zh-CN.md" "$P/"
 cp "$TOP/LICENSE" "$P/LICENSE"
 cp "$IMG" "$P/files/openwrt.ext4.gz"
@@ -145,7 +151,7 @@ cp -R "$TOP/tools/vbc-profile" "$P/scripts/tools/"
 find "$P" \( -name .DS_Store -o -name __pycache__ \) -prune -exec rm -rf {} +
 printf "e5-openwrt-flash %s (OpenWrt %s, e5-linux %s, kernel %s)\n" \
     "$BUILD_TIME" "$VER" "$GIT" "$rel" > "$P/files/VERSION"
-(cd "$P" && find files scripts flash.py flash.sh flash.cmd -type f | sort | while read -r f; do
+(cd "$P" && find files scripts flash.py flash.sh flash.cmd install-userdata.sh install-userdata.cmd -type f | sort | while read -r f; do
     printf "%s  %s\n" "$({ shasum -a 256 "$f" 2>/dev/null || sha256sum "$f"; } | cut -d' ' -f1)" "$f"
 done > SHA256SUMS)
 

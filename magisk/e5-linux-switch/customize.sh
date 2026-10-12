@@ -6,5 +6,7 @@
 set_perm "$MODPATH/e5-bootctl" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/switch.sh" 0 0 0755
+set_perm "$MODPATH/bootchain.sh" 0 0 0755
 ui_print '安装完成后点击模块「操作」即可切回 Linux。'
 ui_print 'Linux 须已安装；保留当前 SD 系统选择，试启动失败回退 Android。'
+ui_print '操作时会先备份并同步有差异的 B 槽启动链；Android A 槽不写入。'

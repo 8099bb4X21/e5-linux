@@ -1,5 +1,5 @@
 #!/bin/bash
-# Rebuild a Debian package with the fixes in rootfs/deb-patches/, for the cases
+# Rebuild a Debian package with the fixes in device/debian_device_common/patches/, for the cases
 # where trixie's package has a bug that upstream has already fixed and the fix
 # matters on the E5.  Runs Debian's own source package in a debian:trixie arm64
 # container (native on an Apple-silicon host), adds each patch to its quilt
@@ -56,7 +56,7 @@ mkdir -p "$OUT"
 # E5_DEB_CHECK=1 runs the package's test suite too (dpkg-buildpackage without
 # nocheck) -- worth it when a patch touches code the suite covers.
 exec docker run --rm --platform linux/arm64 \
-    -v "$HERE/deb-patches:/patches:ro" -v "$OUT:/out" \
+    -v "$HERE/../device/debian_device_common/patches:/patches:ro" -v "$OUT:/out" \
     -e PKG="$PKG" -e CHECK="${E5_DEB_CHECK:-0}" debian:trixie bash -euc '
 export DEBIAN_FRONTEND=noninteractive
 sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources

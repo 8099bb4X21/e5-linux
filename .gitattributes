@@ -1,3 +1,6 @@
 # Imported M8 sources are checksum-pinned to their upstream bytes. Preserve
 # original line endings and whitespace; adaptation lives in the port scripts.
 device/linux_device_m8/port/** -text -whitespace
+
+# Patch context carries upstream indentation and blank-line markers.
+*.patch -whitespace
