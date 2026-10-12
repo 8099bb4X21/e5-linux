@@ -51,6 +51,30 @@ if [ -n "$warn" ]; then
     echo "e5-at: warning: '$CMD' $warn" >&2
 fi
 
+# Adapted images use permanently held nr2 for interactive commands, nr6/nr7 for
+# collectors (selected with T551M_AT_CHANNEL). Keep nr1 and
+# the URC rings with ModemManager; never fall back to opening either device.
+profile=$(cat /etc/e5/device-profile 2>/dev/null)
+if [ "$profile" = t551m ] || [ "$profile" = e5 ] || [ "$profile" = m8 ]; then
+    case "$norm" in
+        # E5SMS is a virtual command implemented by MM, not modem firmware.
+        # Existing per-SIM SMS operations must retain MM's port-local charset,
+        # PDU mode, storage selection and multi-step transaction ownership.
+        AT+E5SMS*) ;;
+        AT+SPACTCARD=*)
+            # Addressing a SIM does not make a command an SMS transaction.
+            # Keep dashboard collectors/controls on their selected nr2/6/7
+            # owner; otherwise every scoped request queues on MM's dial port.
+            # SMS operations still need that port's charset/storage context.
+            case "$norm" in
+                *+E5SMS*|*+CMGS*|*+CMGC*|*+CMGW*|*+CMSS*|*+CMGR*|*+CMGL*|*+CMGD*|*+CMGF*|*+CPMS*|*+CNMI*|*+CNMA*|*+CSCS=*|*+CSCA*|*+CSMP*|*+CSMS*|*+CSCB*|*+CSDH*) ;;
+                *) exec /opt/e5/t551m-at -t "$T" "$CMD" ;;
+            esac
+            ;;
+        *) exec /opt/e5/t551m-at -t "$T" "$CMD" ;;
+    esac
+fi
+
 # (systemd on Debian; OpenWrt has procd, and pidof)
 if systemctl -q is-active ModemManager 2>/dev/null ||
    { ! command -v systemctl >/dev/null && pidof ModemManager >/dev/null; }; then

@@ -3,7 +3,8 @@ config sms 'sms'
 	option vibrate '1'
 	option pattern '250 150 250'
 	# a sound as well, at the speaker volume (e5-audio)
-	option sound '0'
+	option sound '1'
+	option tone 'ding'
 	# the info screen lights up and shows a new message
 	option screen '1'
 

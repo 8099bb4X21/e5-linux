@@ -1925,8 +1925,8 @@ diff -ruN a/src/plugins/unisoc/mm-broadband-modem-unisoc.c b/src/plugins/unisoc/
 +     * +SPCALLEXTINFO),
 +     * the dial's "+CDU: <n>" and the VoLTE call state "+CLCCS:" -- calls are
 +     * followed through +CLCC -- the IMS registration report "+CIREGU:" and
-+     * its addresses "+IMSREGADDR:", and the NR indication "+SPNRINDICATE:". */
-+    vendor = g_regex_new ("\\r\\n\\+(SIND|ECIND|PRENWINFU|SPPSREADY|SPSLICEQUE|SPERROR|SPPCODATA|SPCALLEXTINFO|CIREGU|CDU|CLCCS|IMSREGADDR|SPNRINDICATE):[^\\r\\n]*\\r\\n",
++     * IMS PDN state "+SPIMSPDPINFO:", addresses and NR indications. */
++    vendor = g_regex_new ("\\r\\n\\+(SIND|ECIND|PRENWINFU|SPPSREADY|SPSLICEQUE|SPERROR|SPPCODATA|SPCALLEXTINFO|CIREGU|CDU|CLCCS|IMSREGADDR|SPNRINDICATE|SPIMSPDPINFO):[^\\r\\n]*\\r\\n",
 +                          G_REGEX_RAW | G_REGEX_OPTIMIZE, 0, NULL);
 +    call = g_regex_new ("\\r\\n\\^(ORIG|CONF|CONN|CEND|DSCI):[^\\r\\n]*\\r\\n",
 +                        G_REGEX_RAW | G_REGEX_OPTIMIZE, 0, NULL);

@@ -15,6 +15,12 @@ OUT=${1:?out} FW=${2:?firmware}
 S=/data/local/tmp/e5-devfiles
 rm -rf "$S"
 mkdir -p "$S/opt/e5/android" "$S/lib/firmware" || exit 1
+elf_class=$(od -An -tu1 -j4 -N1 /vendor/bin/modem_control | tr -d ' \n')
+case "$elf_class" in
+  1) android_lib=lib; android_linker=linker ;;
+  2) android_lib=lib64; android_linker=linker64 ;;
+  *) echo "E5-COLLECT-FAIL invalid modem_control ELF class"; exit 1 ;;
+esac
 for p in \
   apex/com.android.runtime/bin/linker64 apex/com.android.runtime/lib64/bionic \
   system/lib64/libcutils.so system/lib64/libexpat.so system/lib64/liblog.so \
@@ -32,6 +38,8 @@ for p in \
   vendor/etc/cp_dump_info.xml vendor/etc/ueventd.rc \
   dev/__properties__
 do
+  # Android may be a 32-bit userspace on the same arm64 SoC (T551M).
+  p=$(echo "$p" | sed "s@/lib64@/$android_lib@g; s@/bin/linker64@/bin/$android_linker@g")
   d="$S/opt/e5/android/$(dirname "$p")"
   mkdir -p "$d"
   cp -rL "/$p" "$d/" 2>/dev/null || { echo "E5-COLLECT-FAIL missing /$p"; exit 1; }

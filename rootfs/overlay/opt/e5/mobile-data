@@ -122,6 +122,8 @@ up_locked() {
     rm -f /run/e5-mobile-data-down
     tty_setup
     radio_on
+    # Background preferences never gate registration/PDP or restart the radio.
+    /opt/e5/e5-data-priority queue 0 >/dev/null 2>&1 || true
     for n in $(seq 1 60); do
         at 'AT+CEREG?' | grep -qE '\+CEREG: [0-9],(1|5)' && break
         # the radio can be switched off again meanwhile (modem reset), so re-check it every 10 s

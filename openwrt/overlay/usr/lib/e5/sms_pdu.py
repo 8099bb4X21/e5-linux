@@ -103,7 +103,7 @@ def decode(pdu):
         raise ValueError('reserved SMS alphabet')
     return {'number': number, 'text': text, 'time': dt.isoformat(timespec='seconds'),
             'epoch': int(dt.timestamp()), 'concat': concat, 'dcs': dcs,
-            'fingerprint': hashlib.sha256(data).hexdigest()}
+            'fingerprint': hashlib.sha256(data).hexdigest(), 'pdu': data.hex()}
 
 
 def listing(response):
@@ -149,7 +149,7 @@ def assemble(parts):
         first = min(group, key=lambda p: p['epoch'])
         result.append({'number': first['number'], 'time': first['time'], 'epoch': first['epoch'],
                        'text': ''.join(p['text'] for p in ordered), 'state': 'received' if complete else 'receiving',
-                       'parts': [{'index': p['storage_index'], 'fingerprint': p['fingerprint']} for p in ordered],
+                       'parts': [{'index': p['storage_index'], 'fingerprint': p['fingerprint'], 'pdu': p.get('pdu')} for p in ordered],
                        'concat': c, 'total_parts': c['total'] if c else 1})
     return result
 

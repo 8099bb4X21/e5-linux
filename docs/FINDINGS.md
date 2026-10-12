@@ -5395,3 +5395,343 @@ and SHA-256 manifest.
 The UFI-TOOLS main repository has separate commits removing both TG group and
 TG channel links and replacing the external donation QR with the user-provided
 `donate.jpg` byte-for-byte. The mirrored Debian overlay carries the same assets.
+
+## 62. T551M 自动工作模式固定采用原厂 152 (2026-10-10)
+
+用户确认当前方案保持设备适配配置：**T551M 的自动模式默认固定为 152，
+E5 继续使用 134**。暂不增加运行时能力探测或自动选择工作模式的机制；
+不能因为 SoC 相同，就把此默认值推广到其他设备。
+
+原厂依据：T551M Android 属性中的基带能力/配置为
+`NR_TL_LF_W,NR_TL_LF_W`，历史工作模式快照为 `152,134`、主卡索引 0。
+本机原厂 `libimpl-ril.so` 的 `getMultiMode` 反汇编确认
+`NR_TL_LF_W`（NR/LTE/WCDMA）映射 152，`NR_TL_LF_W_G`
+（另含 GSM）映射 134。E5 原厂配置包含 `_G`，因此保留其 134 默认值。
+这些数值是原厂工作模式编码，不是速率、射频功率或 NV 校准参数。
+
+T551M 双卡 5G SA + LTE 的固定 IP 对照中，152 连续三分钟 180 包全部
+收到，平均 62.96 ms；恢复 134 的两轮平均分别为 180.59 / 135.16 ms。
+但 134 也出现过平均 65.04 ms 的正常一轮；切模式会重拨，部分轮次的小区
+或网络路径不同，不能据此断言 GSM 搜网或某个双卡调度机制就是根因。
+持久部署后普通重启读回 `152,3,0,20,3,1`，两卡注册正常，90 包全部收到，
+三轮平均 85.25 / 72.10 / 65.72 ms，仍有偶发尖峰。该调整有兼容性依据
+和实测改善，但不代表消除了所有蜂窝延迟波动。
+
+实现提交：`4c02751`。T551M 构建/安装通过
+`unisoc_modem.main.auto_work_mode=152` 指定默认值，显式配置仍保留；
+共用 `lock-control` 支持 134/152，未配置或非法值回退 134，并将两者识别
+为“自动”。网页和屏幕共用后端，继续使用 AT 就绪、拨号前的原有开机回放。
+此决定不强制两张卡都设为 152：实机保存的 SIM1 自动、SIM2 4G 分别映射
+为 152、3；手动 4G、SA、NSA 等选择及频段/小区锁定不变。
+
+源码、T551M 实机及离线 rootfs 已同步，42 项相关测试通过，重启后配置
+验证及原始 NV 只读一致性检查通过；未改物理 NV、CPU 设置或 TF 启动。
+需要回退时，将 `unisoc_modem.main.auto_work_mode` 显式设为 134 并提交
+UCI，再对主卡应用“自动”或重启即可。
+
+完整测试过程、限制及数据见
+[蜂窝延迟调查记录](CELLULAR-LATENCY-20261010.zh-CN.md)。
+
+## 63. OTG 主机初始化、重复注册与根集线器休眠冲突 (2026-10-10)
+
+T551M 实物插拔确认 Type-C/OTG 供电已切到主机，但外设不能完成枚举；
+控制器同时出现每秒约三万次 `trying to suspend as a_idle while active`。
+不能把屏幕不提示、网卡无 DHCP 直接当作界面或 LAN 热插拔配置的问题。
+
+共用移植代码的 `hops.host_start` 为空；注册 HCD 后仅开启 SESSION/HOST 位，
+没有恢复核心 POWER 和中断。双角色配置的 root hub POWER 路径也不会代为
+调用 `musb_start()`。现补齐主机模式下的核心初始化，并唤醒 root hub；
+不通过关闭全局 USB 省电来规避。但 OTG8 实物复测仅偶尔成功，不能视为修复。
+进一步发现 probe 和角色 worker 重复注册同一个 HCD，旧 root hub 泄漏；
+实机 `usb1` 的 BUSNUM 却变成 2。OTG9 / E5 mobile3 将 SPRD 双角色的 HCD
+注册统一交给角色 worker，并防止重复注册/清理；生命周期回归测试通过，
+OTG9 实物复测仍失败：重复注册已消失，但等待连接时的挂起重试和 hub 枚举
+失败仍存在。随后临时禁用 USB autosuspend 做对照，用户反馈正常，日志中
+三轮均识别 hub/r8152 并建立链路，且有电脑 DHCPACK。已恢复全局默认参数。
+
+OTG10 / E5 mobile4 将该修正收敛到 SPRD 根集线器：HCD 注册成功后仅禁止
+root hub 自动挂起，避免默认零延迟重试和提前写入 SUSPENDM；下游设备 PM
+保持不变。原有角色 worker 仍在 host 期间持有控制器 PM 引用，拔出时注销
+HCD、关供电并释放引用。两种构建、生命周期及充电转换测试通过。T551M
+OTG10 已正常启动，全局 autosuspend=2；三轮实物插拔均完成网卡枚举、carrier
+及电脑 DHCPACK，用户确认正常，挂起风暴计数为 0。根 hub 为 on，外接 hub
+仍为 auto；返回电脑后不残留主机总线，NCM / WAN 正常。正式 T551M 镜像、
+匹配模块及离线 rootfs 已同步。E5 mobile4 随第 64 节更新部署，三轮实物
+插拔也均完成网卡枚举、carrier 和电脑 DHCPACK，挂起风暴计数为 0。
+
+此次重启另暴露 userdata F2FS 的 SIT/节点计数损坏，离线修复及只读复查
+通过；内部 OpenWrt ext4 五阶段检查正常，无需修复。原始 NV 未修改，
+九分区及隔离工作设备验证通过。F2FS 反复损坏的根因仍未解决。
+详见 [OTG 调查和恢复记录](USB-OTG-20261010.zh-CN.md)。
+
+## 64. userdata 挂载失败恢复与供电边沿亮屏 (2026-10-10)
+
+按用户要求，TF 启动默认跳过 F2FS 自动修复；正常 userdata 启动先直接挂载，
+成功时不运行 fsck，也没有新增扫描或等待。仅 userdata 根系统挂载失败时，
+验证分区身份、未挂载及无 holders 后，以块设备只读保护进行 dry-run，
+确认文件系统错误才修复，再只读复查。通过后重启一次恢复早期固件加载；
+失败保留救援/回退。不会格式化或修改物理 NV。每次启动只尝试一次，启动
+保护计时器不会在修复途中重启。
+
+真实 ARM64 fsck 工具在 E5 `/tmp` 的人工损坏 F2FS 文件上完成 1→1→0
+检查/修复/复查，dry-run 不改变镜像哈希；未破坏实机分区。BusyBox shell
+策略与早期固件/WCN 共 19 项测试通过。此功能是故障恢复，不代表底层反复
+损坏原因已解决。initramfs 增加约 0.56 MiB 工具包，正常启动不扫描。
+
+共享屏幕 UI 使用已有 battery.online 状态边沿唤醒锁屏，插入和拔出均触发，
+首个样本和充电状态/电流波动不触发；保留锁屏及用户禁用触控设置。专项
+浏览器测试通过，不增加轮询或充电器连接提示。
+
+E5 已安装 mobile4 OTG 内核、匹配模块、新 initramfs 和 mobile.js；正常从
+TF 启动，userdata 只读，/run 没有修复记录。启动日志 15.26 秒 switch-root，
+USB NCM、热点和 WAN 正常。三次 OTG 插拔均获取 IP，用户确认充电器插入、
+拔出均能唤醒并保持锁屏。默认 Android 选择保留。
+
+随后 T551M 也完成部署与重启校验，保留原 OTG10 内核和默认 Linux 启动。
+userdata checkpoint 为 clean-unmount，10.47 秒直接挂载成功，16.33 秒
+switch-root，没有执行 fsck。USB DHCP/SSH、蜂窝 WAN、热点 AP、屏幕 API
+和 cog 进程正常，boot_b 与新 mobile.js 校验通过。正式镜像、离线 rootfs
+及校验文件已同步；本轮没有重新进行 T551M 物理插拔测试。
+
+详见 [恢复与插拔亮屏记录](F2FS-RECOVERY-AND-CHARGER-WAKE-20261010.zh-CN.md)。
+
+## 65. IMS 通知混入拨号响应，导致通话界面退回键盘 (2026-10-10)
+
+E5 实机日志抓到 `SPIMSPDPINFO: 17,0,1,0` 混进 ATD 响应，ModemManager
+报 Unhandled response，把刚建立的拨号对象从 dialing 改为 terminated；
+同时 CLCC 仍报告 SIM2 有通话。屏幕因不再收到 live 对象退回拨号键盘。
+
+现将该 IMS PDN 异步通知加入共用 Unisoc vendor URC 完整行解析，保留真实
+忙线、挂断、CME ERROR 和查询正文。不用屏幕延时掩盖通话状态，也不自动重拨。
+9 个 GLib 正则回归样本、双卡通话匹配和 SIM 上电计划测试通过，E5 daemon
+及离线 rootfs 已更新。r11 修正了这条通知，但用户随后仍复现回退，不能
+将最初的“正常”反馈记为整个问题通过。
+
+第二次日志明确：call3 已被 CLCC 查到，短暂一次空列表就被标为 terminated；
+同秒及随后两次查询仍有 active 外呼，却作为 unexpected outgoing 丢弃。
+用户再次拨号后 call4 才重新关联。r12 对已有通话的空列表在 250 毫秒后
+按原槽位复查一次，并可从完整 CLCC 恢复未跟踪的已有外呼，不发送 ATD。
+正常轮询不变，连续空和显式挂断仍结束通话。新增生产函数回归和干净补丁
+栈校验通过；r12 已应用到 E5，用户确认未再回退，实际日志也捕获空列表复查恢复。
+
+随后 r12 日志暴露主动挂断后的旧 CLCC 可能重新创建通话对象。r13 在挂断中
+禁止重复控制，挂断完成后留出 2 秒再允许拨出，并过滤挂断前/收尾期的外呼
+恢复快照；屏幕同步拨号冷却提示，接听和结束当前通话不受冷却影响。
+生产代码回归、完整补丁栈及屏幕浏览器测试通过。r13 已部署 T551M 实机并同步
+离线根镜像，WAN、电话 API、音频服务正常，默认 Linux 保持。用户明确不再
+进行 T551M 实際通话复测。E5 实机与离线 rootfs 仍为 r12。
+
+完整证据与构建、回退信息见 [拨号状态误判记录](VOICE-IMS-URC-20261010.zh-CN.md)。
+
+
+## 2026-10-12: M8 built-in ringtone corruption during staging
+
+M8's uploaded ringtone played correctly, while the built-in call/beep sounds
+produced digital tearing. Their installed WAV files were each exactly one byte
+short: call 180523 versus 180524 bytes, beep 88363 versus 88364. Both installed
+files matched `source.replace(b"\r\n", b"\n")` byte-for-byte. The M8 root
+staging loop treated WAV as text, deleting a byte inside PCM16 and shifting
+all following samples. The header retained the original length. Ding was
+unchanged because its payload did not contain CRLF.
+
+The shared staging reader now preserves binary assets (NUL-containing or
+non-UTF-8 data). M8 root creation, E5's copy helper and shared UI asset copying
+use it. Shared screen updates also restore all three built-in WAVs verbatim.
+Tests check byte identity and complete PCM frame length on the actual assets,
+and retain LF normalization for scripts. The live M8 assets now match source
+SHA256; the user confirmed both affected sounds are normal. Uploaded audio
+and the saved volume were preserved.
+
+A temporary PulseAudio `mmap=0` comparison did not resolve the noise and was
+reverted. No DMA, DSP profile or amplifier gain change was needed for this bug.
+Separately, cold speaker silent preroll in `e5-volume prepare` no longer uses
+an E5/T551M model allowlist: it follows the shared speaker sink's suspended
+state, retaining idle suspend and avoiding preroll on Bluetooth or warm playback.
+
+
+## 2026-10-12: M8 shared receiver and call-volume range
+
+The user confirmed that M8 uses one physical speaker for both phone and
+handsfree. Routing phone audio to EAR_HPL was silent. The shared voice backend
+now reads `receiver-output=speaker` on M8, retaining the logical phone mode's
+Handset DSP profile while wiring the real speaker and using its codec gains.
+Using Handsfree DSP parameters for both modes was too loud and was corrected.
+
+The user clarified that media could be quiet but the lowest call volume was
+still loud. Native call gain tuning, independent of PulseAudio media volume,
+resolved this in an acoustic test. `e5_call_profiles.py` reads this unit's
+original audio_structure and adjusts only the local-call downlink gain fields
+in DSP RAM through vbc_turning0. Additional attenuation tapers from 30 dB at
+the lowest native step to zero at the existing highest step. The original
+firmware file, NV, uplink, DTMF and Bluetooth parameters stay unchanged.
+M8 enables this via call-low-volume-attenuation-db; other boards retain their
+existing behavior. The helper validates allocation/layout and complete readback,
+and does not compound attenuation on restart or add idle polling.
+
+M8's receiver-volume-ceiling=5 maps the phone volume slider's maximum to the
+previous UI level 5, preserving full speaker/Bluetooth range. This is not native
+DSP step 5: the verified WB maxima are native step 3 for phone and 7 for speaker.
+Reloading the original profile and restarting the voice service reproduced the
+adjusted RAM profile automatically. Factory SHA256 was unchanged; tests cover
+byte-level scope, native maximum, restart idempotence and route-specific caps.
+# M8 Type-C/OTG 修复（2026-10-12，probe9–11）
+
+- probe8 仅 gadget 模式；原厂父节点 extcon/VBUS supply 未与 DWC3 相连。
+  有 CC attached-source 日志而 VBUS regulator 未开启，吻合 OTG 无电现象。
+- M8 的实际组合 PHY 位于 usb-phy[1]，第 0 项是 dummy，不能照搬只调用
+  usb2 PHY 的主机切换。probe9 增加 dual-role/XHCI 和事件驱动的角色/供电衔接，
+  进入主机前停止 sink 检测，退出时先关闭自身升压再恢复充电检测。
+- 连续插拔另有两处软件缺陷：Type-C 500 ms 计数过滤会丢有效 attach；
+  BC1.2 只保存最终状态，快速 absent→present 可能未清上一次充电类型。
+  已修正这两处及同时 attach/detach 的处理，并立即交回 D+/D- 检测路径。
+- 本轮不提高充电电流/电压，不修改原厂 DT 分区、NV 或音频配置。
+  完整编译和匹配模块检查通过，C-C/OTG 物理效果需要部署后实测。
+- probe9 第一次验证仍失败，原因是误把父节点第一个 extcon 当作 Type-C：
+  真实顺序为 GPIO VBUS、Type-C。probe10 按 provider compatible 选择后，
+  用户确认充电正常。实机日志确认 boost 开启、XHCI 主机运行，以及集线器、
+  千兆网卡、读卡器枚举；拔出后关闭 boost 并恢复电脑 USB 网络。
+- 网卡尚不能联网的剩余缺项是早期 kernel 没有 USB 网卡/存储类驱动。
+  probe11 补 RTL8152/ASIX/CDC/NCM/RNDIS/SMSC、storage/UAS/HID；本机已有
+  RTL8153/8156 固件，已有基于 net 热插拔的自动加入 LAN。
+- **probe11 / trial7 已部署，用户确认完全工作正常。** 日志交叉确认 r8152
+  创建 eth0、自动加入 br-lan、链路建立、DHCP ACK 与双向收发（采样错误计数 0）；
+  拔出后 host/boost 正常关闭，回接电脑后 NCM/SSH 恢复。上轮带电流表的 C-C
+  充电也已获用户正常反馈。记录见 `out/m8/probe11-plug.log` 与
+  `out/m8/probe11-plug-state.log`，临时采集完成后停止，不增加日常轮询。
+
+## 2026-10-12: M8 热点 IPv6 与公共中文 SSID 核查
+
+热点客户端没有 IPv6 的原因是 `devices/m8/prepare-trial-root.py` 为避免开发
+电脑改变上网路径，误把整个 LAN 的 RA 和 DHCPv6 都禁用了。实机 `wan_6`
+已经通过 extendprefix 获得联通 /64，并分配到 br-lan；路由器直连 IPv6
+外网三次 ping 均成功，不是基带、APN 或无线驱动缺少 IPv6。
+
+试运行配置恢复 `dhcp.lan.ra=server`、`dhcp.lan.dhcpv6=server`，与公共
+90-e5 默认行为一致，保留 ndp=disabled，避免对 raw-IP sipa_eth0 使用 NDP
+中继。实机已提交 DHCP 配置并重启 odhcpd，无需重启热点或蜂窝。随后已关联的
+无线客户端获得同一公网 /64 下的 SLAAC 地址，路由器向该地址 ping 三次成功。
+25 秒被动采集时手机没有 IPv6 外网流量，该采集本身未验证外网链路；随后用户
+完成手机端测试并反馈“ok没毛病”，补齐热点客户端 IPv6 外网验证。
+诊断记录为 `out/m8/ipv6-{initial,detail,after}.txt`。
+
+开发电脑的 M8 USB 网卡（本轮 ifIndex 137）仅在 ActiveStore 禁用 IPv6 Router
+Discovery，防止它接收新的默认路由；没有连接热点，也没有关闭 LAN IPv6。
+现有只针对开发电脑 DHCP 标签的 IPv4 网关/DNS 抑制保留。新的试运行实例也应
+在测试电脑自己的对应适配器处理此限制，而非关闭所有热点客户端的 IPv6。
+
+用户澄清中文 SSID 仅是听说难设置，本机实际显示和连接都正常。公共 LuCI 的
+maxlength(32) 使用 Blob 字节长度，hostapd 默认 utf8_ssid=1；实机 UCI、运行时
+hostapd get_status 的中文名称一致，AP 为 ENABLED。无需机型特判、转码或改变
+当前名称，也不应把协议限制放宽到 32 个汉字：SSID 上限为 32 UTF-8 字节，
+普通汉字通常每字 3 字节。这轮未修改正常的公共无线配置链路。
+
+## 2026-10-12: M8 改为持久 OpenWrt 启动
+
+用户明确要求默认启动 OpenWrt。原 trial7 在 initramfs 中选择 M8 专用根镜像时
+同时启用 e5_trial，公共试运行逻辑每次都覆盖 default-boot=android；单独修改
+根文件系统配置无法持久生效。make-trial.py 新增显式 --persistent，保留 CID
+校验、专用镜像选择、早期恢复 Android A 和成功启动后由 e5-boot-ok 重设 B 槽，
+仅移除强制覆盖用户启动偏好的语句。不带该参数仍保持试运行回退策略。
+
+已确认实机型号/CID 与备份一致，基于原 probe11 内核制作 persistent1 启动包；
+内核及模块未变。保留现有 openwrt-m8.ext4 的全部配置，将 default-boot 设为
+linux，并移除 S99m8-trial 链接，停止 8 分钟自动回退重启。刷入前检查原 B 槽
+与 trial7 匹配，刷入后核对完整启动镜像与 boot-control 字节；不改 Android A、
+NV 或校准分区。启动包 SHA256：
+`17c65b9c140dadf426feb3645ca5eb78fcff3ca6fe0ee0ecc801c1381b2ae800`。
+
+实机首次启动后 default/next 均为 linux，随后主动重启验证：boot_id 已变化，
+再次进入 M8 OpenWrt，default/next 仍为 linux、B 槽重新 armed，试运行计时器
+未启用，蜂窝 WAN 自动上线，LAN RA=server 保持。确认不是一次性启动。
+
+## 2026-10-12: M8 首次 PDP 激活失败后停止拨号
+
+用户从 Android 再次切回 OpenWrt 后无外网。实机基带已被 MM 识别并注册，
+首次 simple-connect 激活 PDP context 1 返回 `Unknown mobile equipment error: 28`。
+原 netifd 协议脚本将其记为 MM_CONNECT_FAILED，调用 proto_block_restart，随后
+teardown 禁用 modem；WAN 因而一直保持 down/autostart=false，没有默认路由。
+本次不是热点转发、DNS 或默认启动设置的问题。
+
+手动 ifup wan 一次即成功，IPv4/IPv6 外网 ping 各三次全部通过，本地 DNS 正常。
+不能仅由错误 28 推断为特定固件根因，但证据说明本次失败重试后可恢复。
+公共 network-startup.py 为 unisoc-sipc 的这条特定 PDP 激活错误增加最多两次
+重试，分别等待 5、10 秒，在同一次 setup 中重试，不额外禁用无线电或切卡。
+正常成功路径不等待，不增加后台轮询；SIM/PIN、认证、其他错误和其他 modem
+仍沿用原流程，重试耗尽后保留原错误处理。MM 每次调用原有 120 秒超时未改变。
+
+已部署 M8 的共享补丁安装器及 netifd 脚本并核对 SHA256，未断开刚恢复的网络。
+7 项启动测试通过，新增用例覆盖首次成功、第一/第二次重试恢复、重试耗尽、
+SIM 错误、错误 29 和其他 modem 不重试。实机错误重试分支仍需未来故障复现
+验证，不能把模拟测试视为再次复现成功。默认/下次启动仍为 linux。
+
+用户要求通用于全部机型：已核对 E5、T551M、M8 的 staging 均调用共享 ui.py /
+network-startup.py，新构建及 UI 更新包都携带此补丁；uci-defaults 在旧版本迁移
+标记检查之前运行 patch_root，因此已迁移过的机器更新时也会应用新重试逻辑。
+脚本路径的 t551m 是兼容旧安装器的历史名称，不是重试逻辑的机型限制。
+增加三个 profile 的真实补丁生成、幂等及重试行为测试，8 项测试通过。最初部署
+M8 后，用户接入 E5；核对 profile=e5、内核 e5-mobile4 后，将相同重试逻辑及
+共享补丁安装器部署到 E5，脚本语法和 SHA256 校验通过。E5 现有 WAN 连接未中断，
+IPv4/IPv6 外网各三次 ping 全通、本地 DNS 正常。新逻辑在后续拨号时使用，未为
+测试而重启或切断现有网络。T551M 实机以及以前导出的镜像文件本次尚未更新。
+
+## 2026-10-12: M8 约 1.5A 充电排查（待插拔对照）
+
+已回读接电脑前的 DCP 充电记录：输入限流 2500mA，电池充电设置回读 1955mA
+（目标 2000mA，原厂 A6 编码取整），实际电池净流入 1290–1486mA，VBUS 为
+4553–4579mV，电池约 40.7–42.5°C。软件 JEITA 目标仍为 2A、thm_cur=0，
+没有证据表明这一段被软件设成 1.5A 或温控减档。用户说的 1.5A 是 USB 表还是
+电池读数，尚待澄清；不能将两者直接等同。
+
+同期 REG00=0x18（2.5A 输入限流）、REG06=0x67（当前驱动编码对应 4.6V
+VINDPM 门限）、REG0A=0xc0。按驱动寄存器布局及兼容 BQ25601 文档，bit6
+为 VINDPM_STAT，bit5 的 IINDPM_STAT 未置位；结合 VBUS 电压，首先怀疑输入
+电压调节在压低电流。实际是原厂 A6 扩展寄存器芯片，不能把 TI 标准器件全部
+参数照搬。暂不能从这些记录区分充电器、线材、电流表和板内路径压降，未修改
+充电限流、VINDPM 或温控。
+
+日志保存在 out/m8/charge-1500-{initial.txt,full.log,dmesg.log}。已启动 15 分钟
+临时内存日志 /tmp/m8-charge-check.log 和 -state.jsonl（2 秒采样、自动停止），
+请求同一充电器/线材带表 60 秒与绕表直连 60 秒的对照，再回电脑读取。
+寄存器语义参考 https://www.ti.com/cn/lit/ds/symlink/bq25601.pdf。
+
+用户回复“看吧”后取回 /tmp 临时日志，保存为 out/m8/charge-1500-compare.log
+和 .jsonl。本轮只有一段 DCP（uptime 205.35–217.76 秒），约 12 秒，并非两段
+各 60 秒的带表/直连对照。输入限流 2.5A、电池设置 1.955A，6 个稳定采样的
+电池净电流为 1.286–1.325A，温度约 40.2°C。唯一 DCP VBUS 采样在刚接入时
+为 4.593V，不能当作这一轮稳定阶段 VBUS；没有抓到稳定阶段的 REG0A 快照。
+因此本轮仍未定位具体压降环节，也未证实 USB 侧实际 1.5A。已询问该段连接
+是否带表、1.5A 的测量位置，暂不改变电流或保护门限。
+
+用户随后明确 1.58A 是 USB 电流表读数，并决定暂停这项排查、保持参数现状。
+压降具体来源尚未确定，不能写成已排除线材/电流表或已修复硬件问题。
+
+## 2026-10-12: M8 主机名与显示型号
+
+初期干净根镜像保留 hostname=OpenWrt，原厂设备树 model 为通用的
+Spreadtrum UMS9620 SoC，导致看板顶栏和型号都没有 M8 品牌信息。
+M8 stage 现在写入 device-model=VIPME M8、device-hostname=VIPME-M8；共享
+e5-board-identity 启动钩子从这些元数据设置 /tmp/sysinfo/model，并仅更新
+/etc/board.json 的 model.name。保留 board id、网络和无线数据，不改变设备树
+compatible 或驱动匹配。元数据不变时不重写 board.json，无常驻进程。
+
+主机名默认迁移只处理 OpenWrt，占用的自定义主机名保持不动，uci-defaults 成功
+后由标准流程删除；新 M8 镜像也默认 VIPME-M8。实机已更新 UCI、内核 hostname
+和显示型号，ubus system board 及 dashboard-info 返回 VIPME-M8 / VIPME M8，
+启动钩子已启用；无需重新刷内核或重启网络。系统发行版仍正确显示 OpenWrt。
+
+## 2026-10-12: 公共 F2FS 恢复被孤立节点交互询问中断
+
+T551M 用户感知的慢开机实际为 userdata SIT/NAT 损坏后停在救援系统。
+fsck.f2fs 1.16.0 即使使用 `-f --dry-run` 或 `-y`，仍会询问是否把孤立
+节点导出到当前目录的 lost_found；原 `/dev/null` 输入触发 scanf EOF 断言，
+返回 255，未进入写修复。公共脚本现在给检查、修复、复查各提供一次 `n`，
+只拒绝可选导出；没有扩大允许修复的返回码，意外第二次询问仍失败退出。
+健康启动不检查、TF 启动跳过、仅未挂载 userdata 可修复的规则保持。
+
+8 项边界回归通过。保存完整故障分区压缩快照及启动镜像后，T551M 实际恢复
+返回 1→1→0（约 9.12 秒）；原 OpenWrt 根镜像只读 e2fsck 五阶段检查返回 0。
+更新 boot_b 并回读校验后，9.79 秒挂载 userdata、15.75 秒 switch-root，
+没有再执行 fsck；USB、热点、屏幕服务和蜂窝外网检查通过。NV 未改动。
+E5、M8 修正版离线启动镜像已构建，只改公共恢复脚本，尚未部署到两台实机。
+这修复的是恢复分支，原始 F2FS 损坏根因仍未确定，不能声称文件内容全部无损。
+详见 [恢复记录](F2FS-RECOVERY-AND-CHARGER-WAKE-20261010.zh-CN.md)。

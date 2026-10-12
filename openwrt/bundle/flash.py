@@ -311,6 +311,7 @@ def pull_device_files(work, out=None):
               '/odm/firmware/bt_configure_pskey.xpe.ini', '/odm/firmware/bt_configure_rf.xpe.ini',
               '/mnt/vendor/btmac.txt', '/vendor/firmware/aw87xxx_acf.bin',
               '/odm/etc/audio_params/sprd/audio_structure.xml',
+              '/odm/etc/audio_params/sprd/codec.xml',
               '/odm/etc/audio_params/sprd/dsp_vbc.xml', '/odm/etc/audio_params/sprd/cvs.xml']
     wanted += ['/odm/firmware/' + n for n in su('ls /odm/firmware/').split()
                if n.startswith('wifi_board_config') and n.endswith('.ini')]
@@ -340,7 +341,7 @@ def pull_device_files(work, out=None):
     fw = os.path.join(work, 'lib', 'firmware')
     os.makedirs(os.path.join(fw, 'sprd'))
     for n in os.listdir(raw):
-        if n in ('wcnmodem.bin', 'gnssmodem.bin', 'aw87xxx_acf.bin', 'tsx_data', 'l_agdsp_a.img') or \
+        if n in ('wcnmodem.bin', 'gnssmodem.bin', 'aw87xxx_acf.bin', 'tsx_data', 'l_agdsp_a.img', 'codec.xml') or \
                 (n.startswith('wifi_board_config') and n.endswith('.ini')):
             shutil.copy(os.path.join(raw, n), fw)
     tools = os.path.join(SCRIPTS, 'tools')

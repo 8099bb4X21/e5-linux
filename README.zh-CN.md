@@ -2,6 +2,9 @@
 
 > English: [`README.md`](README.md)
 
+T551M 使用独立的[设备适配说明](devices/t551m/README.md)，包含充电、GPIO 背光、
+32 位厂商运行环境和 NV 隔离。请按该说明构建、试启动 T551M。
+
 本项目在荣悦 E5 5G 手机／随身热点（`ums9158_1h10`，Unisoc UMS9621，
 Android 13）上运行 Debian 13／Phosh 和 OpenWrt 25.12.5。Linux 使用 `boot_b`，
 Android 保留在 A 槽。推荐安装到 SD 卡：安装器先检查空间，仅分配 SD 分区，

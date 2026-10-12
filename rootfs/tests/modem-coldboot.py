@@ -18,20 +18,31 @@ CHARGER = 'console=tty0 modem=shutdown sprdboot.mode=charger'
 
 
 class ColdBoot(unittest.TestCase):
+    profile = (2, 183, cold.EDITS)
+
+    def known(self, data):
+        return patch.object(cold, 'PROFILES', {hashlib.sha256(data).hexdigest(): self.profile})
+
     def fixture(self):
+        elf_class, machine, edits = self.profile
         data = bytearray(0xE000)
-        data[:6] = b'\x7fELF\x02\x01'
-        struct.pack_into('<H', data, 18, 183)
-        for offset, before, _ in cold.EDITS:data[offset:offset + 4] = before
+        data[:6] = b'\x7fELF' + bytes((elf_class, 1))
+        struct.pack_into('<H', data, 18, machine)
+        for offset, before, _ in edits:data[offset:offset + len(before)] = before
         return bytes(data)
 
     def test_only_expected_startup_instructions_change(self):
         data = self.fixture()
-        with patch.object(cold, 'KNOWN_SHA256', {hashlib.sha256(data).hexdigest()}):
+        with self.known(data):
             result = cold.selective_copy(data)
         assert len(result) == len(data)
-        allowed = {i for off, before, _ in cold.EDITS for i in range(off, off + len(before))}
+        allowed = {i for off, before, _ in self.profile[2] for i in range(off, off + len(before))}
         assert {i for i in range(len(data)) if data[i] != result[i]} <= allowed
+        if self.profile[0] == 1:
+            # Thumb MOVS r0,#34, and MOVS r4,#0. PM bit0 stays clear.
+            assert struct.unpack_from('<H', result, 0x96C0)[0] == 0x2022
+            assert struct.unpack_from('<H', result, 0x96A2)[0] == 0x2400
+            return
         # ARM64 MOVZ immediate decodes to LOAD_CP | LOAD_CH, excluding PM bits.
         instruction = struct.unpack_from('<I', result, 0xD1D0)[0]
         mask = (instruction >> 5) & 0xFFFF
@@ -45,10 +56,10 @@ class ColdBoot(unittest.TestCase):
             cold.selective_copy(self.fixture())
         for corruption in ['instruction', 'architecture']:
             data = bytearray(self.fixture())
-            if corruption == 'instruction':data[0xD18C] ^= 1
+            if corruption == 'instruction':data[self.profile[2][0][0]] ^= 1
             else:struct.pack_into('<H', data, 18, 62)
             data = bytes(data)
-            with patch.object(cold, 'KNOWN_SHA256', {hashlib.sha256(data).hexdigest()}):
+            with self.known(data):
                 with self.assertRaises(ValueError):cold.selective_copy(data)
 
     def test_normal_boot_and_online_cp_unchanged(self):
@@ -73,11 +84,15 @@ class ColdBoot(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); (root / 'vendor/bin').mkdir(parents=True)
             source = root / 'vendor/bin/modem_control'; source.write_bytes(data)
-            with patch.object(cold, 'requires_cold_start', return_value=True), patch.object(cold, 'KNOWN_SHA256', {hashlib.sha256(data).hexdigest()}):
+            with patch.object(cold, 'requires_cold_start', return_value=True), self.known(data):
                 assert cold.prepare(root, CHARGER) == '/tmp/e5-coldboot/modem_control'
             assert source.read_bytes() == data
             target = root / 'tmp/e5-coldboot/modem_control'
             assert target.stat().st_mode & 0o111 and target.read_bytes() != data
+
+
+class T551MColdBoot(ColdBoot):
+    profile = (1, 40, cold.T551M_EDITS)
 
 
 if __name__ == '__main__':unittest.main()
