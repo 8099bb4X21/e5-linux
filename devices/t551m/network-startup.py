@@ -9,6 +9,71 @@ from pathlib import Path
 import re
 
 
+# Based on mu300-linux 47d9463d. Unlike its fallback, never relax NO_IR.
+NO_DFS = '''// unisoc-driver-dfs-capabilities: obey both driver and regulatory data.
+function device_no_dfs(config) {
+	if (config.band != '5g' || phy_features.radar_detect)
+		return;
+	let radar = {}, usable = [];
+	for (let f in phy_capabilities.freqs) {
+		let chan = (f.freq - 5000) / 5;
+		if (f.radar)
+			radar[chan] = true;
+		else if (!f.disabled && !f.no_ir)
+			push(usable, chan);
+	}
+	if (!config.channel) {
+		config.acs_exclude_dfs = true;
+		return;
+	}
+	if (!radar[config.channel])
+		return;
+	let chan = filter([ 36, 149, ...usable ], (c) => c in usable)[0];
+	if (!chan)
+		die(`DFS channel ${config.channel} requires radar detection; no legal non-DFS 5 GHz channel is available`);
+	log(`driver lacks radar detection: using channel ${chan} instead of DFS channel ${config.channel}`);
+	config.channel = chan;
+	let m = match(config.htmode, /^(HT|VHT|HE|EHT)([0-9]+)$/);
+	if (!m)
+		return;
+	let width = min(+m[2], 80);
+	let fits = (list) => length(filter(list, (c) => !(c in usable))) == 0;
+	let off = (chan - (chan >= 149 ? 149 : 36)) % 16;
+	if (width == 80 && !fits(map([ 0, 4, 8, 12 ], (o) => chan - off + o)))
+		width = 40;
+	if (width == 40 && !fits(off % 8 < 4 ? [ chan, chan + 4 ] : [ chan - 4, chan ]))
+		width = 20;
+	if (m[1] == 'HT')
+		width = min(width, 40);
+	config.htmode = m[1] + width;
+}
+
+'''
+
+
+def patch_wifi_capabilities(root):
+    path = root / 'usr/share/ucode/wifi/hostapd.uc'
+    if not path.exists():
+        return
+    text = path.read_text()
+    if '// unisoc-driver-dfs-capabilities:' in text:
+        return
+    replacements = [
+        ('wiphy_info, wiphy_band\n', 'wiphy_info, wiphy_band, log\n'),
+        ("\tphy_features.cipher_gcmp256 = WLAN_CIPHER_SUITE_GCMP_256 in (phy.cipher_suites ?? []);",
+         "\tphy_features.cipher_gcmp256 = WLAN_CIPHER_SUITE_GCMP_256 in (phy.cipher_suites ?? []);\n"
+         "\tphy_features.radar_detect = length(filter(phy.interface_combinations ?? [], (c) => c.radar_detect_widths)) > 0;\n"
+         "\tphy_capabilities.freqs = band?.freqs ?? [];"),
+        ('function generate(config) {', NO_DFS + 'function generate(config) {'),
+        ('\tset_device_defaults(config);\n', '\tset_device_defaults(config);\n\tdevice_no_dfs(config);\n'),
+    ]
+    for old, new in replacements:
+        if text.count(old) != 1:
+            raise ValueError('Unexpected wifi-scripts hostapd.uc: ' + old[:70])
+        text = text.replace(old, new)
+    path.write_text(text)
+
+
 CONNECT_RETRY = '''# unisoc-pdp-connect-retry: bounded recovery without disabling the radio.
 modemmanager_connect_retry() {
 	local device="$1" connectargs="$2" attempt=1 result rc delay
@@ -37,6 +102,7 @@ modemmanager_connect_retry() {
 def patch_root(root, profile='t551m'):
     if profile not in ('t551m', 'e5', 'm8'):
         raise ValueError('Unknown device profile: ' + profile)
+    patch_wifi_capabilities(root)
     config = root / 'etc/config/unisoc_modem'
     if config.exists() and profile == 't551m':
         text = config.read_text()

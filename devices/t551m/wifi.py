@@ -4,6 +4,7 @@ Adapted from mu300-linux 7e0acce0a01b and f4f5e760cfa6. This tree uses
 the SDIO driver's is_dns/sc2355 names instead of the PCIe fork's fields.
 """
 from pathlib import Path
+import runpy
 
 
 def apply(kernel):
@@ -81,6 +82,8 @@ def apply(kernel):
         path.write_text(text)
     elif text.count(headroom) != 1:
         raise ValueError('Unexpected existing Wi-Fi TX headroom adaptation')
+
+    runpy.run_path(str(Path(__file__).resolve().parents[1] / 'wifi-common.py'))['apply'](kernel)
 
 
 if __name__ == '__main__':

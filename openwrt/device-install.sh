@@ -20,6 +20,28 @@
 set -eu
 T=${1:?tarball}
 MODE=${2:-}
+case "$MODE" in ''|--try|--switch) ;; *) echo "unknown option $MODE" >&2; exit 2 ;; esac
+
+# Keep this block identical in both self-contained installers.
+# BEGIN e5-upgrade-lock
+lockdir=/run/e5-upgrade
+[ "$(id -u)" = 0 ] || { echo 'upgrade requires root' >&2; exit 1; }
+command -v flock >/dev/null 2>&1 || { echo 'flock is required for a safe upgrade' >&2; exit 1; }
+(umask 077; mkdir "$lockdir") 2>/dev/null || true
+[ ! -L "$lockdir" ] && [ -d "$lockdir" ] &&
+    [ "$(stat -c '%u:%a' "$lockdir")" = 0:700 ] || {
+    echo 'unsafe upgrade lock directory' >&2; exit 1;
+}
+lockfile=$lockdir/lock
+[ ! -L "$lockfile" ] && { [ ! -e "$lockfile" ] || {
+    [ -f "$lockfile" ] && [ "$(stat -c '%u:%h' "$lockfile")" = 0:1 ];
+}; } || { echo 'unsafe upgrade lock file' >&2; exit 1; }
+update_umask=$(umask)
+umask 077
+exec 9>>"$lockfile"
+umask "$update_umask"
+flock -n 9 || { echo 'another system upgrade is running' >&2; exit 1; }
+# END e5-upgrade-lock
 DEST=/openwrt NEW=/openwrt.new OLD=/openwrt.old
 
 [ -f /etc/debian_version ] || { echo "run this in the E5's Debian" >&2; exit 1; }
