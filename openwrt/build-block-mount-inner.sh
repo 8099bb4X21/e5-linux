@@ -17,6 +17,21 @@ if [ ! -d "$sdk" ]; then
 fi
 cd "$sdk"
 export FORCE_UNSAFE_CONFIGURE=1
+# The SDK freezes hidden defaults from the release configuration. A seed
+# .config cannot override them: it otherwise selects every shipped kmod.
+# Change package/work selection only; retain all pinned toolchain/ABI options.
+python3 - <<'PY'
+from pathlib import Path
+import re
+p = Path('Config-build.in')
+text = p.read_text()
+def selection(match):
+    name, body = match.group(1), match.group(2)
+    if name.startswith('PACKAGE_kmod-') or name in ('BUILDBOT', 'SDK_LLVM_BPF'):
+        body = re.sub(r'(?m)^(\s*default) [ym](\s*)$', r'\1 n\2', body)
+    return 'config ' + name + body
+p.write_text(re.sub(r'(?m)^config (\S+)([\s\S]*?)(?=^config |\Z)', selection, text))
+PY
 if [ ! -f package/feeds/base/fstools/Makefile ]; then
     ./scripts/feeds update base
     ./scripts/feeds install -p base fstools
