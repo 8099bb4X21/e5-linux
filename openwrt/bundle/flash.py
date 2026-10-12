@@ -797,7 +797,11 @@ if [ -f /etc/e5/sd-root ]; then
     # Updating OpenWrt is an explicit operator choice; make it the persistent
     # SD default after the new slot has verified, rather than leaving Debian
     # selected from an earlier multi-system session.
-    e5-os openwrt
+    if [ -f /mnt/e5-boot/format ]; then
+        e5-os openwrt
+    fi
+    # Legacy single-system SD cards already use the SD boot selection. Their
+    # userdata stays read-only; e5-os there would write an unrelated image choice.
 else
     # the form on userdata (--data, kept for tests)
     sh dii.sh {u}/openwrt.ext4.gz
