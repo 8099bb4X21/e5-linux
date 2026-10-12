@@ -297,7 +297,13 @@ docker run --rm --platform linux/arm64 \
     -v "$TAROUT":/out -e NAME="$NAME" -e VERSION="$VERSION" -e E5_BUILD_EPOCH="${E5_BUILD_EPOCH:-}" -e CONTAINERS="$CONTAINERS" \
     e5-openwrt-base:$VER /bin/sh -euc '
 mkdir -p /var/lock /var/run /tmp
-apk update >/dev/null
+attempt=1
+until apk update >/dev/null; do
+    [ "$attempt" -lt 4 ] || exit 1
+    echo "Retrying OpenWrt package indexes ($attempt/3)" >&2
+    sleep $((attempt * 2))
+    attempt=$((attempt + 1))
+done
 apk add --allow-untrusted /in/block-mount-guarded.apk >/dev/null
 apk add e2fsprogs resize2fs f2fs-tools >/dev/null
 # ModemManager first, from its local file (unsigned): its release is above the
