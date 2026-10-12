@@ -18,3 +18,5 @@
 离线验证包含 36 项短信、15 项 Python APN、70 项 ucode APN 检查、屏幕 / LuCI 浏览器流程、三机型干净根边界、15 项启动链、13 项安装诊断、6 项 userdata 大小与 17 项发布审计。端口通知、事件过滤及 session 等待检查通过；电话卸载回归继续保留。
 
 E5 目前未插入 SIM，真实蜂窝拨号、PAP/CHAP 运营商认证和短信转发无法据此宣布实测通过。三机型完整 Android 安装与 T551M / M8 硬件验证仍需分别记录，不沿用 PR 中其他设备的测试结论。
+
+E5 已刷入 `359ae54` 并通过迁移后的实机回归，详见 [E5-PR3-TEST-20261013.zh-CN.md](E5-PR3-TEST-20261013.zh-CN.md)。release workflow 已更新至 `7c6dd90`；未自动发布新的 GitHub Release。
