@@ -174,8 +174,11 @@ def main():
     if not (a.f2fs_tools / 'manifest.json').is_file():
         sys.exit('Missing early F2FS tools; run boot/prepare-f2fs-tools.py --root ARM64_OPENWRT_ROOT')
     repair_manifest = json.loads((a.f2fs_tools / 'manifest.json').read_text())
-    repair_names = ('sbin/fsck.f2fs', 'lib/ld-musl-aarch64.so.1', 'lib/libf2fs.so.10',
-                    'lib/libuuid.so.1', 'lib/libgcc_s.so.1')
+    repair_names = ('sbin/fsck.f2fs', 'sbin/resize.f2fs', 'lib/ld-musl-aarch64.so.1',
+                    'lib/libf2fs.so.10', 'lib/libuuid.so.1', 'lib/libgcc_s.so.1',
+                    'usr/bin/ucode', 'lib/libucode.so.20230711', 'lib/libjson-c.so.5',
+                    'usr/lib/ucode/fs.so',
+                    'usr/sbin/resize2fs', 'lib/libe2p.so.2', 'lib/libext2fs.so.2', 'lib/libcom_err.so.0')
     for name in repair_names:
         payload = (a.f2fs_tools / name).read_bytes()
         if hashlib.sha256(payload).hexdigest() != repair_manifest['sha256'].get(name):
@@ -183,7 +186,18 @@ def main():
         files['repair/'+name] = (payload, stat.S_IFREG | 0o755)
     files['repair/lib/libc.so'] = (b'ld-musl-aarch64.so.1', stat.S_IFLNK | 0o777)
     files['repair/manifest.json'] = ((a.f2fs_tools / 'manifest.json').read_bytes(), stat.S_IFREG | 0o644)
-    dirs.update({'repair', 'repair/sbin', 'repair/lib'})
+    dirs.update({'repair', 'repair/sbin', 'repair/lib', 'repair/usr', 'repair/usr/bin', 'repair/usr/lib',
+                 'repair/usr/lib/ucode', 'repair/usr/sbin'})
+    # The internal-partition installer (boot/install-part.sh) runs the tools
+    # the way a normal system does, from the standard paths: ucode resolves
+    # its modules at the compiled-in /usr/lib/ucode, and the loader finds
+    # libucode/libc beside it, so no private library path is involved.
+    for name in repair_names:
+        files[name] = ((a.f2fs_tools / name).read_bytes(), stat.S_IFREG | 0o755)
+    files['etc/install-part.sh'] = ((HERE / 'install-part.sh').read_bytes(), stat.S_IFREG | 0o644)
+    files['usr/share/e5-gpt'] = ((HERE.parent / 'openwrt/overlay/usr/libexec/e5-gpt').read_bytes(),
+                                 stat.S_IFREG | 0o755)
+    dirs.update({'usr', 'usr/bin', 'usr/lib', 'usr/lib/ucode', 'usr/share', 'usr/sbin'})
 
     order = []
     if a.module_order.exists():
@@ -279,6 +293,8 @@ def main():
         'f2fs_repair': {'policy': 'userdata-mount-failure-only', 'tf_boot': 'skip',
                         'tools': repair_manifest['sha256'],
                         'script_sha256': hashlib.sha256((HERE / 'f2fs-repair.sh').read_bytes()).hexdigest()},
+        'part_install': {'trigger': 'e5linux/part-install.conf on userdata (flash.py --part)',
+                         'script_sha256': hashlib.sha256((HERE / 'install-part.sh').read_bytes()).hexdigest()},
     }
     a.out.with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(manifest, indent=2))

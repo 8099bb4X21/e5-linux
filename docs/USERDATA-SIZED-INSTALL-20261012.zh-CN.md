@@ -1,5 +1,10 @@
 # 可选容量的 userdata 镜像安装（2026-10-12）
 
+> 已退役（2026-10-12 晚）：刷机包不再包含 `install-userdata.cmd` /
+> `install-userdata.sh` 与 `userdata-image.sh`（flash.py 内的实现保留）。
+> 替代方案见 [INTERNAL-PARTITION-SYSTEM-20261012.zh-CN.md](INTERNAL-PARTITION-SYSTEM-20261012.zh-CN.md)——
+> 在 eMMC 真分区上启动，userdata 不再被 mainline 读写。本文档保留为故障史与教训记录。
+
 TF 安装出现 `expected one SD card, found 0` 表示没有找到外置卡；可以用本次新增的
 `install-userdata.cmd` / `install-userdata.sh` 安装到内置存储的普通镜像文件。
 三机型共用实现，安装器仍检查对应型号、Android A 槽、root、解锁状态及启动链。

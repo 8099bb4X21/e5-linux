@@ -9,25 +9,17 @@ file are for E5 only. Never flash a different model's package.
 Installs OpenWrt 25.12 (5G WAN, hotspot, LuCI and the info screen on the
 panel) next to Android: Android stays as it is, OpenWrt
 goes onto the **SD card** (a partition of its own; the rest of the card is left
-free) and boots from `boot_b`.  Android is always one step away.  `--data`
-installs into the phone's storage instead -- the form before the card.
+free) and boots from `boot_b`.  Android is always one step away.  Without a
+card, `install-part` installs to a partition of the phone's own storage
+instead (userdata is shrunk; Android keeps its files).
 
 ## You need
-
-For installation without an SD card, run `install-userdata.cmd` (Windows) or
-`bash install-userdata.sh` (Linux/macOS). The installer shows userdata free
-space and asks for an image size in GiB; `--image-size 4` selects 4 GiB.
-It reserves at least 1 GiB for Android plus temporary payload space, allocates
-and resizes a new ext4 file, then verifies it read-only before committing.
-userdata itself is not formatted. Existing images remain in a timestamped
-`/data/e5linux/previous.*` directory. A fresh install uses default OpenWrt
-settings; the previous image is kept as a backup. Reboot manually when done.
 
 * a matching device with an **unlocked bootloader** and Android rooted with **Magisk**;
 * Android running from slot a (as it comes from the factory);
 * an **SD card of 4 GB or more** (8 GB recommended): it is partitioned and erased, and
-  its free space stays free for more partitions later.  With `--data` instead,
-  no card is needed and 2.5 GB must be free on the phone's storage;
+  its free space stays free for more partitions later -- or run
+  `install-part.cmd` / `bash install-part.sh` and no card is needed;
 * a Windows, macOS or Linux computer with:
   * **Python 3.8 or newer** (on Windows from https://www.python.org/downloads/, tick
     "Add python.exe to PATH");
@@ -92,9 +84,6 @@ What it does:
   slot b. **Slot a's Android is not touched.** It also saves the boot target in
   `e5linux/boot-os` on userdata. Finally it backs up the live 32-byte misc boot
   control block, derives B's trial state from it and verifies the bounded write;
-* `--data` instead writes the image to `/data/e5linux/openwrt.ext4` and the
-  first boot's settings to `/data/e5linux/openwrt-install.conf`, and asks three
-  times before it writes anything.
 
 ## Using it
 
@@ -104,6 +93,20 @@ What it does:
 * SSH: `ssh root@192.168.9.1`.
 * The panel: left/right turn the pages, confirm presses, back goes back; 高级
   (Settings) has the network mode, bands, APN, charge control and more.
+
+### Without an SD card (`install-part`)
+
+`install-part.cmd` (Windows) or `bash install-part.sh` installs OpenWrt onto a
+partition of the phone's own storage: it shows the partition size range and
+asks for one (default: the image plus 1 GiB), then whether the system should
+**use the whole partition** (default: no, the image's own ~2 GiB allocation),
+then asks **three times** before staging anything. On the next boot the boot image shrinks userdata by that
+much, creates the `e5root` partition and writes OpenWrt into it; userdata is
+not formatted and Android keeps its files. The first boot is a trial: one that
+never comes up falls back. Back to Android: `e5-next-boot android` from the
+screen or a shell, or delete `/data/e5linux/boot-os`, and reboot. Later
+reinstalls or resizes of that partition run from the running OpenWrt:
+`device-install-part.sh`.
 
 ## Back to Android
 
@@ -153,17 +156,12 @@ were (if the E5 fell back to Android meanwhile: `./flash.sh --boot-openwrt`).
 The update needs about the image's size free on the card (1 GiB and a little
 more).
 
-On an install in the phone's storage (`--data`) the new image takes over at the
-reboot; the old one stays as `/mnt/e5-data/e5linux/openwrt.ext4.old`.
-
 ## Uninstall
 
 Back in Android, in a root shell: `echo android > /data/e5linux/boot-os` (or
 delete that file) so the card is no longer the system to boot, then take the
-card out; its partition can be wiped with any partition tool.  A `--data`
-install leaves `/data/e5linux/openwrt.ext4`, `device-files.tar` and
-`openwrt-install.conf` to delete.  The boot image in `boot_b` does not bother
-Android, which boots from slot a.
+card out; its partition can be wiped with any partition tool.  The boot image
+in `boot_b` does not bother Android, which boots from slot a.
 
 ## Disclaimer
 

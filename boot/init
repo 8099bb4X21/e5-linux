@@ -14,7 +14,7 @@
 # inside boot_b, which survives a cold power cycle (pstore does not).
 /bin/busybox mkdir -p /bin /sbin /proc /sys /dev /run /tmp /root /etc
 /bin/busybox --install -s /bin
-export PATH=/bin:/sbin HOME=/root TERM=vt100
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin HOME=/root TERM=vt100
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 # 4, not 7: at 7 each info line costs ~10 ms of synchronous serial console
@@ -588,8 +588,14 @@ mount_userdata_root() {
     log "stage=f2fs-recovery-incomplete retaining-rescue-fallback"
     return 1
 }
-rootdir= data_mounted= on_card=
+rootdir= data_mounted= on_card= on_part= PARTROOT= PARTTRIAL=
 [ -n "$data" ] && f2fs_last_cp "$data"
+# A pending internal-partition install (flash.py --part): userdata is
+# unmounted here, which is the only place its vendor F2FS may be shrunk
+# (raw tools only, docs/FINDINGS.md 48).  A finished install restarts into
+# the new system itself (its partition is unknown to this boot's kernel
+# table); a failed or absent one leaves the chain below to decide.
+[ -z "$data" ] || { . /etc/install-part.sh && install_part_pending "$data"; }
 # The SD card system is the one maintained (the systems on userdata are for
 # tests), and it leaves userdata read-only: mainline damaged that F2FS across
 # power cycles even after a clean unmount (docs/FINDINGS.md 48).  So userdata is
@@ -619,7 +625,53 @@ sd_wait() {
     log "stage=sd-none (waited $(($1 / 2)) s)"
     return 1
 }
-if [ -z "$e5_trial" ] && sd_wait 8 &&
+# The internal partition system (openwrt/device-install-part.sh): a real ext4
+# partition on the eMMC, created by that installer with e5-gpt and marked
+# /etc/e5/part-root.  A system that lives there keeps userdata unmounted, so
+# the vendor F2FS is never written under mainline (docs/FINDINGS.md 48) --
+# the same reason the card system leaves userdata read-only.  Chosen when
+# userdata names it (e5linux/boot-os = part); when the partition is gone the
+# selection falls through to the image path below.
+part_root() {
+    local u e dev
+    [ -n "$misc" ] || return 1
+    e=${misc#/dev/}; e=${e%%p*}
+    for u in /sys/class/block/${e}p*/uevent; do
+        grep -qx PARTNAME=e5root "$u" 2>/dev/null || continue
+        dev=/dev/$(basename "$(dirname "$u")")
+        mount -t ext4 -o ro,noatime "$dev" /sdtry 2>/dev/null || continue
+        if [ -x /sdtry/sbin/init ] && [ -f /sdtry/etc/e5/part-root ]; then
+            PARTTRIAL=
+            [ -f /sdtry/etc/e5/part-trial ] && PARTTRIAL=$(cat /sdtry/etc/e5/part-trial 2>/dev/null)
+            umount /sdtry
+            PARTROOT=$dev
+            return 0
+        fi
+        umount /sdtry
+    done
+    return 1
+}
+# The internal partition system, when userdata names it (boot-os = part).  A
+# trial marker on it, like the card's sd-trial, makes a boot that dies before
+# userspace fall back: booting it writes 0 into the file, and the running
+# system removes it once it is up (e5-boot-ok).  A failed trial, a missing
+# partition or an unreadable one drops the choice for this boot only -- the
+# chain below (card, then image) still gets its turn.
+if [ -z "$e5_trial" ] && [ "$want" = part ]; then
+    if part_root && [ "$PARTTRIAL" != 0 ] &&
+       mount -t ext4 -o noatime "$PARTROOT" /disk 2>>/run/rootmount.err; then
+        rootdir=/disk on_part=1
+        log "stage=openwrt-part $PARTROOT"
+        if [ -n "$PARTTRIAL" ]; then
+            echo 0 > /disk/etc/e5/part-trial && sync
+            log "stage=openwrt-part-trial $PARTROOT"
+        fi
+    else
+        log "stage=openwrt-part-fail ${PARTROOT:-none}${PARTTRIAL:+ trial=$PARTTRIAL}"
+        want=
+    fi
+fi
+if [ -z "$rootdir" ] && [ -z "$e5_trial" ] && sd_wait 8 &&
    { [ -n "$SDMETA" ] || [ -z "$want" ] || [ "$want" = sd ]; }; then
     card=1
     log "stage=card-system userdata read-only"
@@ -631,7 +683,11 @@ if [ -z "$e5_trial" ] && sd_wait 8 &&
                            mount -t f2fs -o ro,norecovery,noatime,nodiratime "$data" /data 2>>/run/datamount.err; }; then
         data_mounted=1
     fi
-elif [ -z "$SDMETA" ] && [ -z "$SDMETA_INVALID" ] && [ -n "$data" ] && mount_userdata_root; then
+elif [ -z "$e5_trial" ] && [ "$want" = part ] && part_root &&
+     mount -t ext4 -o noatime "$PARTROOT" /disk 2>>/run/rootmount.err; then
+    log "stage=openwrt-part $PARTROOT"
+    rootdir=/disk on_part=1
+elif [ -z "$rootdir" ] && [ -z "$SDMETA" ] && [ -z "$SDMETA_INVALID" ] && [ -n "$data" ] && mount_userdata_root; then
     log "stage=data-mounted"
     data_mounted=1
     want=$(read_boot_os /data)
@@ -705,7 +761,7 @@ if [ -n "$rootdir" ]; then
         # brought an image without them.
         dft=/data/e5linux/device-files.tar
         # (a card system carries its own, from its install or update)
-        if [ -z "$on_card" ] && [ -f /newroot/etc/e5/image-form ] && [ -f "$dft" ]; then
+        if [ -z "$on_card" ] && [ -z "$on_part" ] && [ -f /newroot/etc/e5/image-form ] && [ -f "$dft" ]; then
             stamp=$(sha256sum "$dft" | cut -d' ' -f1)
             if [ ! -f /newroot/lib/firmware/wcnmodem.bin ] ||
                [ "$(cat /newroot/etc/e5/device-files.stamp 2>/dev/null)" != "$stamp" ]; then
@@ -745,8 +801,9 @@ if [ -n "$rootdir" ]; then
     fi
     mkdir -p /run/e5linux && cp /etc/misc-bc-slot-a.bin /etc/misc-bc-slot-b-trial.bin /run/e5linux/ 2>/dev/null
     # what this initramfs can do, for the installers of the running system
-    echo "openwrt-image userdata-boot-os sd-gen" > /run/e5linux/init-features
+    echo "openwrt-image userdata-boot-os sd-gen part-root" > /run/e5linux/init-features
     [ -n "$on_card" ] && echo "$SDROOT" > /run/e5linux/sd-root-dev
+    [ -n "$on_part" ] && echo "$PARTROOT" > /run/e5linux/part-root-dev
     if [ -n "$SDMETA" ]; then
         mkdir -p /newroot/mnt/e5-boot
         mount --move /sdboot /newroot/mnt/e5-boot

@@ -84,9 +84,13 @@ def main():
         'apk --root /target --no-scripts --no-network add --allow-untrusted /input/block.apk')
     # The SMS forward signs DingTalk webhooks with the openssl CLI and sends SMTP
     # through msmtp; the clean base carries the backend files without the packages.
+    # (downloads.openwrt.org interrupts mid-index often enough that the same
+    #  retry loop mu300-linux's builder uses belongs here too)
     run('docker', 'run', '--rm', '--platform', 'linux/arm64',
         '-v', f'{root}:/target', '--entrypoint', '/bin/sh', a.apk_image, '-ec',
-        'apk --root /target --no-scripts add openssl-util msmtp')
+        'ok=; for n in 1 2 3; do apk --root /target --no-scripts add openssl-util msmtp && '
+        '{ ok=1; break; }; echo "apk download interrupted (attempt $n), retrying" >&2; sleep 3; done; '
+        '[ -n "$ok" ]')
     forward = {}
     for pkg in ('openssl-util', 'msmtp'):
         match = re.search(rf'^P:{pkg}$\n^V:(\S+)$', (root / 'lib/apk/db/installed').read_text(), re.M)
@@ -171,15 +175,14 @@ def main():
     with (files / 'openwrt.ext4.gz').open('wb') as out:
         run('gzip', '-1', '-c', image, stdout=out)
     runpy.run_path(str(TOP / 'openwrt/prepare-ext4-tools.py'))['build'](root, files / 'ext4-tools.tar')
-    for n in ('flash.py', 'flash.cmd', 'flash.sh', 'install-userdata.cmd', 'install-userdata.sh', 'README.md', 'README.zh-CN.md'):
+    for n in ('flash.py', 'flash.cmd', 'flash.sh', 'install-part.cmd', 'install-part.sh', 'README.md', 'README.zh-CN.md'):
         shutil.copy2(TOP / 'openwrt/bundle' / n, package / n)
-    for n in ('device-install-image.sh', 'device-flash-boot.sh'):
+    for n in ('device-install-image.sh', 'device-flash-boot.sh', 'device-install-part.sh'):
         shutil.copy2(TOP / 'openwrt' / n, files / n)
     for src in ('openwrt/bundle/collect-device-files.sh', 'openwrt/overlay/usr/libexec/e5-gpt', 'tools/android-bootchain.sh'):
         target = files / Path(src).name
         target.write_bytes((TOP / src).read_bytes().replace(b'\r\n', b'\n'))
         target.chmod(0o755)
-    (files / 'userdata-image.sh').write_bytes((TOP / 'openwrt/bundle/userdata-image.sh').read_bytes().replace(b'\r\n', b'\n'))
     tools = package / 'scripts/tools'
     tools.mkdir(parents=True)
     for n in ('e5-telnet.py', 'sprd-bt-config.py'):

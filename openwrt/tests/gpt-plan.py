@@ -50,15 +50,16 @@ def metadata(path):
 
 with tempfile.TemporaryDirectory(prefix='e5-gpt-plan-') as directory:
     root = Path(directory)
+    def run(*args):
+        return subprocess.run(['docker', 'run', '--rm', '-v', f'{root}:/test',
+                               '-v', f'{TOOL}:/gpt:ro', os.environ.get('E5_TEST_IMAGE', 'e5-openwrt-base:25.12.5'),
+                               'ucode', '/gpt', *args], text=True, capture_output=True)
     def check(name, size, parts, success, text='', entries=128):
         image = root / (name + '.img')
         disk(image, size, parts, entries)
         before = metadata(image)
-        result = subprocess.run(['docker', 'run', '--rm', '-v', f'{root}:/test',
-                                 '-v', f'{TOOL}:/gpt:ro', os.environ.get('E5_TEST_IMAGE', 'e5-openwrt-base:25.12.5'),
-                                 'ucode', '/gpt', 'plan', '/test/' + image.name,
-                                 'e5boot:65536', 'debian-a:8388608', 'debian-b:8388608'],
-                                text=True, capture_output=True)
+        result = run('plan', '/test/' + image.name,
+                     'e5boot:65536', 'debian-a:8388608', 'debian-b:8388608')
         assert (result.returncode == 0) == success, (name, result.stdout, result.stderr)
         assert metadata(image) == before, 'plan changed GPT metadata'
         assert text in result.stdout + result.stderr
@@ -77,4 +78,47 @@ with tempfile.TemporaryDirectory(prefix='e5-gpt-plan-') as directory:
                                           (3, 12500, 1000, 'three')], False, 'total remaining')
     check('entries-exhausted', 16384, [(1, 1, 1024, 'e5root')], False, 'GPT entries', entries=2)
     check('duplicate-id', 16384, [(1, 1, 1024, 'debian-a')], False, 'already exists')
+
+    # A shrink in the same plan frees the gap the add lands in: the request
+    # order inside one plan is the order the real commands would run in.
+    image = root / 'resize-plan.img'
+    disk(image, 16384, [(1, 1, 8192, 'userdata')])
+    before = metadata(image)
+    result = run('plan', '/test/resize-plan.img', 'resize:userdata:4194304', 'linux:4194304')
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert metadata(image) == before, 'plan resize changed GPT metadata'
+    rows = [row.split() for row in result.stdout.splitlines()]
+    assert [row[0] for row in rows] == ['userdata', 'linux'], rows
+    assert rows[0][3] == '4196351', rows        # 2048 + 4194304 - 1
+    assert rows[1][2] == '4196352', rows        # 1 MiB aligned, right after the shrink
+    print('resize-plan PASS')
+
+    result = run('plan', '/test/resize-plan.img', 'resize:userdata:4194304', 'resize:linux:2048')
+    assert result.returncode != 0 and 'no partition named linux' in result.stdout + result.stderr
+    result = run('plan', '/test/resize-plan.img', 'resize:nosuch:4194304')
+    assert result.returncode != 0 and 'no partition named nosuch' in result.stdout + result.stderr
+    print('resize-plan-errors PASS')
+
+    # The real shrink, then the real add in the freed gap, then a second
+    # resize of the same size: it must load and compare BOTH GPT copies, so
+    # it fails unless the first one wrote the backup table too.
+    image = root / 'resize-real.img'
+    disk(image, 16384, [(1, 1, 8192, 'userdata'), (2, 12288, 2048, 'tail')])
+    before = metadata(image)
+    result = run('resize', '/test/resize-real.img', 'userdata', '4194304')
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert result.stdout.split() == ['userdata', '1', '2048', '4196351'], result.stdout
+    assert metadata(image) != before, 'resize wrote nothing'
+    result = run('resize', '/test/resize-real.img', 'userdata', '4194304')
+    assert result.returncode == 0, ('backup GPT disagrees', result.stdout, result.stderr)
+    result = run('add', '/test/resize-real.img', 'linux', '4194304')
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    result = run('list', '/test/resize-real.img')
+    rows = {row.split()[3]: row.split() for row in result.stdout.splitlines()}
+    assert rows['userdata'][1:3] == ['2048', '4196351'], rows
+    assert rows['linux'][1:3] == ['4196352', '8390655'], rows
+    over = run('resize', '/test/resize-real.img', 'linux', '20971520')
+    assert over.returncode != 0 and 'overlaps partition' in over.stdout + over.stderr
+    print('resize-real PASS')
+
 print('All GPT allocation plans preserved disk metadata')

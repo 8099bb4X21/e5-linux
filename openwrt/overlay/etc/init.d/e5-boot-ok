@@ -13,6 +13,11 @@ start() {
 		rm -f /etc/e5/sd-trial && sync
 		logger -t e5-boot-ok "the card update's first boot is up: kept ($(cat /etc/e5/image-version 2>/dev/null))"
 	fi
+	# the first boot of an internal partition install (boot/init, device-install-part.sh)
+	if [ -f /etc/e5/part-trial ]; then
+		rm -f /etc/e5/part-trial && sync
+		logger -t e5-boot-ok "the internal partition's first boot is up: kept ($(cat /etc/e5/image-version 2>/dev/null))"
+	fi
 	# flash.py --boot-openwrt from Android asks for OpenWrt as the default
 	# again, taken once the system is up (a boot that fails keeps Android)
 	local f=/mnt/e5-data/e5linux/openwrt-default-boot

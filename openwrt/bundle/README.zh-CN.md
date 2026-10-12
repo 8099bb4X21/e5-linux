@@ -7,14 +7,15 @@
 
 把 OpenWrt 25.12（带 5G 上网、热点、LuCI 和屏幕信息屏）装到设备上，与原来的 Android
 共存：Android 不动，OpenWrt 装到 **SD 卡**（独立分区，卡上其余空间保留）上，从 `boot_b` 启动。
-随时可以回到 Android。加 `--data` 则装到手机存储里——即改用 SD 卡之前的做法。
+随时可以回到 Android。没有 TF 卡时可用 `install-part` 装到手机存储自己的一块内部分区
+（对 userdata 缩容，Android 的文件保留）。
 
 ## 需要
 
 * 与安装包对应的设备，**bootloader 已解锁**，Android 已用 **Magisk** 获取 root；
 * Android 在 slot a 运行（出厂状态就是）；
-* 卡槽里插一张 **4 GB 以上的 SD 卡**（建议 8 GB）：它会被重新分区并清空，其余空间留给以后加分区。
-  用 `--data` 则不需要卡，但要手机存储至少 2.5 GB 可用；
+* 卡槽里插一张 **4 GB 以上的 SD 卡**（建议 8 GB）：它会被重新分区并清空，其余空间留给以后加分区；
+  或者运行 `install-part.cmd` / `bash install-part.sh`，无需插卡；
 * 一台 Windows、macOS 或 Linux 电脑，装有：
   * **Python 3.8 或更新版本**（Windows 从 https://www.python.org/downloads/ 安装，勾选“Add python.exe to PATH”）；
   * **adb**（Android platform-tools：https://developer.android.com/tools/releases/platform-tools ，
@@ -65,25 +66,19 @@
   卸载、刷新缓存后以只读方式重新挂载，复核关键文件和固件 SHA-256，通过后才写 boot。
 * 把启动镜像写入 `boot_b` 并校验，然后让下次启动走 slot b。**slot a 的 Android 不会被改动。**
   同时记录 userdata 上的 `e5linux/boot-os` 启动目标；最后备份本机 misc 的 32 字节
-  启动控制信息、生成 B 槽试启动状态并回读校验。启动链备份也保存在 Android data 内；
-* 加 `--data` 则改为把镜像写到 `/data/e5linux/openwrt.ext4`、设置写到
-  `/data/e5linux/openwrt-install.conf`，并在写入前**确认三次**。
+  启动控制信息、生成 B 槽试启动状态并回读校验。启动链备份也保存在 Android data 内。
 
 ## 使用
 
-### 安装到 userdata（无需 TF 卡）
+### 安装到内置分区（无需 TF 卡）
 
-Windows 双击 `install-userdata.cmd`，Linux/macOS 运行 `bash install-userdata.sh`。
-也可以运行 `flash.cmd --data` / `bash flash.sh --data`。
-脚本显示 `/data` 可用空间和镜像大小范围，让你输入 GiB 数值，例如 `4` 或 `6.5`。
-镜像至少为包内根镜像大小（本批为 2 GiB），至少为 Android 保留 1 GiB，另计临时上传和固件空间。
-命令行可指定 `install-userdata.cmd --image-size 4`；加 `-y` 且未指定大小时使用最小镜像。
-
-此安装只创建 `/data/e5linux/openwrt.ext4` 文件，不格式化 userdata。
-随包携带 ARM64/musl 的 ext4 扩容工具；先完整分配镜像空间，扩容、fsck、只读挂载检查，
-通过后才同步 B 槽启动链和提交系统。旧镜像保存在 `/data/e5linux/previous.<时间>.<进程号>/`，
-不自动删除，也不把它的空间算入可用空间。存在未完成 `.part` 或待提交 `.new` 时停止，请先检查。
-安装完成后手动重启。首次安装会使用新的 OpenWrt 默认配置，旧镜像作为备份保留。
+Windows 双击 `install-part.cmd`，Linux/macOS 运行 `bash install-part.sh`。
+脚本显示分区大小范围并让你输入（默认：镜像大小 + 1 GiB），再问是否**完全使用空间**把根
+文件系统扩满整个分区（默认否：按镜像约 2 GiB 分配），随后**确认三次**才开始落位。
+下次启动由引导镜像完成三件事：把 userdata 缩到所选大小、建立 `e5root` 分区、把 OpenWrt
+写入其中——不格式化 userdata，Android 的文件保留。首次启动是试启动，起不来会自动回退。
+回 Android：屏幕或 shell 里 `e5-next-boot android`，或删掉 `/data/e5linux/boot-os` 后重启。
+此后的重装或改大小，在运行中的 OpenWrt 里用 `device-install-part.sh`。
 
 * 热点：用刷机时设置的名称和密码连接；或用 USB 线连接电脑（USB 网卡）。
 * 管理页面 LuCI（中文、Aurora 主题）：`http://192.168.9.1`，用户 `root`，密码 `root`，**请尽快修改**
@@ -136,8 +131,7 @@ SSH 密钥、流量记录、信息屏上装的应用）。用 `apk` 另装的软
 ## 卸载
 
 回到 Android 后，在 root shell 里执行 `echo android > /data/e5linux/boot-os`（或删掉该文件），
-这样卡不再是启动目标，然后把卡取出来，用任意分区工具清掉它的分区即可。用 `--data` 装的则要删
-`/data/e5linux/openwrt.ext4`、`device-files.tar` 和 `openwrt-install.conf`。`boot_b` 里的启动
+这样卡不再是启动目标，然后把卡取出来，用任意分区工具清掉它的分区即可。`boot_b` 里的启动
 镜像留着也不影响 Android（Android 从 slot a 启动）。
 
 ## 免责声明

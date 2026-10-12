@@ -20,6 +20,17 @@ spec.loader.exec_module(flash)
 
 
 class Diagnostics(unittest.TestCase):
+    def test_part_mode_is_whole_and_separate_from_check(self):
+        # an insertion once absorbed check()'s opening into install_part: the
+        # armed slot-B state then failed the pre-install check after arming.
+        import inspect
+        part = inspect.getsource(flash.install_part)
+        self.assertIn('arm_slot_b()', part)
+        self.assertNotIn('free on /data', part)
+        self.assertNotIn('检查完成', part)
+        self.assertTrue(part.rstrip().endswith("falls back.''')"), part[-160:])
+        self.assertTrue(inspect.getsource(flash.check).lstrip().startswith('def check(a):\n    steps(3)'))
+
     def test_wrong_profile_is_rejected_before_partition_commands(self):
         for profile, model, wrong in (('e5', 'E5', 'T551M'),
                                      ('t551m', 'T551M', 'VIPME M8'),

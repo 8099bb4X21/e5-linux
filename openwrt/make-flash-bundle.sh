@@ -131,8 +131,7 @@ P=$S/$NAME
 mkdir -p "$P/files" "$P/scripts/tools"
 # the flasher: flash.py (Windows, macOS, Linux), started by flash.cmd / flash.sh
 cp "$HERE/bundle/flash.py" "$HERE/bundle/flash.sh" "$HERE/bundle/flash.cmd" "$P/"
-cp "$HERE/bundle/install-userdata.cmd" "$HERE/bundle/install-userdata.sh" "$P/"
-cp "$HERE/bundle/userdata-image.sh" "$P/files/"
+cp "$HERE/bundle/install-part.cmd" "$HERE/bundle/install-part.sh" "$P/"
 test -f "$OUT/ext4-tools.tar" || { echo 'Missing ext4-tools.tar: openwrt/prepare-ext4-tools.py --root CLEAN_ARM64_ROOT --out out/openwrt/ext4-tools.tar' >&2; exit 1; }
 cp "$OUT/ext4-tools.tar" "$P/files/"
 chmod 755 "$P/flash.py" "$P/flash.sh"
@@ -142,7 +141,7 @@ cp "$IMG" "$P/files/openwrt.ext4.gz"
 cp "$BOOT.img" "$P/files/boot.img"
 cp "$BOOT.json" "$P/files/boot.json"
 cp "$BOOT.misc-slot-b-trial.bin" "$P/files/boot-misc-slot-b.bin"
-cp "$HERE/device-install-image.sh" "$HERE/device-flash-boot.sh" "$HERE/bundle/collect-device-files.sh" \
+cp "$HERE/device-install-image.sh" "$HERE/device-install-part.sh" "$HERE/device-flash-boot.sh" "$HERE/bundle/collect-device-files.sh" \
    "$HERE/overlay/usr/libexec/e5-gpt" "$P/files/"
 cp "$TOP/tools/e5-telnet.py" "$TOP/tools/sprd-bt-config.py" "$P/scripts/tools/"
 cp "$TOP/tools/android-bootchain.sh" "$P/files/android-bootchain.sh"

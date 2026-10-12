@@ -6,6 +6,9 @@
                             formatted, OpenWrt goes onto it
   flash.py --data           the same onto the phone's storage (userdata), the
                             form before the SD card; it asks three times
+  flash.py --part           first install onto an internal eMMC partition,
+                            without an SD card: the next boot shrinks userdata,
+                            creates the partition and writes OpenWrt into it
   flash.py --update         update, from the running e5-linux over the USB LAN
                             (OpenWrt's settings and installed apps kept)
   flash.py --boot-openwrt   from Android back to the installed OpenWrt (adb)
@@ -876,6 +879,180 @@ def install(a):
   If the boot fails, the E5 falls back to Android after two tries.''')
 
 
+def part_userdata_policy(a):
+    """A requested wipe must be explicit, and encryption never implies consent."""
+    state = sh('getprop ro.crypto.state').strip()
+    kind = sh('getprop ro.crypto.type').strip()
+    mounts = su_checked('检查 data 加密 / checking data encryption', 'cat /proc/mounts')
+    data_source = next((line.split()[0] for line in mounts.splitlines()
+                        if len(line.split()) > 2 and line.split()[1] == '/data'), '')
+    encrypted = state == 'encrypted' or kind in ('file', 'block')
+    metadata = data_source.startswith(('/dev/block/dm-', '/dev/mapper/'))
+    encrypted = encrypted or metadata
+    wipe = bool(getattr(a, 'format_userdata', False)) or encrypted
+    if encrypted:
+        print(f'   检测到 data 加密 / data encryption: {kind or state or "mapped block device"}; '
+              '本次安装必须格式化 userdata / formatting userdata is required.')
+    elif not a.y and not wipe:
+        wipe = confirm('   是否格式化 userdata？这会清空 Android 所有用户数据 / '
+                       'format userdata and erase ALL Android user data [no]: ', word='yes')
+    if wipe:
+        print('   警告 / WARNING: Android 应用、账号、照片及内部存储文件将被清空。')
+        print('   ALL Android apps, accounts, photos and internal storage files will be erased.')
+        # -y is the existing unattended installer confirmation, not permission
+        # for a newly detected destructive operation.
+        if a.y and not getattr(a, 'format_userdata', False):
+            die('encrypted userdata requires --format-userdata as explicit erase consent; -y alone is insufficient')
+    if metadata:
+        die('data uses block/metadata encryption: the initramfs cannot read staged payloads. '
+            'This installer cannot safely format it yet; nothing was erased. '
+            '需要 USB/RAM 载荷交接，不能直接使用 userdata 上的安装文件。')
+    a.format_userdata = wipe
+    return wipe
+
+
+def part_target(a, raw_size):
+    """The userdata node and the sizes an internal-partition install wants."""
+    probe = su_checked('读取分区 / reading the partition table',
+                       'for u in /sys/class/block/mmcblk*p*/uevent; do '
+                       'n=$(basename "$(dirname "$u")"); '
+                       'grep -qx PARTNAME=userdata "$u" 2>/dev/null && echo "data $n $(cat /sys/class/block/$n/size)"; '
+                       'grep -qx PARTNAME=e5root "$u" 2>/dev/null && echo "part $n"; '
+                       'done; df -k /data | tail -1')
+    node = data_sectors = ''
+    existing = None
+    used_mib = 0
+    for line in probe.splitlines():
+        fields = line.split()
+        if len(fields) >= 3 and fields[0] == 'data':
+            node, data_sectors = fields[1], fields[2]
+        elif len(fields) >= 2 and fields[0] == 'part':
+            existing = fields[1]
+        elif len(fields) >= 4 and fields[3].isdigit():
+            used_mib = int(fields[2]) // 1024
+    if existing:
+        die(f'the internal partition {existing} (e5root) already exists; use device-install-part.sh '
+            'from the running OpenWrt to reinstall or resize it')
+    if not node or not data_sectors.isdigit() or int(data_sectors) == 0:
+        die('userdata is not in the partition table of this device')
+    udata_mib = int(data_sectors) // 2048
+    image_mib = (raw_size + (1 << 20) - 1) // (1 << 20)
+    minimum = image_mib + 256
+    maximum = udata_mib - (0 if getattr(a, 'format_userdata', False) else used_mib) - 2048
+    if maximum < minimum:
+        die(f'not enough room: userdata is {udata_mib} MiB with {used_mib} MiB used, '
+            f'the image needs a {minimum} MiB partition')
+    value = getattr(a, 'part_size', None)
+    if value is None and not a.y:
+        value = ask(f'内置分区大小（GiB）/ partition size [{((image_mib + 1024) / 1024):.2f}, '
+                    f'max {maximum / 1024:.2f}]: ', f'{(image_mib + 1024) / 1024:.2f}')
+    if value is None:
+        part_mib = min(maximum, ((image_mib + 1024 + 1023) // 1024) * 1024)
+    else:
+        try:
+            amount = Decimal(str(value))
+            if not amount.is_finite() or amount <= 0:
+                raise ValueError()
+            part_mib = int((amount * (1 << 30) / (1 << 20)).to_integral_value(rounding=ROUND_CEILING))
+        except (InvalidOperation, ValueError, OverflowError):
+            die('the partition size must be a positive number in GiB, for example 4 or 6.5')
+    if not minimum <= part_mib <= maximum:
+        die(f'partition size outside the permitted range ({minimum / 1024:.2f}–{maximum / 1024:.2f} GiB)')
+    return node, udata_mib, used_mib, part_mib
+
+
+def install_part(a):
+    """Install OpenWrt onto its own eMMC partition, in space taken from
+    userdata -- without an SD card.  This side only chooses the sizes, stages
+    the payloads and arms the boot: the F2FS shrink and the partition table
+    change happen on the next boot (boot/install-part.sh in the initramfs),
+    where userdata is unmounted and only raw tools touch it."""
+    steps(6)
+    find_adb()
+    android_checks()
+    bj = boot_json()
+    install_preflight()
+    img = os.path.join(F, 'openwrt.ext4.gz')
+    raw_size = gz_usize(img)
+    wipe = part_userdata_policy(a)
+    node, udata_mib, used_mib, part_mib = part_target(a, raw_size)
+    data_mib = udata_mib - part_mib
+    grow = 1 if a.grow_fs else 0
+    if not a.y:
+        say("安装到内置分区 / installing to an internal partition")
+        print(f'   userdata: {udata_mib / 1024:.2f} -> {data_mib / 1024:.2f} GiB, ' +
+              ('清空 Android 用户数据 / erase Android user data' if wipe else 'Android 的文件保留'))
+        print(f'   新分区 e5root / new partition: {part_mib / 1024:.2f} GiB（镜像 {raw_size >> 20} MiB）')
+        print('   缩容与写入在下次启动由引导镜像完成。')
+        print('   The shrink and the writing happen on the next boot, from the boot image;')
+        print('   ' + ('userdata WILL BE FORMATTED.' if wipe else 'userdata is not formatted.') +
+              ' Reboot manually when done.')
+        if not grow and confirm('   完全使用空间：把根文件系统扩满所选分区（默认 2 GiB 分配）/ '
+                                'use the whole partition for the system [no]: ', word='yes'):
+            grow = 1
+        print('   系统分配 / system allocation: ' +
+              ('整个分区 / the whole partition' if grow else "镜像大小 / the image's size, about 2 GiB"))
+        for n in (1, 2, 3):
+            if not confirm(f'   确认 {n}/3 -- 输入 yes 继续 / type yes to continue: '):
+                die('aborted: nothing was written')
+
+    apn, ssid, key = a.apn, a.ssid if a.ssid is not None else default_hotspot_name(), a.wifi_key
+    if not a.y:
+        if apn is None:
+            apn = ask('APN [自动识别 / automatic, from the SIM]: ')
+        ssid = ask(f'热点名称 / hotspot name [{ssid}]: ', ssid)
+        if not key:
+            key = ask(f'热点密码 / hotspot key, 8-63 characters [random]: ')
+    apn = apn or ''
+    if not key:
+        key = ''.join(random.SystemRandom().choice('abcdefghjkmnpqrstuvwxyz23456789') for _ in range(10))
+    if not 8 <= len(key) <= 63 or "'" in key or "'" in ssid or "'" in apn:
+        die("the hotspot key must have 8-63 characters, and no ' anywhere")
+
+    with tempfile.TemporaryDirectory() as work:
+        firmware = f'{TMP}/e5-data-device-files.tar'
+        size = pull_device_files(work, firmware)
+        print(f'   device-files.tar: {size} bytes')
+        push(img, f'{TMP}/e5-part-install.img.gz', 'openwrt.ext4.gz')
+        push(os.path.join(F, 'boot.img'), f'{TMP}/e5-boot.img', 'boot.img')
+        conf = os.path.join(work, 'part-install.settings')
+        with open(conf, 'w', newline='\n') as f:
+            f.write("E5_APN='%s'\nE5_WIFI_SSID='%s'\nE5_WIFI_KEY='%s'\n"
+                    "E5_WIFI_CHANNEL='149'\nE5_DEFAULT_BOOT='linux'\n" % (apn, ssid, key))
+        adb('push', conf, f'{TMP}/part-install.settings', check=True)
+        say(f'落位安装载荷 / staging the install -> {D}')
+        su_checked('落位安装载荷 / staging the install',
+                   f'umask 077; mkdir -p {D}; '
+                   f'mv {TMP}/e5-part-install.img.gz {D}/part-install.img.gz; '
+                   f'mv {firmware} {D}/device-files.tar; '
+                   f'mv {TMP}/part-install.settings {D}/part-install.settings; '
+                   f'printf "PART_MIB={part_mib}\\nDATA_MIB={data_mib}\\nGROW_FS={grow}\\nFORMAT_DATA={int(wipe)}\\n" > {D}/part-install.conf.tmp; '
+                   f'mv {D}/part-install.conf.tmp {D}/part-install.conf; '
+                   f'chmod 600 {D}/part-install.conf {D}/part-install.settings {D}/device-files.tar; sync')
+
+    say('写入启动镜像 / boot image -> boot_b')
+    with busy('写入并校验 boot_b / writing and verifying boot_b'):
+        su_checked('写入 boot_b / writing boot_b',
+                   f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M conv=fsync; sync')
+        ok = su('sha256sum /dev/block/by-name/boot_b').split()[0:1] == [bj['sha256']]
+    if not ok:
+        die('boot_b did not verify; Android stays as it is')
+    su(f'rm -f {TMP}/e5-boot.img')
+    su_checked('记录分区启动目标 / recording the partition boot target',
+               f'rm -f {D}/boot-os-next; echo part > {D}/boot-os; sync')
+    arm_slot_b()
+
+    say('安装已就绪，请手动重启 / staged; reboot manually')
+    print(f'''
+  下一次启动由引导镜像完成缩容、建分区并写入 OpenWrt（约几分钟），随后自动重启进入它。
+  The next boot shrinks userdata, creates the e5root partition and writes
+  OpenWrt into it, then restarts once into it -- about a few minutes.
+  热点 / hotspot:  {ssid}   密码 / key:  {key}
+  管理 / admin:    http://192.168.9.1  (LuCI, root / root -- 请改密码 / change it)
+  回 Android:      e5-next-boot android（或删掉 {D}/boot-os）后重启；首启是试启动，
+  失败会回到 Android。If the first boot fails, the next one falls back.''')
+
+
 def check(a):
     steps(3)
     find_adb()
@@ -1027,14 +1204,28 @@ def main():
     g.add_argument('--check', action='store_true')
     g.add_argument('--data', action='store_true',
                    help="install to the phone's storage (userdata) as before; the SD card is the default")
+    g.add_argument('--part', action='store_true',
+                   help="install to an internal eMMC partition, without an SD card; "
+                        "the next boot shrinks userdata and creates it")
     ap.add_argument('--apn')
     ap.add_argument('--ssid', help='hotspot name; defaults to the package device model plus -OpenWrt')
     ap.add_argument('--wifi-key')
     ap.add_argument('--image-size', help='userdata image size in GiB (e.g. 4 or 6.5); requires --data')
+    ap.add_argument('--part-size', help='internal partition size in GiB (e.g. 4 or 6.5); requires --part')
+    ap.add_argument('--grow-fs', action='store_true',
+                    help="let the system's filesystem use the whole partition (default: the image's size)")
+    ap.add_argument('--format-userdata', action='store_true',
+                    help='erase ALL Android user data before internal-partition installation; requires --part')
     ap.add_argument('-y', action='store_true')
     a = ap.parse_args()
     if a.image_size is not None and not a.data:
         ap.error('--image-size requires --data / install-userdata')
+    if a.part_size is not None and not a.part:
+        ap.error('--part-size requires --part / install-part')
+    if a.grow_fs and not a.part:
+        ap.error('--grow-fs requires --part / install-part')
+    if a.format_userdata and not a.part:
+        ap.error('--format-userdata requires --part / install-part')
     if sys.version_info < (3, 8):
         die('Python 3.8 or newer is needed')
     check_package()
@@ -1046,6 +1237,8 @@ def main():
         check(a)
     elif a.data:
         install(a)          # the form before the SD card; three confirmations
+    elif a.part:
+        install_part(a)     # an internal partition; the boot image finishes it
     else:
         install_sd(a)
 

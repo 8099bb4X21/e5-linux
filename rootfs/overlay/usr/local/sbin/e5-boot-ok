@@ -18,4 +18,8 @@ if [ -f /etc/e5/sd-trial ]; then
     rm -f /etc/e5/sd-trial
     sync
 fi
+if [ -f /etc/e5/part-trial ]; then
+    rm -f /etc/e5/part-trial
+    sync
+fi
 exec /opt/e5/e5-next-boot --rearm
