@@ -104,6 +104,9 @@ def audit_root(info):
     for name in ('vendor-start.sh', 'e5-modem-coldboot'):
         expected['opt/e5/' + name] = file_digest(TOP / 'device/linux_device_common/overlay/opt/e5' / name)
     found, versions, modules = {}, {}, set()
+    required_exec = {'etc/init.d/e5-infoscreen', 'usr/libexec/e5-infoscreen/session',
+                     'usr/libexec/e5-infoscreen/plugin', 'usr/libexec/e5-infoscreen/update'}
+    executable = set()
     rootfs = TOP / 'work/openwrt' / f'e5-openwrt-{info["openwrt_version"]}-generic-rootfs.tar.gz'
     if not rootfs.is_file():
         raise ValueError(f'root filesystem archive was not built: {rootfs}; inspect bundle-build.log for the original failure')
@@ -114,6 +117,8 @@ def audit_root(info):
     with tarfile.open(rootfs, 'r|gz') as archive:
         for entry in archive:
             name = entry.name.removeprefix('./')
+            if name in required_exec and entry.isfile() and entry.mode & 0o111:
+                executable.add(name)
             if forbidden.match(name):
                 raise ValueError('device-specific file in generic image: ' + name)
             if name.startswith('lib/modules/') and entry.isfile() and name.endswith('.ko'):
@@ -126,6 +131,8 @@ def audit_root(info):
                     found[name] = hashlib.sha256(data).hexdigest()
                 else:
                     found[name] = digest(stream)
+    if required_exec - executable:
+        raise ValueError('required screen scripts are not executable: ' + ', '.join(sorted(required_exec - executable)))
     if 'etc/e5/feature-port.json' in versions:
         # Feature staging deliberately rewrites vendor-start to preserve the
         # isolated NV loops. Reproduce that exact transformation for the gate.

@@ -73,7 +73,7 @@ class Bootstrap(unittest.TestCase):
 
 
 class RootAudit(unittest.TestCase):
-    def audit(self, files, staged_vendor=None, kernel_out=None):
+    def audit(self, files, staged_vendor=None, kernel_out=None, nonexec=()):
         with tempfile.TemporaryDirectory() as temp:
             top = Path(temp)
             (top / 'work/openwrt').mkdir(parents=True)
@@ -94,6 +94,9 @@ class RootAudit(unittest.TestCase):
             with tarfile.open(path, 'w:gz') as archive:
                 for name, data in files.items():
                     entry = tarfile.TarInfo(name); entry.size = len(data)
+                    if name in ('etc/init.d/e5-infoscreen', 'usr/libexec/e5-infoscreen/session',
+                                'usr/libexec/e5-infoscreen/plugin', 'usr/libexec/e5-infoscreen/update') and name not in nonexec:
+                        entry.mode = 0o755
                     archive.addfile(entry, io.BytesIO(data))
             info = {'openwrt_version': '25.12.5', 'build_epoch': 123}
             def stage_nv(root):
@@ -106,12 +109,24 @@ class RootAudit(unittest.TestCase):
             return info
 
     def files(self):
-        return {'usr/bin/openssl': b'OpenSSL fixture', 'usr/share/e5-infoscreen/VERSION': b'1.6.3',
+        return {'etc/init.d/e5-infoscreen': b'#!/bin/sh\n',
+                'usr/libexec/e5-infoscreen/session': b'#!/bin/sh\n',
+                'usr/libexec/e5-infoscreen/plugin': b'#!/bin/sh\n',
+                'usr/libexec/e5-infoscreen/update': b'#!/bin/sh\n',
+                'usr/bin/openssl': b'OpenSSL fixture', 'usr/share/e5-infoscreen/VERSION': b'1.6.3',
                 'etc/e5-infoscreen/plugins/phone/manifest.json': json.dumps({'version': '1.4'}).encode(),
                 'etc/e5/build-time': b'123', 'lib/modules/6.18-e5/modem/sipc_wwan.ko': b'module'}
 
     def test_same_release_and_epoch_pass(self):
         self.assertEqual(self.audit(self.files())['phone_version'], '1.4')
+
+    def test_nonexecutable_screen_start_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'not executable.*e5-infoscreen'):
+            self.audit(self.files(), nonexec=('etc/init.d/e5-infoscreen',))
+
+    def test_nonexecutable_plugin_manager_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'not executable.*plugin'):
+            self.audit(self.files(), nonexec=('usr/libexec/e5-infoscreen/plugin',))
 
     def test_selected_kernel_output_pass(self):
         self.assertEqual(self.audit(self.files(), kernel_out='out/e5/kernel')['kernel_release'], '6.18-e5')
