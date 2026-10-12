@@ -27,9 +27,11 @@ function followDataSim(slot, confirmed) {
 	// manual selector change. The SIM-management page itself has no selector.
 	if (changed && document.querySelector('.mud-sim-selector')) window.location.reload();
 }
-function scopedRpc(method, params, nobatch) {
+function scopedRpc(method, params) {
 	params = params || [];
-	var call = rpc.declare({object:'mu300dash', method:method, params:params.concat(['slot']), expect:{'':{}}, nobatch:!!nobatch});
+	// An AT-backed request may take seconds. Never share its HTTP batch with
+	// rates/status or another SIM's data. Keep the existing polling/cache rules.
+	var call = rpc.declare({object:'mu300dash', method:method, params:params.concat(['slot']), expect:{'':{}}, nobatch:true});
 	return function() {
 		var args = Array.prototype.slice.call(arguments, 0, params.length);
 		while (args.length < params.length) args.push('');
@@ -78,11 +80,11 @@ function simSelector(root) {
 	}
 }
 var callStatus = scopedRpc('status');
-var callRates = scopedRpc('rates', [], true);
+var callRates = scopedRpc('rates');
 /* Separate HTTP replies let cached neighbors/config paint during a live AT read. */
-var callCells = scopedRpc('cells', [], true);
-var callSignal = scopedRpc('signal', [], true);
-var callSysinfo = rpc.declare({ object: 'mu300dash', method: 'sysinfo', expect: { '': {} } });
+var callCells = scopedRpc('cells');
+var callSignal = scopedRpc('signal');
+var callSysinfo = rpc.declare({ object: 'mu300dash', method: 'sysinfo', expect: { '': {} }, nobatch: true });
 var readSimGet = rpc.declare({object:'mu300dash',method:'sim_get',expect:{'':{}},nobatch:true});
 function callSimGet() {
 	var revision = dataSimRevision;
@@ -97,8 +99,8 @@ var callSimStatus = rpc.declare({object:'mu300dash',method:'sim_status',params:[
 var callAct = scopedRpc('act',['op','arg']);
 var callAt = scopedRpc('at',['cmd']);
 var callAtHist = scopedRpc('at_history');
-var callLockGet = scopedRpc('lock_get', [], true);
-var callLockFresh = scopedRpc('lock_get',['fresh'], true);
+var callLockGet = scopedRpc('lock_get');
+var callLockFresh = scopedRpc('lock_get',['fresh']);
 var callLockSet = scopedRpc('lock_set',['kind','val']);
 var callLockStatus = scopedRpc('lock_status',['id']);
 function waitLockJob(started) {

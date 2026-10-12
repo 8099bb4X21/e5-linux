@@ -9,6 +9,63 @@ from pathlib import Path
 import re
 
 
+# Based on mu300-linux 47d9463d; fixed channel fallback, no bandwidth changes.
+NO_DFS = '''// unisoc-driver-dfs-capabilities: fixed fallback preserving bandwidth.
+function device_no_dfs(config) {
+	if (config.band != '5g' || phy_features.radar_detect)
+		return;
+	let radar = {};
+	for (let f in phy_capabilities.freqs) {
+		let chan = (f.freq - 5000) / 5;
+		if (f.radar)
+			radar[chan] = true;
+	}
+	if (!config.channel) {
+		config.acs_exclude_dfs = true;
+		return;
+	}
+	if (!radar[config.channel])
+		return;
+	// Fixed fallback requested by the user: only replace the primary channel.
+	// hostapd/nl80211 retain their normal width and regulatory validation.
+	log(`driver lacks radar detection: using channel 36 instead of DFS channel ${config.channel}, preserving ${config.htmode}`);
+	config.channel = 36;
+}
+
+'''
+
+
+def patch_wifi_capabilities(root):
+    path = root / 'usr/share/ucode/wifi/hostapd.uc'
+    if not path.exists():
+        return
+    text = path.read_text()
+    marker = '// unisoc-driver-dfs-capabilities:'
+    if marker in text:
+        # Upgrade roots carrying the earlier auto-shrink policy too. Keep
+        # imports/capability collection/call site intact and replace only our
+        # marked policy section, which immediately precedes generate().
+        start = text.index(marker)
+        end = text.index('function generate(config) {', start)
+        if text[start:end] != NO_DFS:
+            path.write_text(text[:start] + NO_DFS + text[end:])
+        return
+    replacements = [
+        ('wiphy_info, wiphy_band\n', 'wiphy_info, wiphy_band, log\n'),
+        ("\tphy_features.cipher_gcmp256 = WLAN_CIPHER_SUITE_GCMP_256 in (phy.cipher_suites ?? []);",
+         "\tphy_features.cipher_gcmp256 = WLAN_CIPHER_SUITE_GCMP_256 in (phy.cipher_suites ?? []);\n"
+         "\tphy_features.radar_detect = length(filter(phy.interface_combinations ?? [], (c) => c.radar_detect_widths)) > 0;\n"
+         "\tphy_capabilities.freqs = band?.freqs ?? [];"),
+        ('function generate(config) {', NO_DFS + 'function generate(config) {'),
+        ('\tset_device_defaults(config);\n', '\tset_device_defaults(config);\n\tdevice_no_dfs(config);\n'),
+    ]
+    for old, new in replacements:
+        if text.count(old) != 1:
+            raise ValueError('Unexpected wifi-scripts hostapd.uc: ' + old[:70])
+        text = text.replace(old, new)
+    path.write_text(text)
+
+
 CONNECT_RETRY = '''# unisoc-pdp-connect-retry: bounded recovery without disabling the radio.
 modemmanager_connect_retry() {
 	local device="$1" connectargs="$2" attempt=1 result rc delay
@@ -37,6 +94,7 @@ modemmanager_connect_retry() {
 def patch_root(root, profile='t551m'):
     if profile not in ('t551m', 'e5', 'm8'):
         raise ValueError('Unknown device profile: ' + profile)
+    patch_wifi_capabilities(root)
     config = root / 'etc/config/unisoc_modem'
     if config.exists() and profile == 't551m':
         text = config.read_text()
