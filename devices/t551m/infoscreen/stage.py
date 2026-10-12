@@ -232,6 +232,7 @@ def stage(root):
         'usr/lib/e5/e5_call_volume.py': repo / 'openwrt/overlay/usr/lib/e5/e5_call_volume.py',
         'usr/lib/e5/e5_call_events.py': repo / 'openwrt/overlay/usr/lib/e5/e5_call_events.py',
         'usr/lib/e5/e5_screen_rpc.py': repo / 'openwrt/overlay/usr/lib/e5/e5_screen_rpc.py',
+        'usr/lib/e5/e5_power_events.py': repo / 'openwrt/overlay/usr/lib/e5/e5_power_events.py',
         'usr/lib/e5/e5_sounds.py': repo / 'openwrt/overlay/usr/lib/e5/e5_sounds.py',
         'usr/libexec/e5-notification-sound': repo / 'openwrt/overlay/usr/libexec/e5-notification-sound',
         'usr/libexec/e5-sms-notify': repo / 'openwrt/overlay/usr/libexec/e5-sms-notify',

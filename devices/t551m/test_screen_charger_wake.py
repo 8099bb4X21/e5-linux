@@ -39,6 +39,14 @@ def main():
             page.wait_for_timeout(300)
             def poll():page.evaluate('poll()');page.wait_for_timeout(250)
             def dark():page.evaluate('setBlank(true)');page.wait_for_timeout(200)
+            # A quick unplug/replug leaves the next status sample unchanged.
+            # Both kernel transitions must wake without waiting for that poll.
+            for _ in range(2):
+                dark()
+                page.evaluate("window.dispatchEvent(new Event('e5-power-supply-change'))")
+                page.wait_for_timeout(200)
+                assert page.evaluate('!blank && T551M.isLocked()')
+                assert state['screen']['awake']
             for online in [True,False,True,False]:
                 dark();state['battery']['online']=online;poll()
                 assert page.evaluate('!blank && T551M.isLocked()')

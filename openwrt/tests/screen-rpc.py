@@ -1,5 +1,6 @@
 """Real browser/HTTP/WebSocket checks; never talks to a modem or device."""
 import json
+import socket
 import sys
 import threading
 import time
@@ -10,6 +11,26 @@ from playwright.sync_api import sync_playwright
 repo = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo / 'openwrt/overlay/usr/lib/e5'))
 from e5_call_events import CallEvents
+import e5_power_events
+
+
+class TestPowerEvents:
+    """Inject a supply event without real hardware or a periodic timer."""
+    instances = []
+
+    def __init__(self):
+        self.socket, self.writer = socket.socketpair()
+        self.instances.append(self)
+
+    def receive(self):
+        return self.socket.recv(1) == b'1'
+
+    def close(self):
+        self.socket.close()
+        self.writer.close()
+
+
+e5_power_events.PowerEvents = TestPowerEvents
 
 reads, actions = [], []
 
@@ -61,6 +82,12 @@ try:
             page.wait_for_timeout(50)
         assert events.rpc_sockets
         page.wait_for_timeout(100)
+        page.evaluate("window.powerChanges=0;window.addEventListener('e5-power-supply-change',()=>window.powerChanges++)")
+        TestPowerEvents.instances[-1].writer.send(b'1')
+        page.wait_for_function('window.powerChanges===1')
+        TestPowerEvents.instances[-1].writer.send(b'0')
+        page.wait_for_timeout(100)
+        assert page.evaluate('window.powerChanges') == 1
         reads.clear()
         assert page.evaluate('''async()=>{
             for(let i=0;i<200;i++){

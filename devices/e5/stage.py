@@ -47,9 +47,11 @@ def stage_nv(root):
                               'procd_set_param respawn 3600 5 0\n\tprocd_set_param term_timeout 2')
     service = service.replace('start_service() {',
                               'start_service() {\n\trm -f /run/e5-vendor-prepared\n\t/opt/e5/t551m-nv-prepare || return 1')
+    # Keep the deployed startup handshake responsive, with the same 12 s
+    # bound. This wait ends at readiness; it is not a background poller.
     service = service.replace('instance cp_diskserver /opt/e5/android-run cp_diskserver',
         "instance cp_diskserver /bin/sh -c 'i=0; until [ -e /run/e5-vendor-prepared ]; do "
-        "i=$((i + 1)); [ $i -lt 12 ] || exit 1; sleep 1; done; exec /opt/e5/android-run cp_diskserver'")
+        "i=$((i + 1)); [ $i -lt 120 ] || exit 1; sleep 0.1; done; exec /opt/e5/android-run cp_diskserver'")
     service += '\nstop_service() {\n\t/opt/e5/t551m-nv-stop quiesce\n}\n\nservice_stopped() {\n\t/opt/e5/t551m-nv-stop detach\n}\n'
     (root / 'etc/init.d/e5-vendor').write_text(service)
     (root / 'etc/init.d/e5-vendor').chmod(0o755)
