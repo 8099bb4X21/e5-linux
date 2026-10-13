@@ -16,7 +16,7 @@
 install_part_pending() {
     . /etc/part-progress.sh
     local dev=$1 node=${1##*/} disk=${1%p*}
-    local mp=/part-install img dft lo rc cur target need low hi pstart pend found out ptarget
+    local mp=/part-install img dft lo rc cur target need low hi pstart pend found out ptarget raw want got
     [ -b "$dev" ] || return 0
     # The request: sizes chosen by flash.py on the Android side.
     mkdir -p "$mp"
@@ -31,20 +31,34 @@ install_part_pending() {
             FORMAT_DATA=*) FORMAT_DATA=${kv#*=} ;;
         esac
     done
+    part_progress_start
+    echo "1/6 checking staged image and firmware" > /run/part-status
+    # Validate the staged payload before shrinking or changing GPT. A damaged
+    # archive must not leave a newly carved but unusable root partition.
+    img="$mp/e5linux/part-install.img.gz" dft="$mp/e5linux/device-files.tar"
+    if [ ! -s "$img" ] || [ ! -s "$dft" ] ||
+       ! gzip -t "$img" || ! tar -tf "$dft" >/dev/null; then
+        umount "$mp"; part_fail 'missing or corrupt installation payload'; return 1
+    fi
+    raw=$(set -o pipefail; gzip -dc "$img" | wc -c) || {
+        umount "$mp"; part_fail 'cannot read installation image'; return 1;
+    }
     case "$GROW_FS" in 1) ;; *) GROW_FS=0 ;; esac
     umount "$mp"
     [ "$FORMAT_DATA" = 0 ] || { part_fail 'format request requires two-stage installer'; return 1; }
-    case "${PART_MIB:-}" in ''|*[!0-9]*) log "stage=part-install bad-conf"; return 0 ;; esac
-    case "${DATA_MIB:-}" in ''|*[!0-9]*) log "stage=part-install bad-conf"; return 0 ;; esac
+    case "${PART_MIB:-}" in ''|*[!0-9]*) log "stage=part-install bad-conf"; part_stop; return 0 ;; esac
+    case "${DATA_MIB:-}" in ''|*[!0-9]*) log "stage=part-install bad-conf"; part_stop; return 0 ;; esac
     [ "$PART_MIB" -ge 2048 ] && [ "$DATA_MIB" -ge 2048 ] ||
         { log "stage=part-install bad-sizes"; part_stop; return 0; }
     target=$((DATA_MIB * 2048)) need=$((PART_MIB * 2048))
+    [ "$raw" -gt 0 ] && [ "$raw" -le "$((need * 512))" ] || {
+        part_fail 'image exceeds partition'; return 1;
+    }
     log "stage=part-install start data=$((DATA_MIB >> 10))G part=$((PART_MIB >> 10))G"
 
     # Two-second progress survives fractional /proc/uptime and long operations.
     # Everything on the console is plain ASCII: the framebuffer console font
     # has no CJK.  (The backlight is not touched here.)
-    part_progress_start
     echo "1/6 checking userdata" > /run/part-status
 
     # 1. the filesystem, raw and unmounted. Its own superblock, not the
@@ -70,12 +84,26 @@ install_part_pending() {
         /repair/lib/ld-musl-aarch64.so.1 --library-path /repair/lib \
             /repair/sbin/resize.f2fs -s -t "$target" "$dev" \
             >/run/part-resize.log 2>&1 </dev/null
+        rc=$?
+        [ "$rc" = 0 ] || { part_fail "userdata resize failed rc=$rc (see /run/part-resize.log)"; return 1; }
         low=$(od -An -tx4 -j 1060 -N 4 "$dev" | tr -d ' \n')
         cur=$((0x$low * 8))
         [ "$cur" = "$target" ] ||
             { log "stage=part-install shrink-failed now=$((cur / 2048))MiB (see /run/part-resize.log)"; part_stop; return 0; }
         log "stage=part-install shrunk $((target / 2048))MiB"
     fi
+    # Check also when a previous attempt already changed the block count.
+    # A new count alone cannot prove that all block moves/checkpoints finished.
+    echo "2/6 verifying shrunk userdata" > /run/part-status
+    /repair/lib/ld-musl-aarch64.so.1 --library-path /repair/lib \
+        /repair/sbin/fsck.f2fs -f "$dev" >/run/part-shrink-check.log 2>&1
+    rc=$?
+    case "$rc" in 0|1) ;; *) part_fail "shrunk userdata check failed rc=$rc"; return 1 ;; esac
+    low=$(od -An -tx4 -j 1060 -N 4 "$dev" | tr -d ' \n')
+    hi=$(od -An -tx4 -j 1064 -N 4 "$dev" | tr -d ' \n')
+    [ "$hi" = 00000000 ] && [ "$((0x$low * 8))" = "$target" ] || {
+        part_fail 'shrunk userdata size verification'; return 1;
+    }
 
     # 2. the partition table, only now.  ucode is called by its absolute path
     #    and its own output is checked: a piped `list` once hid a ucode that
@@ -108,8 +136,7 @@ install_part_pending() {
     [ -f "$img" ] || { umount "$mp"; log "stage=part-install no-image"; part_stop; return 0; }
     log "stage=part-install write $((pstart / 2048))MiB"
     gzip -t "$img" || { umount "$mp"; part_fail 'corrupt image'; return 1; }
-    local raw producer writer write_rc unpack_rc
-    raw=$(gzip -dc "$img" | wc -c)
+    local producer writer write_rc unpack_rc
     [ "$raw" -gt 0 ] && [ "$raw" -le "$((need * 512))" ] || { umount "$mp"; part_fail 'image exceeds partition'; return 1; }
     dd if=/dev/zero of="$disk" bs=1048576 seek=$((pstart / 2048)) count=4 conv=fsync 2>/dev/null ||
         { umount "$mp"; part_fail 'initial image write'; return 1; }
@@ -129,10 +156,21 @@ install_part_pending() {
     wait "$producer"; unpack_rc=$?
     rm -f /run/part-worker /run/part-pipe /run/part-disk
     [ "$write_rc:$unpack_rc" = 0:0 ] || { umount "$mp"; part_fail 'image write'; return 1; }
-
     # 4. the new root: the device's files and the markers
     lo=$(losetup -f) && losetup -o $((pstart * 512)) "$lo" "$disk" ||
         { umount "$mp"; log "stage=part-install loop-fail"; part_stop; return 0; }
+    echo "4/6 verifying the complete written image" > /run/part-status
+    # Keep pipefail local to these checks: init has other intentional short
+    # reads. Read exactly raw bytes through the newly attached loop device.
+    want=$(set -o pipefail; gzip -dc "$img" | sha256sum | cut -d' ' -f1) || {
+        losetup -d "$lo"; umount "$mp"; part_fail 'source image checksum'; return 1;
+    }
+    got=$(set -o pipefail; head -c "$raw" "$lo" | sha256sum | cut -d' ' -f1) || {
+        losetup -d "$lo"; umount "$mp"; part_fail 'image readback'; return 1;
+    }
+    [ "$got" = "$want" ] || {
+        losetup -d "$lo"; umount "$mp"; part_fail 'image readback checksum mismatch'; return 1;
+    }
     mkdir -p /part-root
     if [ "$GROW_FS" = 1 ]; then
         # The partition as it stands, not the size chosen on the PC: a re-run

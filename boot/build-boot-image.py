@@ -199,6 +199,7 @@ def main():
     files['etc/install-part.sh'] = ((HERE / 'install-part.sh').read_bytes(), stat.S_IFREG | 0o644)
     files['etc/part-progress.sh'] = ((HERE / 'part-progress.sh').read_bytes(), stat.S_IFREG | 0o644)
     files['etc/part-prepare.sh'] = ((HERE / 'part-prepare.sh').read_bytes(), stat.S_IFREG | 0o644)
+    files['etc/part-update.sh'] = ((HERE / 'part-update.sh').read_bytes(), stat.S_IFREG | 0o644)
     files['usr/share/e5-gpt'] = ((HERE.parent / 'openwrt/overlay/usr/libexec/e5-gpt').read_bytes(),
                                  stat.S_IFREG | 0o755)
     dirs.update({'usr', 'usr/bin', 'usr/lib', 'usr/lib/ucode', 'usr/share', 'usr/sbin'})
@@ -299,6 +300,8 @@ def main():
                         'script_sha256': hashlib.sha256((HERE / 'f2fs-repair.sh').read_bytes()).hexdigest()},
         'part_install': {'trigger': 'e5linux/part-install.conf on userdata (flash.py --part)',
                          'script_sha256': hashlib.sha256((HERE / 'install-part.sh').read_bytes()).hexdigest()},
+        'part_update': {'version': 1, 'trigger': '/.e5-update/request on e5root; firmware-mount event',
+                        'script_sha256': hashlib.sha256((HERE / 'part-update.sh').read_bytes()).hexdigest()},
     }
     a.out.with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(manifest, indent=2))

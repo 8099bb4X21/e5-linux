@@ -318,6 +318,9 @@ def finish(g, a, path, state):
         g['sha256'](str(files/'openwrt.ext4.gz')) != state['image_sha']):
         raise ValueError('wrong device or different installation package')
     target = verify_geometry(state, probe(g))
+    # Android may have updated its boot chain since preparation or the first
+    # install. Reinstall/resume needs the same size/BCAB/chain checks as TF.
+    g['install_preflight']()
     if state['phase'] != 'installed':
         if state['phase'] != 'writing':
             marker = g['su_checked']('检查分区准备标记 / checking preparation marker', f'head -c 128 {target}')
@@ -341,6 +344,7 @@ def finish(g, a, path, state):
     # No dependency on decrypting /data during OpenWrt boot.
     final_boot = path.parent/'boot-part.img'
     final_boot.write_bytes(boot_command((files/'boot.img').read_bytes(), 'e5.root=part'))
+    g['bootchain']('sync')
     flash_boot(g, final_boot)
     g['arm_slot_b']()
     state['phase'] = 'complete'; save(path, state)

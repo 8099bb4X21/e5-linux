@@ -175,16 +175,11 @@ def main():
     with (files / 'openwrt.ext4.gz').open('wb') as out:
         run('gzip', '-1', '-c', image, stdout=out)
     runpy.run_path(str(TOP / 'openwrt/prepare-ext4-tools.py'))['build'](root, files / 'ext4-tools.tar')
-    for n in ('flash.py', 'flash.cmd', 'flash.sh', 'install-part.cmd', 'install-part.sh',
-              'reinstall.cmd', 'reinstall.sh', 'part-two-stage.py', 'README.md', 'README.zh-CN.md',
-              '【插件】mu300系统切换器.js'):
+    runpy.run_path(str(TOP / 'openwrt/bundle/install-entrypoints.py'))['assemble'](package)
+    for n in ('README.md', 'README.zh-CN.md'):
         shutil.copy2(TOP / 'openwrt/bundle' / n, package / n)
-    # A Windows build of the flasher (work/build-flash-exe.cmd) ships with the
-    # package when it is there: users without Python run flash.exe instead.
-    exe = TOP / 'openwrt/bundle/flash.exe'
-    if exe.is_file():
-        shutil.copy2(exe, package / 'flash.exe')
-    for n in ('device-install-image.sh', 'device-flash-boot.sh', 'device-install-part.sh'):
+    shutil.copy2(TOP / 'openwrt/bundle/【插件】mu300系统切换器.js', package / 'openwrt-system-switch-plugin.js')
+    for n in ('device-install-image.sh', 'device-flash-boot.sh', 'device-install-part.sh', 'device-stage-part-update.sh'):
         shutil.copy2(TOP / 'openwrt' / n, files / n)
     (files / 'part-write.sh').write_bytes((TOP / 'openwrt/bundle/part-write.sh').read_bytes().replace(b'\r\n', b'\n'))
     for src in ('openwrt/bundle/collect-device-files.sh', 'openwrt/overlay/usr/libexec/e5-gpt', 'tools/android-bootchain.sh'):
@@ -193,7 +188,7 @@ def main():
         target.chmod(0o755)
     tools = package / 'scripts/tools'
     tools.mkdir(parents=True)
-    for n in ('e5-telnet.py', 'sprd-bt-config.py'):
+    for n in ('e5-telnet.py', 'e5-update.py', 'sprd-bt-config.py'):
         shutil.copy2(TOP / 'tools' / n, tools / n)
     shutil.copytree(TOP / 'tools/vbc-profile', tools / 'vbc-profile', ignore=shutil.ignore_patterns('__pycache__'))
     shutil.copy2(TOP / 'LICENSE', package / 'LICENSE')
@@ -201,7 +196,8 @@ def main():
     (files / 'VERSION').write_text(name + ' (' + release + ')\n')
     (package / 'START-HERE.zh-CN.md').write_text(f'''# {MODELS[a.profile][0]} TF 卡安装包
 
-仅用于 {MODELS[a.profile][0]}，不要跨机型刷入。解压后，在电脑运行 flash.cmd（Windows）或 bash flash.sh。
+仅用于 {MODELS[a.profile][0]}，不要跨机型刷入。解压后运行 OpenWrt-Installer.exe 或 start-installer.cmd（Windows）；Linux/macOS 用 bash start-installer.sh。
+选择 TF 卡首次安装可用 install-to-tf-card；无需 TF 卡时用 install-to-internal-storage（Windows .cmd，Linux/macOS .sh）。
 需要 Python 3.8+、ADB、已解锁且已 root 的 Android A 槽、Magisk BusyBox。
 首次安装会重新分区并清空整张 TF 卡：至少 4 GB，建议 8 GB 以上。
 系统分区约 2 GiB，其余容量留作后续扩展/升级；不是使用已有分区全容量的安装方式。
@@ -215,7 +211,7 @@ def main():
 ''', encoding='utf-8')
     checks = {p.relative_to(package).as_posix(): digest(p) for p in sorted(package.rglob('*')) if p.is_file()}
     (package / 'SHA256SUMS').write_text(''.join(v + '  ' + k + '\n' for k, v in checks.items()))
-    spec = importlib.util.spec_from_file_location('packaged_flash', package / 'flash.py')
+    spec = importlib.util.spec_from_file_location('packaged_flash', package / 'OpenWrt-Installer.py')
     flash = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(flash)
     flash.check_package()

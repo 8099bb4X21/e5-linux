@@ -129,31 +129,27 @@ S=$(mktemp -d)
 trap 'rm -rf "$S0" "$S"' EXIT
 P=$S/$NAME
 mkdir -p "$P/files" "$P/scripts/tools"
-# the flasher: flash.py (Windows, macOS, Linux), started by flash.cmd / flash.sh
-cp "$HERE/bundle/flash.py" "$HERE/bundle/flash.sh" "$HERE/bundle/flash.cmd" "$P/"
-cp "$HERE/bundle/install-part.cmd" "$HERE/bundle/install-part.sh" "$P/"
-cp "$HERE/bundle/reinstall.cmd" "$HERE/bundle/reinstall.sh" "$P/"
-cp "$HERE/bundle/part-two-stage.py" "$P/"
+# Use the same descriptive user entries as all three profile packages.
+python3 "$HERE/bundle/install-entrypoints.py" "$P"
 cp "$HERE/bundle/part-write.sh" "$P/files/"
 test -f "$OUT/ext4-tools.tar" || { echo 'Missing ext4-tools.tar: openwrt/prepare-ext4-tools.py --root CLEAN_ARM64_ROOT --out out/openwrt/ext4-tools.tar' >&2; exit 1; }
 cp "$OUT/ext4-tools.tar" "$P/files/"
-chmod 755 "$P/flash.py" "$P/flash.sh"
 cp "$HERE/bundle/README.md" "$HERE/bundle/README.zh-CN.md" "$P/"
 cp "$TOP/LICENSE" "$P/LICENSE"
 cp "$IMG" "$P/files/openwrt.ext4.gz"
 cp "$BOOT.img" "$P/files/boot.img"
 cp "$BOOT.json" "$P/files/boot.json"
 cp "$BOOT.misc-slot-b-trial.bin" "$P/files/boot-misc-slot-b.bin"
-cp "$HERE/device-install-image.sh" "$HERE/device-install-part.sh" "$HERE/device-flash-boot.sh" "$HERE/bundle/collect-device-files.sh" \
+cp "$HERE/device-install-image.sh" "$HERE/device-install-part.sh" "$HERE/device-flash-boot.sh" "$HERE/device-stage-part-update.sh" "$HERE/bundle/collect-device-files.sh" \
    "$HERE/overlay/usr/libexec/e5-gpt" "$P/files/"
-cp "$TOP/tools/e5-telnet.py" "$TOP/tools/sprd-bt-config.py" "$P/scripts/tools/"
+cp "$TOP/tools/e5-telnet.py" "$TOP/tools/e5-update.py" "$TOP/tools/sprd-bt-config.py" "$P/scripts/tools/"
 cp "$TOP/tools/android-bootchain.sh" "$P/files/android-bootchain.sh"
 cp -R "$TOP/tools/vbc-profile" "$P/scripts/tools/"
 find "$P" \( -name .DS_Store -o -name __pycache__ \) -prune -exec rm -rf {} +
 printf "e5-openwrt-flash %s (OpenWrt %s, e5-linux %s, kernel %s)\n" \
     "$BUILD_TIME" "$VER" "$GIT" "$rel" > "$P/files/VERSION"
-(cd "$P" && find files scripts flash.py flash.sh flash.cmd part-two-stage.py -type f | sort | while read -r f; do
-    printf "%s  %s\n" "$({ shasum -a 256 "$f" 2>/dev/null || sha256sum "$f"; } | cut -d' ' -f1)" "$f"
+(cd "$P" && find . -type f ! -name SHA256SUMS | sort | while read -r f; do
+    printf "%s  %s\n" "$({ shasum -a 256 "$f" 2>/dev/null || sha256sum "$f"; } | cut -d' ' -f1)" "${f#./}"
 done > SHA256SUMS)
 
 # macOS tar otherwise adds AppleDouble files that are absent from the ZIP.

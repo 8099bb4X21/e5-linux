@@ -179,12 +179,12 @@ def verify():
     for line in data['SHA256SUMS'].decode().splitlines():
         checksum, name = line.split(None, 1)
         listed[name] = checksum
-    expected_members = {name: checksum for name, checksum in members.items() if name.startswith(('files/', 'scripts/')) or name in ('flash.py', 'flash.sh', 'flash.cmd')}
+    expected_members = {name: checksum for name, checksum in members.items() if name != 'SHA256SUMS'}
     if listed != expected_members:
         raise ValueError('bundle SHA256SUMS mismatch')
     for name, path in [('files/boot.img', TOP / 'work/boot-linux-slotb-bundle-mainline.img'),
                        ('files/android-bootchain.sh', TOP / 'tools/android-bootchain.sh'),
-                       ('flash.py', TOP / 'openwrt/bundle/flash.py'),
+                       ('OpenWrt-Installer.py', TOP / 'openwrt/bundle/flash.py'),
                        ('files/openwrt.ext4.gz', TOP / 'out/openwrt' / f'e5-openwrt-{info["openwrt_version"]}-generic.ext4.gz')]:
         if members[name] != file_digest(path):
             raise ValueError('bundle uses a different build output: ' + name)

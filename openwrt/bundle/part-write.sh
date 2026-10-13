@@ -23,18 +23,20 @@ done
 [ "$raw" -gt 0 ] && [ "$raw" -le "$((sectors * 512))" ]
 lock=/data/local/tmp/e5-part-write.lock
 mkdir "$lock" || { echo 'another installation or stale lock exists' >&2; exit 1; }
-stage=$(mktemp -d /data/local/tmp/e5-part-tools.XXXXXX)
+stage=
 mounted=0 devbound=0 procbound=0
 cleanup() {
     rc=$?; trap - EXIT
     [ "$mounted" = 0 ] || umount "$stage/view" || exit 1
     [ "$procbound" = 0 ] || umount "$stage/proc" || exit 1
     [ "$devbound" = 0 ] || umount "$stage/dev" || exit 1
-    rm -rf "$stage"; rmdir "$lock"
+    [ -z "$stage" ] || rm -rf "$stage"
+    rmdir "$lock"
     exit "$rc"
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
+stage=$(mktemp -d /data/local/tmp/e5-part-tools.XXXXXX)
 tar -xf /data/local/tmp/e5-ext4-tools.tar -C "$stage"
 (cd "$stage" && sha256sum -c SHA256SUMS)
 mkdir "$stage/dev" "$stage/proc" "$stage/etc" "$stage/view"
@@ -68,14 +70,23 @@ test -s "$stage/view/etc/openwrt_release"
 mkdir -p "$stage/view/etc/e5" "$stage/view/etc/e5linux"
 echo linux > "$stage/view/etc/e5linux/default-boot"
 cp /data/local/tmp/e5-install.conf "$stage/view/etc/e5/install.conf"
+chmod 600 "$stage/view/etc/e5/install.conf"
 rm -f "$stage/view/etc/e5/sd-root" "$stage/view/etc/e5/sd-trial"
 printf 'e5root /dev/%s\n' "${node%p*}" > "$stage/view/etc/e5/part-root"
 echo 1 > "$stage/view/etc/e5/part-trial"
 echo "$token" > "$stage/view/etc/e5/part-install-token"
+test -x "$stage/view/opt/e5/android/vendor/bin/modem_control"
+chroot "$stage/view" /bin/busybox find /lib/firmware /opt/e5/android -type f \
+    -exec /bin/busybox sha256sum '{}' \; > "$stage/root-files.sha256"
+chroot "$stage/view" /bin/busybox sha256sum /sbin/init /etc/e5/install.conf \
+    /etc/e5/part-root /etc/e5/part-trial /etc/e5/part-install-token >> "$stage/root-files.sha256"
+test -s "$stage/root-files.sha256"
 sync
 umount "$stage/view"; mounted=0
+blockdev --flushbufs "$dev"
 echo '4/4 verifying installed root read-only'
 mount -t ext4 -o ro,noload "$dev" "$stage/view"; mounted=1
+chroot "$stage/view" /bin/busybox sha256sum -c < "$stage/root-files.sha256"
 test "$(cat "$stage/view/etc/e5/part-install-token")" = "$token"
 test -s "$stage/view/lib/firmware/wcnmodem.bin"
 test -x "$stage/view/sbin/init"

@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""荣悦 E5 OpenWrt 一键刷入 / one-click flash of OpenWrt on the Rongyue E5.
+"""OpenWrt Installer / 安装与维护助手。
 
-  flash.py                  first install onto the **SD card**, from rooted
+  OpenWrt-Installer         choose the installation or maintenance action
+  OpenWrt-Installer --tf    first install onto the **SD card**, from rooted
                             Android over adb: the card is partitioned and
                             formatted, OpenWrt goes onto it
-  flash.py --data           the same onto the phone's storage (userdata), the
+  OpenWrt-Installer --data  the same onto the phone's storage (userdata), the
                             form before the SD card; it asks three times
-  flash.py --part           first install onto an internal eMMC partition,
+  OpenWrt-Installer --part  first install onto an internal eMMC partition,
                             without an SD card: the next boot shrinks userdata,
                             creates the partition and writes OpenWrt into it
-  flash.py --update         update, from the running e5-linux over the USB LAN
+  OpenWrt-Installer --update update, from the running e5-linux over the USB LAN
                             (OpenWrt's settings and installed apps kept)
-  flash.py --boot-openwrt   from Android back to the installed OpenWrt (adb)
-  flash.py --check          the checks and the device's files, from Android, and
+  OpenWrt-Installer --boot-openwrt from Android back to installed OpenWrt (adb)
+  OpenWrt-Installer --check the checks and the device's files, from Android, and
                             nothing written (a dry run of the first install)
 
 Options for the first install (asked for when not given):
@@ -22,7 +23,7 @@ Options for the first install (asked for when not given):
   -y                   no questions: the defaults, and yes to erasing the card
 
 Runs on Windows, macOS and Linux with Python 3.8+ and adb (Android
-platform-tools).  flash.cmd (Windows) and flash.sh start it.  See README.md.
+platform-tools). start-installer.cmd/sh starts it. See README.md.
 """
 import argparse
 import gzip
@@ -130,18 +131,25 @@ def sha256(path):
     return h.hexdigest()
 
 
-def gz_usize(path):
-    """Check gzip integrity and count its real size (ISIZE wraps at 4 GiB)."""
+def gz_metadata(path):
+    """Check gzip CRC and obtain size/hash of the complete unpacked image."""
     size = 0
+    digest = hashlib.sha256()
     try:
         with gzip.open(path, 'rb') as f:
             for chunk in iter(lambda: f.read(1 << 20), b''):
                 size += len(chunk)
+                digest.update(chunk)
     except (OSError, EOFError) as error:
         die(f'cannot decompress {os.path.basename(path)}: {error}')
     if not size:
         die(f'{os.path.basename(path)} contains an empty image')
-    return size
+    return size, digest.hexdigest()
+
+
+def gz_usize(path):
+    """Count the real gzip size; ISIZE wraps at 4 GiB."""
+    return gz_metadata(path)[0]
 
 
 def boot_json():
@@ -495,6 +503,34 @@ def confirm(prompt, word='yes'):
     return v.lower() == word
 
 
+def choose_install_action(a):
+    print('''
+OpenWrt Installer / 安装助手
+  1. Install to TF card / TF 卡首次安装（清空整张卡）
+  2. Install to internal storage / 缩容 userdata 安装
+  3. Reinstall internal system / 覆盖重装已有内置系统
+  4. Resume internal installation / 继续加密 data 的两阶段安装
+  5. Switch to OpenWrt / 从 Android 切回已安装的 OpenWrt
+  6. Update OpenWrt / 更新已运行的 OpenWrt
+  0. Exit / 退出
+''')
+    choice = ask('Choose / 请选择 [0]: ', '0')
+    modes = {'1': 'tf', '2': 'part', '3': 'reinstall_part',
+             '5': 'boot_openwrt', '6': 'update'}
+    if choice == '0':
+        return False
+    if choice == '4':
+        path = ask('Transaction JSON / 续装 transaction.json 路径: ').strip('"')
+        if not path:
+            return False
+        a.resume_part = path
+    elif choice in modes:
+        setattr(a, modes[choice], True)
+    else:
+        die('unknown menu choice / 无效选项')
+    return True
+
+
 def device_sd():
     """The removable card's block device: the mmcblk device that is not the one
     Android's partitions live on (userdata, misc).  "Removable" cannot be asked
@@ -578,7 +614,7 @@ def install_sd(a):
     sd = device_sd()
     capacity = device_size(sd)
     img = os.path.join(F, 'openwrt.ext4.gz')
-    raw_size = gz_usize(img)
+    raw_size, raw_sha = gz_metadata(img)
     needed = raw_size + (2 << 20) + 34 * 512
     if capacity < max(needed, 2 << 30):
         die(f'SD capacity is insufficient: {sd} has {capacity / (1 << 20):.1f} MiB; '
@@ -647,6 +683,11 @@ def install_sd(a):
         with busy('解压到 SD 卡 / unpacking onto the card'):
             su_checked('解压并写入 SD / decompressing image onto card',
                        f'gzip -dc {TMP}/openwrt.ext4.gz > {part}; sync', timeout=1800)
+        with busy('回读校验完整 SD 镜像 / verifying complete SD image'):
+            su_checked('SD 镜像回读校验 / SD image readback verification',
+                       f'blockdev --flushbufs {part}; '
+                       f'[ "$(head -c {raw_size} {part} | sha256sum | cut -d " " -f1)" = {raw_sha} ]',
+                       timeout=900)
         su(f'rm -f {TMP}/openwrt.ext4.gz')
         # (no e2fsck here: the image is built by a newer e2fsprogs than the
         # device's, whose feature set -- metadata_csum_seed, orphan_file -- the
@@ -654,7 +695,7 @@ def install_sd(a):
 
         say('这台设备的文件和首次启动设置 / this device\'s files and the first boot\'s settings')
         conf = os.path.join(work, 'install.conf')
-        with open(conf, 'w', newline='\n') as f:
+        with open(conf, 'w', encoding='utf-8', newline='\n') as f:
             f.write('# the flash package (flash.py), for OpenWrt\'s first boot\n'
                     f"E5_APN='{apn}'\nE5_WIFI_SSID='{ssid}'\nE5_WIFI_KEY='{key}'\n"
                     "E5_WIFI_CHANNEL='149'\nE5_DEFAULT_BOOT='linux'\n")
@@ -855,7 +896,7 @@ def install(a):
 
         say('首次启动设置 / the first boot\'s settings')
         conf = os.path.join(work, 'install.conf')
-        with open(conf, 'w', newline='\n') as f:
+        with open(conf, 'w', encoding='utf-8', newline='\n') as f:
             f.write('# the flash package (flash.py), for OpenWrt\'s first boot\n'
                     f"E5_APN='{apn}'\nE5_WIFI_SSID='{ssid}'\nE5_WIFI_KEY='{key}'\n"
                     "E5_WIFI_CHANNEL='149'\nE5_DEFAULT_BOOT='linux'\n")
@@ -1033,7 +1074,7 @@ def install_part(a):
         push(img, f'{TMP}/e5-part-install.img.gz', 'openwrt.ext4.gz')
         push(os.path.join(F, 'boot.img'), f'{TMP}/e5-boot.img', 'boot.img')
         conf = os.path.join(work, 'part-install.settings')
-        with open(conf, 'w', newline='\n') as f:
+        with open(conf, 'w', encoding='utf-8', newline='\n') as f:
             f.write("E5_APN='%s'\nE5_WIFI_SSID='%s'\nE5_WIFI_KEY='%s'\n"
                     "E5_WIFI_CHANNEL='149'\nE5_DEFAULT_BOOT='linux'\n" % (apn, ssid, key))
         adb('push', conf, f'{TMP}/part-install.settings', check=True)
@@ -1073,7 +1114,10 @@ def install_part(a):
 
 def part_two_stage(action, *args):
     try:
-        runpy.run_path(os.path.join(B, 'part-two-stage.py'))[action](globals(), *args)
+        helper = os.path.join(SCRIPTS, 'installer', 'part-two-stage.py')
+        if not os.path.isfile(helper):
+            helper = os.path.join(B, 'part-two-stage.py')
+        runpy.run_path(helper)[action](globals(), *args)
     except (ValueError, OSError) as error:
         die(str(error))
 
@@ -1135,95 +1179,25 @@ def update(a):
         pw = 'root'     # (-y: the default, not asked)
     if pw is None:
         import getpass
-        pw = getpass.getpass('root password of the E5 [root]: ') or 'root'
-    bj = boot_json()
-    profile = package_profile()
-    guard = ''
-    if profile:
-        guard = ('[ "$(cat /etc/e5/device-profile 2>/dev/null)" = ' + profile['profile'] +
-                 ' ] || { echo "error: package/device profile mismatch" >&2; exit 1; }\n')
-    mb = bj['persist_log_offset'] // 1048576
-    with tempfile.TemporaryDirectory() as td:
-        head = os.path.join(td, 'boot-head.img')
-        with open(os.path.join(F, 'boot.img'), 'rb') as i, open(head, 'wb') as o:
-            o.write(i.read(mb << 20))
-        files = {'/boot-head.img': head,
-                 '/openwrt.ext4.gz': os.path.join(F, 'openwrt.ext4.gz'),
-                 '/dii.sh': os.path.join(F, 'device-install-image.sh'),
-                 '/e5-gpt': os.path.join(F, 'e5-gpt'),
-                 '/dfb.sh': os.path.join(F, 'device-flash-boot.sh')}
+        pw = getpass.getpass('Device root password / 设备 root 密码 [root]: ') or 'root'
+    boot_json()  # validate the package before connecting
+    size, image_hash = gz_metadata(os.path.join(F, 'openwrt.ext4.gz'))
+    env = dict(os.environ, E5_TELNET_PASS=pw)
+    helper = python_tool(os.path.join(SCRIPTS, 'tools', 'e5-update.py'))
+    say(f'更新 / updating {host} (SSH upload)')
+    result = subprocess.run(helper + ['--package', B, '--host', host,
+                            '--raw-size', str(size), '--raw-sha256', image_hash], env=env)
+    if result.returncode:
+        die('the update did not finish; see the failed step above')
+    say('载荷已校验，设备正在重启执行更新 / verified, rebooting to apply update')
 
-        class H(http.server.SimpleHTTPRequestHandler):
-            def translate_path(self, path):
-                return files.get(path.split('?')[0], os.path.join(td, 'nothing'))
-
-            def log_message(self, *args):
-                pass
-
-        srv = http.server.ThreadingHTTPServer((ip, 0), H)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-        u = f'http://{ip}:{srv.server_address[1]}'
-        say(f'更新 / updating {host}')
-        env = dict(os.environ, E5_TELNET_HOST=host, E5_TELNET_PASS=pw, E5_TELNET_WAIT='1800')
-        telnet = python_tool(os.path.join(SCRIPTS, 'tools', 'e5-telnet.py'))
-        # The steps as a script the device fetches: a long command line typed over
-        # telnet gets lost (the 80-column pty's line editing), so only a short one is.
-        steps_sh = f"""set -e
-{guard}\
-cd /tmp
-wget -q -O dfb.sh {u}/dfb.sh
-wget -q -O dii.sh {u}/dii.sh
-sh dfb.sh {u}/boot-head.img {bj["sha256_head56m"]} {mb}
-if [ -f /etc/e5/sd-root ]; then
-    # an SD card system (the default install): the new image goes into the card's
-    # other root partition, the next boot is its trial; userdata is not touched
-    # (FINDINGS 49)
-    wget -q -O e5-gpt {u}/e5-gpt
-    E5_IMAGE_SIZE={gz_usize(os.path.join(F, "openwrt.ext4.gz"))} sh dii.sh {u}/openwrt.ext4.gz
-    # Updating OpenWrt is an explicit operator choice; make it the persistent
-    # SD default after the new slot has verified, rather than leaving Debian
-    # selected from an earlier multi-system session.
-    e5-os openwrt
-else
-    # the form on userdata (--data, kept for tests)
-    sh dii.sh {u}/openwrt.ext4.gz
-    d=/mnt/e5-data/e5linux
-    rm -f $d/boot-os-next
-    echo openwrt > $d/boot-os
-    sync
-fi
-echo E5-UPDATE-$((1+1))
-"""
-        with open(os.path.join(td, 'update.sh'), 'w', newline='\n') as f:
-            f.write(steps_sh)
-        files['/update.sh'] = os.path.join(td, 'update.sh')
-        cmd = f'cd /tmp && wget -q -O e5-update.sh {u}/update.sh && sh e5-update.sh'
-        # the device's own steps as they happen: the boot image, the unpacking,
-        # the settings kept, the device's files
-        lines = []
-        with subprocess.Popen(telnet + [cmd], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as pr:
-            with busy('设备上的更新 / the update on the device'):
-                for raw in pr.stdout:
-                    line = raw.decode('utf-8', 'replace').replace('\r', '').rstrip('\n')
-                    lines.append(line)
-                    if line.startswith(('==', 'installed', 'WARNING', 'error', 'the image', '   ')):
-                        sys.stdout.write('\r   ' + line + ' ' * 20 + '\n')
-                        sys.stdout.flush()
-        out = '\n'.join(lines)
-        srv.shutdown()
-        if 'E5-UPDATE-2' not in out:
-            print('\n'.join(out.splitlines()[-20:]))
-            die('the update did not finish (the log is above)')
-        # the reboot on its own: a session the reboot cuts never sees its end
-        env['E5_TELNET_WAIT'] = '20'
-        subprocess.run(telnet + ['( (sleep 2; reboot) >/dev/null 2>&1 & )'], env=env,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    say('完成，设备正在重启 / done, the E5 is rebooting')
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group()
+    g.add_argument('--menu', action='store_true', help='choose an installation or maintenance action')
+    g.add_argument('--tf', action='store_true', help='first install onto the TF card (erases the whole card)')
     g.add_argument('--update', action='store_true')
     g.add_argument('--boot-openwrt', action='store_true')
     g.add_argument('--check', action='store_true')
@@ -1248,6 +1222,8 @@ def main():
                     help='erase ALL Android user data before internal-partition installation; requires --part')
     ap.add_argument('-y', action='store_true')
     a = ap.parse_args()
+    if (a.menu or len(sys.argv) == 1) and not choose_install_action(a):
+        return
     if a.image_size is not None and not a.data:
         ap.error('--image-size requires --data / install-userdata')
     if a.part_size is not None and not a.part:

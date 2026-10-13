@@ -4,6 +4,7 @@
 No ADB, physical disks, formatting of userdata, or reboots.
 """
 import importlib.util
+import contextlib
 import os
 from pathlib import Path
 import runpy
@@ -171,6 +172,46 @@ class TwoStage(unittest.TestCase):
         text = "E5_APN='internet'\nE5_WIFI_SSID='X'\nE5_WIFI_KEY='abcdefgh12'\n"
         self.assertEqual(api['installed_settings'](dict(su=lambda *a, **k: text)),
                          {'apn': 'internet', 'ssid': 'X', 'key': 'abcdefgh12'})
+
+    def test_resume_retains_phase_when_root_verification_or_boot_write_fails(self):
+        for phase, fault in [('writing','root'), ('installed','boot'), ('installed','chain')]:
+            with self.subTest(phase=phase,fault=fault), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory); files=root/'files'; files.mkdir()
+                boot=bytearray(8192); boot[:8]=b'ANDROID!'
+                struct.pack_into('<I', boot, 40, 4)
+                boot[44:1580]=b'e5.part_v=2'.ljust(1536,b'\0')
+                (files/'boot.img').write_bytes(boot)
+                state=dict(version=2,phase=phase,token='c'*32,serial='SERIAL',model='T551M',
+                           data=dict(node='mmcblk0p70',cid='a'*32,start=2048,size=8388608),
+                           target=4194304,need=4194304,grow=1,raw_size=2147483648,
+                           boot_sha='f'*64,image_sha='f'*64,apn='',ssid='test',key='12345678')
+                path=root/'transaction.json'; api['save'](path,state)
+                rows=dict(userdata=dict(state['data'],size=state['target']),
+                          e5root=dict(node='mmcblk0p71',cid='a'*32,start=4196352,size=4194304))
+                ns=api['finish'].__globals__; original=ns['probe']; ns['probe']=lambda _:rows
+                stages=[]
+                def checked(stage,*args,**kwargs):
+                    stages.append(stage)
+                    raise SystemExit('injected root-readback or boot-write failure')
+                chain=[]
+                def sync_chain(mode):
+                    chain.append(mode)
+                    if fault=='chain':raise SystemExit('injected boot-chain failure')
+                g=dict(F=str(files),TMP='/data/local/tmp',adb=lambda *a,**k:'SERIAL',
+                       sh=lambda *a,**k:'T551M',sha256=lambda *a:'f'*64,
+                       busy=lambda *a:contextlib.nullcontext(),su_checked=checked,
+                       install_preflight=lambda:None,bootchain=sync_chain,
+                       push=lambda *a:None,pull_device_files=lambda *a:None,
+                       arm_slot_b=lambda: self.fail('must not arm a failed installation'))
+                try:
+                    with self.assertRaises(SystemExit):
+                        api['finish'](g,SimpleNamespace(),path,state)
+                finally:
+                    ns['probe']=original
+                self.assertEqual(__import__('json').loads(path.read_text())['phase'],phase)
+                self.assertEqual(stages, ['安装独立分区 / install independent root'] if phase=='writing'
+                                 else [] if fault=='chain' else ['写入并校验 B 槽 / writing slot B'])
+                self.assertEqual(chain, [] if phase=='writing' else ['sync'])
 
     def test_progress_heartbeat_with_fractional_uptime(self):
         with tempfile.TemporaryDirectory() as directory:

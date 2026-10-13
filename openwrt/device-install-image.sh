@@ -51,9 +51,15 @@ lockfile=$lockdir/lock
 }; } || { echo 'unsafe upgrade lock file' >&2; exit 1; }
 update_umask=$(umask)
 umask 077
-exec 9>>"$lockfile"
+if [ "${E5_UPGRADE_LOCK_HELD:-}" = 1 ]; then
+    [ "$(readlink /proc/$$/fd/8)" = "$lockfile" ] && flock -n 8 || {
+        echo 'invalid inherited upgrade lock' >&2; exit 1;
+    }
+else
+    exec 9>>"$lockfile"
+    flock -n 9 || { echo 'another system upgrade is running' >&2; exit 1; }
+fi
 umask "$update_umask"
-flock -n 9 || { echo 'another system upgrade is running' >&2; exit 1; }
 # END e5-upgrade-lock
 
 # The configuration of the OpenWrt at $1 into the new root $2 (/etc/config,

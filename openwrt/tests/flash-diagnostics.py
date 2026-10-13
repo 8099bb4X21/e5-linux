@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise installer failures without adb, a device or card writes."""
 import contextlib
+import builtins
 import gzip
 import importlib.util
 import io
@@ -44,19 +45,18 @@ class Diagnostics(unittest.TestCase):
         self.assertIn("sys.executable if getattr(sys, 'frozen', False) else __file__", source)
         for call in ("python_tool(os.path.join(tools, 'sprd-bt-config.py')",
                      "python_tool(os.path.join(tools, 'vbc-profile', 'vbc-profile.py')",
-                     "python_tool(os.path.join(SCRIPTS, 'tools', 'e5-telnet.py'))"):
+                     "python_tool(os.path.join(SCRIPTS, 'tools', 'e5-update.py'))"):
             self.assertIn(call, source, call)
 
     def test_reinstall_launchers_ship_with_the_package(self):
-        # Every other install has a one-word launcher next to flash.cmd
-        # (install-part.cmd / install-part.sh); the rewrite needs the same, and
-        # both packaging paths have to copy them or they never leave the tree.
+        # Legacy source wrappers retain their flags; both packagers now use
+        # the descriptive generator exercised by install-entrypoints.py.
         openwrt = Path(__file__).parents[1]
         for name in ('reinstall.cmd', 'reinstall.sh'):
             launcher = (openwrt / 'bundle' / name).read_text(encoding='utf-8')
             self.assertIn('--reinstall-part', launcher, name)
-            self.assertIn(name, (openwrt / 'build-profile-tf.py').read_text(encoding='utf-8'), name)
-            self.assertIn(name, (openwrt / 'make-flash-bundle.sh').read_text(encoding='utf-8'), name)
+            self.assertIn('install-entrypoints.py', (openwrt / 'build-profile-tf.py').read_text(encoding='utf-8'))
+            self.assertIn('install-entrypoints.py', (openwrt / 'make-flash-bundle.sh').read_text(encoding='utf-8'))
         import inspect
         self.assertIn("'--reinstall-part'", inspect.getsource(flash))
 
@@ -197,11 +197,11 @@ class Diagnostics(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 flash.gz_usize(path)
 
-    def simulate_install(self, failure=None):
+    def simulate_install(self, failure=None, ssid='test'):
         calls = []
         def record(kind, text=''):
             calls.append((kind, text))
-            if failure and failure in text:
+            if failure and isinstance(text, str) and failure in text:
                 raise SystemExit('injected failure')
         def checked(stage, command, timeout=600):
             record('command', command)
@@ -209,7 +209,11 @@ class Diagnostics(unittest.TestCase):
         def firmware(*args):
             record('firmware', 'firmware')
             return 1024
-        args = SimpleNamespace(apn='', ssid='test', wifi_key='12345678', y=True)
+        args = SimpleNamespace(apn='', ssid=ssid, wifi_key='12345678', y=True)
+        def device_adb(*args, **kwargs):
+            record('adb', args[0])
+            if args[0] == 'push' and Path(args[1]).name == 'install.conf':
+                record('settings', Path(args[1]).read_bytes().decode('utf-8'))
         with contextlib.ExitStack() as stack:
             mocks = {
                 'find_adb': lambda: None, 'android_checks': lambda: None,
@@ -218,12 +222,13 @@ class Diagnostics(unittest.TestCase):
                 'device_sd': lambda: '/dev/block/mmcblk1',
                 'device_size': lambda dev: (5 << 20) if dev.endswith('p1') else (16 << 30),
                 'gz_usize': lambda path: 4 << 20,
+                'gz_metadata': lambda path: (4 << 20, 'rawsha'),
                 'su_checked': checked, 'pull_device_files': firmware,
                 'push': lambda local, remote, label: record('push', label),
                 'unmount_android_sd': lambda sd: record('release', sd),
                 'bootchain': lambda mode: record('chain', mode),
                 'arm_slot_b': lambda: record('arm'),
-                'adb': lambda *args, **kwargs: record('adb', args[0]),
+                'adb': device_adb,
                 'su': lambda cmd, **kwargs: 'abc' if cmd.startswith('sha256sum') else 'ok',
             }
             for name, value in mocks.items():
@@ -254,6 +259,21 @@ class Diagnostics(unittest.TestCase):
     def test_readonly_remount_failure_never_writes_boot_or_arms_slot(self):
         calls = self.simulate_install('ro,noload')
         self.assertFalse(any('of=/dev/block/by-name/boot_b' in text or kind == 'arm' for kind, text in calls))
+
+    def test_image_readback_failure_never_writes_boot_or_arms_slot(self):
+        calls = self.simulate_install('head -c')
+        self.assertFalse(any('of=/dev/block/by-name/boot_b' in text or kind == 'arm' for kind, text in calls))
+
+    def test_chinese_ssid_is_utf8_even_on_a_gbk_host(self):
+        def host_open(*args, **kwargs):
+            if 'b' not in (args[1] if len(args) > 1 else 'r'):
+                kwargs.setdefault('encoding', 'gbk')
+            return builtins.open(*args, **kwargs)
+        with patch.object(flash, 'open', host_open, create=True):
+            calls = self.simulate_install(ssid='中文热点')
+        settings = next(text for kind, text in calls if kind == 'settings')
+        self.assertIn("E5_WIFI_SSID='中文热点'", settings)
+        self.assertNotIn('\r\n', settings)
 
 
 if __name__ == '__main__':

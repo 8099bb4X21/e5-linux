@@ -13,16 +13,29 @@ free) and boots from `boot_b`.  Android is always one step away.  Without a
 card, `install-part` installs to a partition of the phone's own storage
 instead (userdata is shrunk; Android keeps its files).
 
+Public entry names are descriptive English names. Use `.cmd` on Windows or `.sh` on Linux/macOS:
+
+| Entry | Action |
+| --- | --- |
+| `OpenWrt-Installer.exe` / `start-installer` | Choose an action; the Windows exe needs no separate Python |
+| `install-to-tf-card` | First install, erasing the entire TF card |
+| `install-to-internal-storage` | Shrink userdata and create an independent root partition |
+| `reinstall-internal-system` | Rewrite an existing e5root without shrinking or wiping Android data |
+| `resume-internal-install` | Resume using the saved transaction.json |
+| `switch-to-openwrt` | Switch from Android to an existing OpenWrt installation |
+| `update-openwrt` | Update the running OpenWrt system |
+
+`scripts/installer` contains internal helpers, not user entrypoints. Existing command-line options remain available.
+
 ## You need
 
 * a matching device with an **unlocked bootloader** and Android rooted with **Magisk**;
 * Android running from slot a (as it comes from the factory);
 * an **SD card of 4 GB or more** (8 GB recommended): it is partitioned and erased, and
   its free space stays free for more partitions later -- or run
-  `install-part.cmd` / `bash install-part.sh` and no card is needed;
+  `install-to-internal-storage.cmd` / `bash install-to-internal-storage.sh` and no card is needed;
 * a Windows, macOS or Linux computer with:
-  * **Python 3.8 or newer** (on Windows from https://www.python.org/downloads/, tick
-    "Add python.exe to PATH");
+  * **Python 3.8 or newer** (unnecessary on Windows when `OpenWrt-Installer.exe` is included);
   * **adb** (Android platform-tools, https://developer.android.com/tools/releases/platform-tools:
     add its directory to PATH, or put the `platform-tools` folder into the package's);
   * on Windows the device's USB driver (usually installed by Windows itself);
@@ -34,11 +47,11 @@ instead (userdata is shrunk; Android keeps its files).
 2. Grant **Shell** superuser access in Magisk (the phone asks the first time).
 3. Unpack the package and run, in its directory:
 
-   * **Windows**: double-click `flash.cmd` (or run `flash.cmd` in a command prompt);
-   * **macOS / Linux**: `./flash.sh`
+   * **Windows**: double-click `start-installer.cmd` (or run `start-installer.cmd` in a command prompt);
+   * **macOS / Linux**: `./start-installer.sh`
 
-   To see first that the device is fine, with nothing written: `flash.cmd --check` /
-   `./flash.sh --check`.
+   To see first that the device is fine, with nothing written: `start-installer.cmd --check` /
+   `./start-installer.sh --check`.
 
    It asks for the APN, the hotspot's name and key.  For the APN just press
    Enter: OpenWrt picks it from the SIM's operator (China Mobile `cmnet`,
@@ -47,8 +60,8 @@ instead (userdata is shrunk; Android keeps its files).
    shown at the end.  Or give them on the command line:
 
    ```sh
-   flash.cmd --ssid E5-OpenWrt --wifi-key 12345678 -y        (Windows)
-   ./flash.sh --ssid E5-OpenWrt --wifi-key 12345678 -y       (macOS / Linux)
+   start-installer.cmd --ssid E5-OpenWrt --wifi-key 12345678 -y        (Windows)
+   ./start-installer.sh --ssid E5-OpenWrt --wifi-key 12345678 -y       (macOS / Linux)
    ```
 
    It asks once more before it partitions and formats the **SD card** -- type
@@ -88,7 +101,7 @@ What it does:
 ## Using it
 
 * Hotspot: the name and key set while flashing; or the USB cable (USB network).
-* LuCI (in Chinese, Argon theme; System -> System -> Language and Style): `http://192.168.9.1`, user `root`, password `root` -- **change it**
+* LuCI (Aurora theme; System -> System -> Language and Style): `http://192.168.9.1`, user `root`, password `root` -- **change it**
   (LuCI -> System -> Administration, or `passwd` over SSH).
 * SSH: `ssh root@192.168.9.1`.
 * The panel: left/right turn the pages, confirm presses, back goes back; 高级
@@ -96,7 +109,7 @@ What it does:
 
 ### Without an SD card (`install-part`)
 
-`install-part.cmd` (Windows) or `bash install-part.sh` installs OpenWrt onto a
+`install-to-internal-storage.cmd` (Windows) or `bash install-to-internal-storage.sh` installs OpenWrt onto a
 partition of the phone's own storage: it shows the partition size range and
 asks for one (default: the image plus 1 GiB), then whether the system should
 **use the whole partition** (default: no, the image's own ~2 GiB allocation),
@@ -106,7 +119,7 @@ not formatted and Android keeps its files. The first boot is a trial: one that
 never comes up falls back. Back to Android: `e5-next-boot android` from the
 screen or a shell, or delete `/data/e5linux/boot-os`, and reboot. Later
 reinstalls or resizes of that partition run from the running OpenWrt:
-`device-install-part.sh`.
+`device-install-to-internal-storage.sh`.
 
 ## Back to Android
 
@@ -117,7 +130,7 @@ From Android back to OpenWrt, with nothing reinstalled (the settings stay,
 and OpenWrt is the default boot again): connect the E5 and run
 
 ```sh
-flash.cmd --boot-openwrt          (Windows; macOS / Linux: ./flash.sh --boot-openwrt)
+start-installer.cmd --boot-openwrt          (Windows; macOS / Linux: ./start-installer.sh --boot-openwrt)
 ```
 
 A failed OpenWrt boot falls back to Android on its
@@ -150,7 +163,7 @@ prepared layout before writing directly to the independent e5root partition.
 To continue after closing the script, keep the same package and run:
 
 ```
-flash.cmd --resume-part "backups/part-DATE-ID/transaction.json"
+start-installer.cmd --resume-part "backups/part-DATE-ID/transaction.json"
 ```
 
 Do not repeat stage one. Backups contain device images and hotspot settings;
@@ -169,9 +182,9 @@ into it while keeping Android's user data, the userdata filesystem and the
 partition table, use the rewrite:
 
 ```text
-reinstall.cmd                       (the same as flash.cmd --reinstall-part; POSIX: ./reinstall.sh)
-flash.cmd --reinstall-part          (interactive: prints the geometry and the settings, one confirmation)
-flash.cmd --reinstall-part -y       (unattended)
+reinstall-internal-system.cmd                       (the same as start-installer.cmd --reinstall-part; POSIX: ./reinstall-internal-system.sh)
+start-installer.cmd --reinstall-part          (interactive: prints the geometry and the settings, one confirmation)
+start-installer.cmd --reinstall-part -y       (unattended)
 ```
 
 It reads the device's current userdata/e5root geometry, pulls this unit's own
@@ -188,7 +201,7 @@ recorded under `backups/reinstalls/DATE-ID/transaction.json`.
 With the E5 running OpenWrt and connected over USB, run the new package's:
 
 ```sh
-flash.cmd --update                (Windows; macOS / Linux: ./flash.sh --update)
+start-installer.cmd --update                (Windows; macOS / Linux: ./start-installer.sh --update)
 ```
 
 It updates the boot image and the OpenWrt image over the USB network and
@@ -200,7 +213,7 @@ partition of the card -- made in the card's free space by the first update,
 reused after that -- while the old one keeps running; userdata is not touched.
 The reboot starts the new one.  Its first boot is a trial: if it does not come
 up, the next start of Linux goes back to the previous system, settings as they
-were (if the E5 fell back to Android meanwhile: `./flash.sh --boot-openwrt`).
+were (if the E5 fell back to Android meanwhile: `./start-installer.sh --boot-openwrt`).
 The update needs about the image's size free on the card (1 GiB and a little
 more).
 
@@ -227,3 +240,13 @@ Enceka <enceka@yeah.net>.  The scripts and e5-linux's parts are MIT
 (`LICENSE`); OpenWrt, the Linux kernel and the other components are under
 their own licences (GPL and others), with their sources at OpenWrt and in the
 e5-linux repository.
+
+
+Updates use outbound SSH uploads rather than an HTTP server on the PC. The Windows
+installer bundles Paramiko; Python users can install it with `python -m pip install paramiko`.
+`update-openwrt` also handles independent e5root installations: stage the image,
+settings and device firmware, verify the boot image, then reboot into initramfs.
+All payloads are copied into RAM and verified before the unmounted root is replaced.
+The filesystem grows back to its existing partition size. Android userdata and GPT
+are unchanged, including encrypted userdata. Keep power connected during the write;
+a single internal root has no automatic rollback slot. Extra APK packages are not migrated.
