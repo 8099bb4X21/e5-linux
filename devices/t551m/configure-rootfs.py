@@ -20,6 +20,7 @@ def stage(root, persistent=True):
     if root == Path('/'):
         raise ValueError('Expected an offline root')
     top = Path(__file__).resolve().parents[2]
+    runpy.run_path(str(top / 'devices/wifi-common.py'))['stage'](root)
     from types import SimpleNamespace
     a = SimpleNamespace(persistent=persistent)
     for name in ('vendor-start.sh', 'android-run', 'e5-modem-coldboot'):

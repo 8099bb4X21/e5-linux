@@ -8,6 +8,19 @@ from pathlib import Path
 import re
 
 
+def stage(root):
+    """Refresh recovery in existing offline roots as well as clean images."""
+    root = Path(root).resolve()
+    if root == Path('/').resolve():
+        raise ValueError('Expected an offline root')
+    name = 'etc/hotplug.d/ieee80211/90-sc2355-recovery'
+    source = Path(__file__).resolve().parents[1] / 'openwrt/overlay' / name
+    target = root / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(source.read_bytes().replace(b'\r\n', b'\n'))
+    target.chmod(0o755)
+
+
 def apply(kernel):
     base = Path(kernel) / 'drivers/unisoc_platform/sprd_wlan_combo'
 
@@ -130,8 +143,43 @@ static void iface_notify_deinit(struct sprd_priv *priv)
         text = re.sub(pattern, quiet, text, flags=re.S)
         path.write_text(text)
 
-    # This tree already keeps missing multicast LUTs and stale DELBA quiet.
-    # In particular, do not demote the similar unknown-session BAR error.
+    # A departed AP client can leave a large download in the bridge backlog.
+    # Printing three errors per discarded packet stalls the serial console in
+    # softirq context and can prevent firmware command responses being handled.
+    path = base / 'sc2355/cmdevt.c'
+    text = path.read_text()
+    start = text.index('unsigned char sc2355_find_lut_index(')
+    end = text.index('\nstatic bool sc2355_is_valid_lut(', start)
+    func = text[start:end].replace('wl_err(', 'wl_debug(')
+    text = text[:start] + func + text[end:]
+    text = text.replace('wl_err("%s, %d, sta disconn, no data tx!",',
+                        'pr_debug_ratelimited("%s, %d, sta disconn, no data tx!",')
+    path.write_text(text)
+    edit('common/iface.c',
+         '\t\tnetdev_err(ndev, "%s drop msg due to TX Err\\n", __func__);',
+         '\t\tif (net_ratelimit())\n'
+         '\t\t\tnetdev_err(ndev, "%s drop msg due to TX Err\\n", __func__);')
+
+    # h_proto is network endian. Without htons(), IPv4/IPv6 fall into the
+    # vendor's extra non-IP W2W copy as well as Linux bridge forwarding.
+    edit('sc2355/rx.c',
+         '\t\t\tif (eth->h_proto != ETH_P_IP &&\n'
+         '\t\t\t    eth->h_proto != ETH_P_IPV6) {',
+         '\t\t\t/* IP multicast is forwarded by the host network stack. */\n'
+         '\t\t\tif (eth->h_proto != htons(ETH_P_IP) &&\n'
+         '\t\t\t    eth->h_proto != htons(ETH_P_IPV6)) {')
+
+    # Android consumes the vendor assert event; OpenWrt needs a uevent to tell
+    # netifd to reopen the radio. Emit once per reset from sleepable work, never
+    # from the atomic WCN notifier or for ordinary client disconnections.
+    edit('common/cfg80211.c',
+         '\t\twl_info("Try to report assert a %d time \\n", hif->report_try);',
+         '\t\tif (hif->report_try == 1) {\n'
+         '\t\t\tchar *env[] = { "SC2355_RECOVERY=1", NULL };\n\n'
+         '\t\t\tkobject_uevent_env(&wiphy_dev(priv->wiphy)->kobj,\n'
+         '\t\t\t\t\t   KOBJ_CHANGE, env);\n'
+         '\t\t}\n'
+         '\t\twl_info("Try to report assert a %d time \\n", hif->report_try);')
 
 
 if __name__ == '__main__':

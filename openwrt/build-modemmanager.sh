@@ -48,7 +48,11 @@ set -euo pipefail
 # 12: confirm transient empty call lists and adopt existing outgoing CP calls.
 # 13: serialize hangup, settle before redial and ignore pre-hangup CLCC snapshots.
 # 14: detached, owner-aware CEUS/CEMODE confirmation with bounded retries.
-E5REV=15
+# 15: mobility-safe CGEV/SPPCODATA events and in-place bearer address renewal.
+# 16: include shared APN, pre-dial replay and recovery glue in APK upgrades too.
+# 17: replace the complete netifd snapshot so old addresses/DNS do not survive.
+# 18: standalone mask conversion and retry a rejected address update safely.
+E5REV=19
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"
@@ -68,6 +72,11 @@ cp "$HERE/tests/sim-power.py" "$WORK/sim-power.py"
 cp "$HERE/tests/voice-urc.py" "$WORK/voice-urc.py"
 cp "$HERE/tests/voice-recovery.py" "$WORK/voice-recovery.py"
 cp "$HERE/tests/data-priority-hook.py" "$WORK/data-priority-hook.py"
+cp "$HERE/tests/modem-mobility.py" "$WORK/modem-mobility.py"
+cp "$HERE/files/modemmanager-unisoc-renew" "$WORK/modemmanager-unisoc-renew"
+mkdir -p "$WORK/devices/t551m" "$WORK/openwrt/overlay/usr/libexec"
+cp "$TOP/devices/t551m/network-startup.py" "$WORK/devices/t551m/network-startup.py"
+cp "$HERE/overlay/usr/libexec/e5-mm-report-ports" "$WORK/openwrt/overlay/usr/libexec/e5-mm-report-ports"
 n=900
 for p in "$TOP"/rootfs/deb-patches/modemmanager-[0-9][0-9]-*.patch; do
     cp "$p" "$WORK/patches/src/$n-e5-$(basename "$p" | sed 's/^modemmanager-//')"
@@ -110,7 +119,12 @@ P=feeds/packages/net/modemmanager
 # the package directory back to the feed state, then the E5 changes on top
 git -C feeds/packages checkout -q -- net/modemmanager
 git -C feeds/packages clean -qfd -- net/modemmanager
+install -Dm755 /work/modemmanager-unisoc-renew "$P/files/usr/sbin/modemmanager-unisoc-renew"
 for p in /work/patches/pkg/*.patch; do patch -p1 -d $P < "$p"; done
+# Match the rootfs stager: upgrading this APK must retain APN selection,
+# boot replay, port discovery, initial EPS preservation and PDP retries.
+# Package files have no board config, so only the shared glue is affected.
+python3 /work/devices/t551m/network-startup.py --root "$P/files" --profile e5
 cp /work/patches/src/*.patch $P/patches/
 rel=$(sed -n "s/^PKG_RELEASE:=//p" $P/Makefile)
 sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$((rel + 900 + E5REV))/" $P/Makefile
@@ -154,6 +168,7 @@ python3 /work/sim-power.py "$(dirname "$voice_source")"
 python3 /work/voice-urc.py "$(dirname "$voice_source")"
 python3 /work/voice-recovery.py "$(dirname "$voice_source")"
 python3 /work/data-priority-hook.py "$(dirname "$voice_source")"
+python3 /work/modem-mobility.py "$(dirname "$voice_source")" /work/modemmanager-unisoc-renew
 rm -f /out/modemmanager*.apk
 find bin/packages -name "modemmanager*-r$((rel + 900 + E5REV)).apk" -exec cp {} /out/ \;
 ls -la /out/modemmanager*.apk
