@@ -176,7 +176,8 @@ def main():
         run('gzip', '-1', '-c', image, stdout=out)
     runpy.run_path(str(TOP / 'openwrt/prepare-ext4-tools.py'))['build'](root, files / 'ext4-tools.tar')
     for n in ('flash.py', 'flash.cmd', 'flash.sh', 'install-part.cmd', 'install-part.sh',
-              'reinstall.cmd', 'reinstall.sh', 'part-two-stage.py', 'README.md', 'README.zh-CN.md'):
+              'reinstall.cmd', 'reinstall.sh', 'part-two-stage.py', 'README.md', 'README.zh-CN.md',
+              '【插件】mu300系统切换器.js'):
         shutil.copy2(TOP / 'openwrt/bundle' / n, package / n)
     # A Windows build of the flasher (work/build-flash-exe.cmd) ships with the
     # package when it is there: users without Python run flash.exe instead.
