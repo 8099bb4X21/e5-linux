@@ -72,7 +72,7 @@ echo "== 5/6 align"
 "$ZIPALIGN" -f 4 build/unsigned.apk build/aligned.apk
 
 echo "== 6/6 sign"
-KS=$HERE/debug.keystore   # kept across builds: a new key would break -r installs
+KS=debug.keystore   # relative on purpose: a /d/... path means something else to the Windows tools
 if [ ! -f "$KS" ]; then
     keytool -genkeypair -keystore "$KS" -storepass android -keypass android \
         -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
