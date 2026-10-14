@@ -71,18 +71,15 @@ def main():
     a = p.parse_args()
     files = a.package / 'files'
     profile = json.loads((files / 'device-profile.json').read_text())['profile'] if (files / 'device-profile.json').exists() else 'e5'
-    known = a.package / 'backups' / ('ssh-' + profile + '.known_hosts')
-    known.parent.mkdir(parents=True, exist_ok=True)
     client = paramiko.SSHClient()
-    if known.exists():
-        client.load_host_keys(str(known))
+    # USB-connected devices reuse the same management address. Keep trust
+    # within this connection rather than pinning that IP to one installation.
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(a.host, username='root', password=os.environ['E5_TELNET_PASS'],
                    look_for_keys=False, allow_agent=False, timeout=15, auth_timeout=20)
     stage = None
     try:
         execute(client, '[ "$(id -u)" = 0 ] && [ "$(cat /etc/e5/device-profile)" = ' + shlex.quote(profile) + ' ]')
-        client.save_host_keys(str(known))
         # Detection and capacity checks precede uploads and all boot writes.
         layout = execute(client, 'if [ -f /etc/e5/part-root ]; then echo part; '
             'elif [ -f /etc/e5/sd-root ]; then echo sd; else echo image; fi').strip()

@@ -51,6 +51,17 @@ def main():
         raise ValueError('block-mount is not built from the current probe guard')
     if Path(str(a.block_apk) + '.sha256').read_text().split()[0] != digest(a.block_apk):
         raise ValueError('block-mount APK checksum mismatch')
+    # A sanitized prebuilt base may carry an older daemon. Refresh it from
+    # the source-verified APKs so a userspace fix cannot disappear in a repack.
+    modem_state = runpy.run_path(str(TOP / 'tools/openwrt-package-state.py'))
+    modem_build = modem_state['inspect']('25.12.5')
+    if json.loads(modem_state['STATE'].read_text()) != modem_build:
+        raise ValueError('ModemManager APKs are stale; rebuild them before packaging')
+    modem_names = sorted(modem_build['apks'])
+    if len(modem_names) != 2 or not all(re.fullmatch(r'modemmanager(?:-rpcd)?-1\.24\.0-r\d+\.apk', n) for n in modem_names):
+        raise ValueError('Unexpected ModemManager package set')
+    modem_args = ' '.join('/modem/' + n for n in modem_names)
+    modem_daemon = next(n for n in modem_names if n.startswith('modemmanager-1'))
     a.work.mkdir(parents=True)
     root = a.work / 'root'
     release = runpy.run_path(str(TOP / 'upstream/check-container-support.py'))['check'](a.kernel)
@@ -84,8 +95,13 @@ def main():
     # apk handles the package database/dependencies; never copy just /sbin/block.
     run('docker', 'run', '--rm', '--platform', 'linux/arm64',
         '-v', f'{root}:/target', '-v', f'{a.block_apk.resolve()}:/input/block.apk:ro',
+        '-v', f'{TOP / "out/openwrt"}:/modem:ro',
         '--entrypoint', '/bin/sh', a.apk_image, '-ec',
-        'apk --root /target --no-scripts --no-network add --allow-untrusted /input/block.apk')
+        'apk --root /target --no-scripts --no-network add --allow-untrusted /input/block.apk ' + modem_args + ' && '
+        'mkdir /tmp/modem-verify && apk extract --allow-untrusted --destination /tmp/modem-verify /modem/' + modem_daemon + ' && '
+        'cmp /target/usr/sbin/ModemManager /tmp/modem-verify/usr/sbin/ModemManager && '
+        'ucode /target/usr/libexec/unisoc-modem/disable-channel-analysis /target')
+    runpy.run_path(str(TOP / 'devices/t551m/network-startup.py'))['patch_root'](root, a.profile)
     # The SMS forward signs DingTalk webhooks with the openssl CLI and sends SMTP
     # through msmtp; the clean base carries the backend files without the packages.
     # (downloads.openwrt.org interrupts mid-index often enough that the same
@@ -164,6 +180,7 @@ def main():
             'kernel_manifest': json.loads((a.kernel / 'container-support.json').read_text()),
             'compiled_helpers': helpers,
             'modemmanager_sha256': digest(root / 'usr/sbin/ModemManager'),
+            'modemmanager_packages': modem_build['apks'],
             'sources': sources}
     for dest in (root / 'etc/e5/build.json', files / 'BUILD.json'):
         dest.write_text(json.dumps(info, ensure_ascii=False, indent=2) + '\n')

@@ -463,6 +463,9 @@ else date -u +%s > $R/etc/e5/build-time; fi
 if [ "$E5_FEATURES" = 1 ]; then
     python3 /in/feature-source/devices/e5/stage.py --root $R
 fi
+if [ -f $R/usr/libexec/unisoc-modem/disable-channel-analysis ]; then
+    ucode $R/usr/libexec/unisoc-modem/disable-channel-analysis $R
+fi
 cd $R && tar -czf /out/$NAME .
 ls -la /out/$NAME
 '

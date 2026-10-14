@@ -4,7 +4,7 @@
 'require mu300.common as M';
 
 /* Network settings use verified asynchronous jobs. Each operation reports its
- * own completion/error; modem readback, not cache timestamps, proves success. */
+ * own completion/error; bands require command acknowledgement, other fields verify. */
 
 var MODES = [ [ 'auto', '自动' ], [ '5g4g', '5G/4G' ], [ '4g', '仅 4G' ], [ 'sa', '5G SA' ], [ 'nsa', '5G NSA' ] ];
 var NR_CAND = [], LTE_CAND = []; /* 读取后端能力后再显示，避免短暂展示错误频段。 */
@@ -368,7 +368,8 @@ return view.extend({
 		}).then(function(l) {
 			if (!l || l.error) throw new Error(l && l.error || '无法读取应用后的状态');
 			self.lastLock = l; self.paint(); self.paintServing(self.lastCell); self.paintNeighbors();
-			self.note('已应用并核对模组状态', 'success');
+			self.note(['lte','nr','bands_default'].indexOf(operation.kind || operation.op) >= 0 ?
+				'频段设置已应用，实际频段以模组回读为准' : '已应用并核对模组状态', 'success');
 		}).catch(function(error) {
 			self.note('应用失败：' + (error.message || error), 'error');
 			self.refresh();

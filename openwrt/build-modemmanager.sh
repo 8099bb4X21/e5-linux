@@ -54,7 +54,8 @@ set -euo pipefail
 # 18: standalone mask conversion and retry a rejected address update safely.
 # 20: isolate ambiguous dual-SIM CMTI indices and restore scoped SMS AT context.
 # 21: keep compound SMS prompt transactions out of context restoration.
-E5REV=21
+# 22: fail on invalid power/mode readback and failed activation prerequisites.
+E5REV=22
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"
@@ -100,7 +101,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends build-essential ca-certificates clang file flex bison \
     gawk gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync swig unzip wget \
-    xz-utils zlib1g-dev zstd libglib2.0-dev >/dev/null
+    xz-utils zlib1g-dev zstd libglib2.0-dev pkg-config >/dev/null
 # the buildroot refuses to run as root unless told otherwise; it lives in the
 # volume, which is case-sensitive (a macOS bind mount is not)
 export FORCE_UNSAFE_CONFIGURE=1

@@ -1223,6 +1223,7 @@ var DASH_I18N = {
 	'正在确认 EN-DC 状态': ['Confirming EN-DC status', 'EN-DC durumu doğrulanıyor'],
 	'正在确认开机自动应用': ['Confirming startup setting', 'Başlangıç ayarı doğrulanıyor'],
 	'正在直读调制解调器（最多几秒）': ['Reading modem directly (a few seconds at most)', 'Modem doğrudan okunuyor (en fazla birkaç saniye)'],
+	'频段设置已应用，实际频段以模组回读为准': ['Band setting applied; actual bands are shown by modem readback', 'Bant ayarı uygulandı; gerçek bantlar modem geri okumasında gösterilir'],
 	'已刷新': ['Refreshed', 'Yenilendi'],
 	'刷新失败': ['Refresh failed', 'Yenileme başarısız'],
 	'暂无驻网数据': ['No serving-network data', 'Bağlı olunan ağ verisi yok'],
@@ -1594,7 +1595,7 @@ html.mud-bootstrap-theme{--surface:var(--background-color-high);--surface-sunken
 .mud-voice-switch.on .mud-voice-track:after{transform:translateX(14px)}
 @media(prefers-reduced-motion:reduce){.mud-voice-track,.mud-voice-track:after{transition:none}}
 
-.mud-btn.on{background:var(--brand,var(--primary,#2f7bf6));border-color:var(--brand,var(--primary,#2f7bf6));color:var(--on-brand,#fff)}
+.mud-btn.on:not(.mud-voice-switch){background:var(--brand,var(--primary,#2f7bf6));border-color:var(--brand,var(--primary,#2f7bf6));color:var(--on-brand,#fff)}
 .mud-btn.warn{border-color:color-mix(in oklab,var(--danger,#E25555) 55%,transparent);color:var(--danger,#E25555)}
 .mud-btn[disabled]{opacity:.4;pointer-events:none}
 .mud-ctl{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:7px}

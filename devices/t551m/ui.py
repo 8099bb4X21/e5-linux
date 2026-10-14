@@ -62,7 +62,7 @@ def stage(root, profile='t551m'):
                 # Discover this modem's capabilities; no donor band allowlist.
                 target.write_bytes(b''.join(line for line in target.read_bytes().splitlines(keepends=True)
                                            if b'option lte_supported_bands ' not in line))
-            executable = srcdir == 'root' and any(part in src.parts for part in ('init.d', 'hotplug.d', 'libexec'))
+            executable = srcdir == 'root' and any(part in src.parts for part in ('init.d', 'hotplug.d', 'libexec', 'uci-defaults'))
             target.chmod(0o755 if executable else 0o644)
             if srcdir == 'root' and src.relative_to(plugin / srcdir).as_posix() == 'etc/config/unisoc_apn':
                 target.chmod(0o600)

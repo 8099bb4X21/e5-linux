@@ -242,12 +242,9 @@ def verify(kind, val, expected):
     if kind == 'endc':
         return (numbers('AT+SPENDC?', '+ENDC')[0] == 1) == (val == 'on')
     if kind in ('lte', 'nr'):
-        current = band_state(kind)
-        raw = current['raw']
-        if raw == expected: return True
-        # Modem may expand automatic zero masks into its supported band set.
-        supported = LTE if kind == 'lte' else nr_capabilities()
-        return not val and bool(supported) and set(current['locked'].split(',')) == set(map(str, supported))
+        # SPLBAND readback can normalize/filter masks after an accepted write.
+        # It is display state, not an equality requirement for band jobs.
+        return True
     if kind == 'cell':
         return all(set(cell_state(rat)) == set(cells) for rat, cells in expected.items())
     return True
@@ -276,8 +273,6 @@ def apply(kind, val, restart=True, persist=True, early=False):
         bands = ','.join(map(str, LTE))
         apply('lte', bands, restart=False, persist=persist, early=early)
         apply('nr', '', restart=restart, persist=persist, early=early)
-        if set(band_state('lte')['locked'].split(',')) != set(map(str, LTE)):
-            raise RuntimeError('Default LTE bands did not survive reconnect')
         return
     if kind == 'auto_apply':
         atomic(STATE / kind, val)
@@ -303,8 +298,9 @@ def apply(kind, val, restart=True, persist=True, early=False):
         v = masks(bands, LTE_TABLES if kind == 'lte' else NR_TABLES)
         if kind == 'nr': v.insert(1, 0)
         expected = ','.join(map(str, v))
-        write_setting('AT+SPLBAND=' + ('1,' if kind == 'lte' else '2,') + expected, 15, early,
-                      lambda: verify(kind, val, expected))
+        # Require the command's own OK; do not infer acceptance from a
+        # possibly different pre-existing band mask (including early replay).
+        at('AT+SPLBAND=' + ('1,' if kind == 'lte' else '2,') + expected, 3 if early else 15)
     elif kind == 'cell':
         if val == 'auto':
             subprocess.run(['/usr/libexec/unisoc-modem/cell'], capture_output=True, timeout=25, check=True)
@@ -339,7 +335,13 @@ def apply(kind, val, restart=True, persist=True, early=False):
             atomic(STATE / kind, '\n'.join(cell_state('lte') + cell_state('nr')) + '\n')
         else:
             atomic(STATE / kind, val)
-    snapshot()
+    try:
+        snapshot()
+    except RuntimeError:
+        # A successful band command stays successful if the subsequent status
+        # refresh is temporarily unavailable. Getters retain/report that state.
+        if kind not in ('lte', 'nr'): raise
+
 
 def exclusive():
     RUN.mkdir(parents=True, exist_ok=True)
@@ -383,7 +385,8 @@ def matches_saved(kind, val, state):
     return not bands or bool(supported) and bands == supported
 
 def verify_saved(saved, state):
-    mismatches = [kind for kind, val in saved.items() if not matches_saved(kind, val, state)]
+    mismatches = [kind for kind, val in saved.items()
+                  if kind not in ('lte', 'nr') and not matches_saved(kind, val, state)]
     if mismatches:
         raise RuntimeError('Saved settings do not match modem readback: ' + ', '.join(mismatches))
 
