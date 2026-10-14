@@ -25,7 +25,7 @@ def finalize(package, profile, bootctl):
     package, bootctl = Path(package), Path(bootctl)
     files = package / 'files'
     for name in ('OpenWrt-Installer.py', 'START-HERE.md', 'files/android-bootchain.sh',
-                 'files/collect-device-files.sh', 'files/ext4-tools.tar', 'scripts/tools/sprd-bt-config.py',
+                 'files/collect-device-files.sh', 'files/android-loop.sh', 'files/ext4-tools.tar', 'scripts/tools/sprd-bt-config.py',
                  'scripts/tools/vbc-profile/vbc-profile.py'):
         if not (package / name).is_file():
             raise ValueError('missing package component: ' + name)

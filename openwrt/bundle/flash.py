@@ -827,6 +827,7 @@ def stage_userdata_image(raw_size, selected):
     if not 0 < raw_mib <= selected_mib <= 2147483647:
         die('userdata image size is outside the supported MiB range')
     script = os.path.join(F, 'userdata-image.sh')
+    push(os.path.join(F, 'android-loop.sh'), f'{TMP}/e5-android-loop.sh', 'android-loop.sh')
     push(script, f'{TMP}/e5-userdata-image.sh', 'userdata-image.sh')
     su_checked('扩容和只读检查 userdata 镜像 / resizing and verifying userdata image',
                f'sh {TMP}/e5-userdata-image.sh {raw_size} {selected} {raw_mib} {selected_mib}', timeout=1800)

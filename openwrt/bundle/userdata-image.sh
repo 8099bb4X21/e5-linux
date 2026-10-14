@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # Operates only on a NEW regular image file. Never fsck or resize userdata itself.
 set -eu
+. /data/local/tmp/e5-android-loop.sh
 raw=${1:?raw bytes} selected=${2:?selected bytes}
 # Android mksh numeric comparisons can wrap byte counts at 32 bits (10 GiB
 # compares equal to 2 GiB). Keep all arithmetic in MiB; bytes are strings only.
@@ -19,6 +20,8 @@ mkdir -p "$D"
 }
 stage=$(mktemp -d /data/local/tmp/e5-ext4.XXXXXX)
 mounted=0
+loop_attached=0
+loop=
 bound=0
 devbound=0
 procbound=0
@@ -29,6 +32,7 @@ cleanup() {
     if [ "$mounted" = 1 ]; then
         umount "$stage/view" || exit 1
     fi
+    [ "$loop_attached" = 0 ] || losetup -d "$loop" || exit 1
     if [ "$bound" = 1 ]; then
         umount "$stage/images" || exit 1
     fi
@@ -83,7 +87,10 @@ tools e2fsck -f -n /images/openwrt.ext4.part
 [ "$(stat -c %s "$image")" = "$selected" ]
 sync
 mkdir "$stage/view"
-mount -t ext4 -o loop,ro,noload "$image" "$stage/view"
+loop=$(desktop_free_loop)
+losetup -r "$loop" "$image"
+loop_attached=1
+mount -t ext4 -o ro,noload "$loop" "$stage/view"
 mounted=1
 for name in sbin/init usr/sbin/ModemManager etc/openwrt_release etc/e5/device-profile; do
     chroot "$stage/view" /bin/busybox test -s "/$name"
@@ -91,6 +98,8 @@ done
 chroot "$stage/view" /bin/busybox true
 umount "$stage/view"
 mounted=0
+losetup -d "$loop"
+loop_attached=0
 umount "$stage/images"
 bound=0
 umount "$stage/proc"

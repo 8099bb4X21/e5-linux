@@ -81,6 +81,7 @@ def assemble(package, source=HERE):
     (launchers / 'start-installer.sh').chmod(0o755)
     files = package / 'files'; files.mkdir(exist_ok=True)
     shutil.copy2(source / 'userdata-image.sh', files / 'userdata-image.sh')
+    shutil.copy2(source / 'android-loop.sh', files / 'android-loop.sh')
     docs = package / 'docs'; docs.mkdir(exist_ok=True)
     for name in ('README.md', 'README.zh-CN.md'):
         shutil.copy2(source / name, docs / name)

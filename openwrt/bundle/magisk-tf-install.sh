@@ -6,21 +6,7 @@
 set -eu
 fail() { echo "E5-TF-ERROR: $*" >&2; exit 1; }
 sha() { local result; result=$(sha256sum "$1") || return 1; printf '%s\n' "${result%% *}"; }
-free_loop() {
-    local candidate name number
-    candidate=$(losetup -f) || return 1
-    name=${candidate##*/}; number=${name#loop}
-    case $candidate in /dev/loop*|/dev/block/loop*) ;; *) return 1 ;; esac
-    case $number in ''|*[!0-9]*) return 1 ;; esac
-    if [ -b "/dev/block/$name" ]; then echo "/dev/block/$name"
-    elif [ -b "$candidate" ]; then echo "$candidate"
-    else
-        number=$(cat "/sys/class/block/$name/dev") || return 1
-        case $number in *[!0-9:]*|:*|*:) return 1 ;; esac
-        mknod "$STATE/$name" b "${number%:*}" "${number#*:}" || return 1
-        echo "$STATE/$name"
-    fi
-}
+free_loop() { . "$P/files/android-loop.sh"; desktop_free_loop; }
 stage() {
     printf '%s\n' "$1" > "$STATE/stage"
     echo "[TF] $1"
@@ -74,7 +60,9 @@ prepare_firmware() {
     mkdir "$STATE/view"
     LOOP=$(free_loop)
     losetup "$LOOP" "$STATE/convert.ext4"
+    LOOP_ATTACHED=1
     mount -t ext4 "$LOOP" "$STATE/view"
+    VIEW_MOUNTED=1
     view=$STATE/view
     [ "$(cat "$view/etc/e5/device-profile")" = "$PROFILE" ] || fail 'rootfs profile mismatch'
     [ -x "$view/usr/bin/python3" ] || fail 'rootfs Python is required for local firmware conversion'
@@ -104,7 +92,9 @@ prepare_firmware() {
     echo "[TF] Hotspot / 热点：$E5_WIFI_SSID; key / 密码：$E5_WIFI_KEY"
     (cd "$view/tmp/e5-convert/firmware" && tar -cf "$STATE/firmware.tar" lib)
     umount "$view"
+    VIEW_MOUNTED=0
     losetup -d "$LOOP"
+    LOOP_ATTACHED=0
     LOOP=
     rm "$STATE/convert.ext4"
     E5_COLLECT_WORK="$STATE/collect" sh "$P/files/collect-device-files.sh" "$STATE/device-files.tar" "$STATE/firmware.tar"
@@ -158,6 +148,7 @@ write_root() {
     rm "$STATE/root.readback"
     sh "$P/files/android-tf.sh" grow "$part" "$P/files/ext4-tools.tar" "$STATE/ext4-tools"
     mount -t ext4 "$part" "$STATE/view"
+    VIEW_MOUNTED=1
     tar -xf "$STATE/device-files.tar" -C "$STATE/view"
     mkdir -p "$STATE/view/etc/e5"
     cp "$STATE/install.conf" "$STATE/view/etc/e5/install.conf"
@@ -170,14 +161,17 @@ write_root() {
     done
     sync
     umount "$STATE/view"
+    VIEW_MOUNTED=0
     blockdev --flushbufs "$part"
     mount -t ext4 -o ro,noload "$part" "$STATE/view"
+    VIEW_MOUNTED=1
     chroot "$STATE/view" /bin/busybox sha256sum -c < "$STATE/firmware.sha256" > "$STATE/root-check.log"
     for file in /sbin/init /opt/e5/android/vendor/bin/modem_control; do
         chroot "$STATE/view" /bin/busybox test -x "$file"
     done
     chroot "$STATE/view" /bin/busybox true
     umount "$STATE/view"
+    VIEW_MOUNTED=0
 }
 write_boot() {
     # Current Android A and NV are never written. Misc is committed only after
@@ -224,12 +218,14 @@ mkdir "$STATE/bin"
 export PATH="$STATE/bin:/system/bin:$PATH"
 heartbeat=
 LOOP=
+LOOP_ATTACHED=0
+VIEW_MOUNTED=0
 cleanup() {
     result=$?
     trap - EXIT HUP INT TERM
     [ -z "$heartbeat" ] || { kill "$heartbeat" 2>/dev/null || true; wait "$heartbeat" 2>/dev/null || true; }
-    if mountpoint -q "$STATE/view"; then umount "$STATE/view" || exit 1; fi
-    [ -z "$LOOP" ] || losetup -d "$LOOP" || exit 1
+    if [ "$VIEW_MOUNTED" = 1 ]; then umount "$STATE/view" || exit 1; fi
+    [ "$LOOP_ATTACHED" = 0 ] || losetup -d "$LOOP" || exit 1
     if [ "$result" = 0 ]; then
         rm -f "$STATE/device-files.tar" "$STATE/install.conf"
         rmdir "$lock"

@@ -39,7 +39,7 @@ class Entrypoints(unittest.TestCase):
 
     def source(self, path):
         path.mkdir()
-        for name in ('flash.py', 'flash.cmd', 'flash.sh', 'part-two-stage.py', 'userdata-image.sh',
+        for name in ('flash.py', 'flash.cmd', 'flash.sh', 'part-two-stage.py', 'userdata-image.sh', 'android-loop.sh',
                      'README.md', 'README.zh-CN.md', 'START-HERE.md'):
             shutil.copy2(TOP / 'openwrt/bundle' / name, path / name)
 
@@ -62,6 +62,7 @@ class Entrypoints(unittest.TestCase):
             self.assertFalse((package/'install-part.cmd').exists())
             self.assertTrue((package/'scripts/installer/part-two-stage.py').exists())
             self.assertTrue((package/'files/userdata-image.sh').exists())
+            self.assertTrue((package/'files/android-loop.sh').exists())
             self.assertTrue((package/'docs/README.zh-CN.md').exists())
             self.assertEqual({p.name for p in package.iterdir() if p.is_file()},
                              {'OpenWrt-Installer.py','START-HERE.md'})

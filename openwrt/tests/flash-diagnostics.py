@@ -21,6 +21,13 @@ spec.loader.exec_module(flash)
 
 
 class Diagnostics(unittest.TestCase):
+    def test_userdata_verification_uploads_loop_helper_before_running_worker(self):
+        with patch.object(flash,'push') as push,patch.object(flash,'su_checked') as execute:
+            flash.stage_userdata_image(2 << 30, 10 << 30)
+        self.assertEqual([call.args[2] for call in push.call_args_list],['android-loop.sh','userdata-image.sh'])
+        self.assertIn('/e5-android-loop.sh',push.call_args_list[0].args[1])
+        self.assertIn('2147483648 10737418240 2048 10240',execute.call_args.args[1])
+
     def test_part_mode_is_whole_and_separate_from_check(self):
         # an insertion once absorbed check()'s opening into install_part: the
         # armed slot-B state then failed the pre-install check after arming.
