@@ -113,7 +113,7 @@ Windows 双击 `launchers/install-to-internal-storage.cmd`，Linux/macOS 运行 
 * 屏幕：高级 → 系统 → 下次启动 Android；
 * 或 SSH 里：`e5-next-boot android && reboot`。
 
-从 Android 再回到 OpenWrt（不重装，设置都在，之后默认启动也恢复为 OpenWrt）：连上电脑运行
+从 Android 临时启动已安装的 OpenWrt（不重装、不挂载根分区、不改变默认启动设置）：连上电脑运行
 
 ```sh
 launchers/start-installer.cmd --boot-openwrt          (Windows；macOS / Linux：./launchers/start-installer.sh --boot-openwrt)
@@ -121,7 +121,9 @@ launchers/start-installer.cmd --boot-openwrt          (Windows；macOS / Linux�
 
 如果 OpenWrt 启动失败，设备会在两次尝试后自动回到 Android。
 
-`--boot-openwrt` 和 Magisk 切回模块也会先检查、同步启动链，再切槽重启。
+电脑安装器的 `--boot-openwrt` 只检查启动镜像和启动链，然后写入并回读 misc 的 32 字节启动控制块。
+不挂载／修复根文件系统，不写启动选择或默认启动标记，不同步启动链；默认启动策略仍由 OpenWrt 自己管理。
+独立的 Magisk 切回模块不是此电脑入口，不要混为一谈。
 本安装器仍要求 Android A、Linux B，不能在 Android B 下反向安装。
 TF 与 MU300 一样使用已有第一分区（无任何分区时才用整卡）的全部容量，不预留更新空间、不改 GPT。
 

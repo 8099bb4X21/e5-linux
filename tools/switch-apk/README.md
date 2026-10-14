@@ -1,73 +1,48 @@
-# e5-switch.apk — 点开就是对话框，一键把默认启动切成 OpenWrt
+# op系统切换器
 
-给 E5 / M8 / T551M（包名 `com.minikano.e5switch`）。**没有界面**：Activity 是透明的（`Theme.Translucent`），
-点桌面图标**直接弹出对话框**，没有任何自己的页面：
+适用于 E5、T551M、VIPME M8 的 Android A／OpenWrt B 安装布局，需要 root。
+APK 文件为 `op-system-switcher.apk`，包名保留 `com.minikano.e5switch`，可覆盖安装旧版。
 
-```
-   切换到 OpenWrt？
-   确认后设备下次启动进入 OpenWrt，并保持为默认系统。
-   Android 用户数据、分区表和 boot 镜像都不动。
-   [ 取消 ]        [ 回到 Android ]        [ 确认切换 ]
-```
+点开应用选择 OpenWrt 或 Android，确认后只设置下次启动，再选择是否立即重启。
+弹窗跟随系统深浅色，文字、按钮和背景使用明确配色。
 
-- **确认切换** → 写入 + 回读校验 → 报告写进去的块 → 问「现在重启？」（现在重启 / 稍后）。
-- **回到 Android** → 同一个对话框反过来（确认后回到 Android，OpenWrt 不删除）。
-- 取消 / 返回键 → 直接退出，什么都不做。
+## 切换范围
 
-## 它改哪三处（都要 root，Magisk）
+- 读取 misc、当前 Android 槽位，以及 B 槽启动镜像标识；拒绝不支持的槽位、无效控制块和错误 CRC。
+- 只修改 misc 偏移 2048 的 32 字节启动控制块并回读校验。
+- 不挂载 OpenWrt 分区或镜像，不写 `boot-os`、`default-boot`，不修复文件系统或同步启动链。
+- 不更改原有默认启动策略。需要永久默认启动时，进入 OpenWrt 后在网页／屏幕设置。
+- 临时文件只放 Android 的 `/data/local/tmp`，完成后删除。
+- OpenWrt 启动镜像存在不等于根文件系统完好；存储缺失或系统损坏仍可能启动失败并回退 Android。
 
-| 位置 | 作用 |
-|---|---|
-| `/data/e5linux/boot-os` | initramfs 选哪个系统（`part` / `android`） |
-| `/etc/e5linux/default-boot`（**e5root 里**） | `e5-boot-ok` 只在它是 `linux` 时才每次成功启动续期 B 槽 —— 这才是"永久"的来源 |
-| misc @2048，32 字节 | Unisoc LK 的 A/B 启动控制块（与厂商刷机工具 `spreadtrum_flash` 的 `set_active` 同布局） |
+旧版 `e5-switch.apk` 会读写挂载 e5root 来改变默认启动设置，请换成新版。
+本工具不能用于 MU300／F50／V50，其槽位和启动规则不同。
 
-启动控制块（`#pragma pack(1)`，32 字节）：
+## 安装
 
-```
-0..3   slot_suffix[4]     5f 62 00 00 = 0x5F + "_b"
-4..7   magic              42 43 41 42 "BCAB"
-8..10  version / nb_slot  01 02 00
-11     reserved
-12..19 slot_info[4] × 2B  priority:4 | tries:3 | successful:1  (+verity:1|reserved:7)
-20..27 reserved
-28..31 crc32_le           CRC32 over bytes 0..27
+三机型发布包包含 `extras/android/op-system-switcher.apk`，在 Android 中打开安装，
+首次使用时授予 root。也可在电脑上执行：
+
+```sh
+adb install -r op-system-switcher.apk
 ```
 
-切 OpenWrt：B 槽 `prio 15 / tries 2 / 未成功`，A 槽 `prio 14` 且保留 successful（可用回退）。
-回 Android：A 槽 `prio 15 / successful`，B 槽 `prio 14` 不可用（等于出厂状态）。
-`tries 2`（厂商用 6）是本项目一贯的取舍：只试一次，起不来让 LK 自己滚回 Android。
+## 构建与测试
 
-写 `/etc/e5linux/default-boot` 是尽力而为：老版本包装的系统里它是 `android`，mount 不上时结果弹窗会
-提醒"可能只生效一次"（那种情况用新版 `reinstall.cmd` 重装一次就对了）。
-
-## 编译
-
-需要 Android SDK（`ANDROID_HOME` 或 `/d/Android/Sdk`）+ JDK：
+Windows Git Bash，Android SDK + JDK：
 
 ```sh
 ./build.sh
 ```
 
-`aapt2` → `javac --release 8 -classpath android.jar` → `d8` → `zipalign` → `apksigner`。
-第 0 步先跑 `test/ArmedBlockTest.java`，把启动控制块的算法与仓库发布的
-`files/boot-misc-slot-b.bin`（`5f6200…9e002f…9bf8546d`）和出厂块（`5f6100…9f001e…0be17146`）
-逐字节对齐，算错就编不出 APK。
-
-签名密钥是 `debug.keystore`（与 build.sh 同目录，已 gitignore）；签名与校验用的路径都写成**相对路径**，
-Windows 下的 keytool/apksigner 不认 `/d/...` 这种 MSYS 路径，否则每次编译都会新生成钥匙、
-`adb install -r` 就会因签名不一致失败。
-
-产物：本目录下的 `e5-switch.apk`。
-
-## 安装与验证状态
+构建运行启动控制块 Java 测试，使用原有 debug.keystore 签名，并生成 APK 源码／二进制指纹。
+不要删除自己的 keystore，否则不能覆盖原来签名的安装。
+`openwrt/bundle/finalize-package.py` 校验指纹后才把 APK 加入发布包。
 
 ```sh
-adb install -r e5-switch.apk
+python3 test/test_switcher.py
 ```
 
-- **已在 M8（Android 13）验证**：点图标立刻弹出确认对话框（logcat `e5switch: ask slot=b`，
-  窗口是 `ty=APPLICATION fmt=TRANSLUCENT` 的对话框 + 一个 `fmt=TRANSPARENT` 的透明 Activity，
-  没有任何自己的界面）；取消/返回不写入任何东西。
-- 写入这三处的内容在 T551M 上由脚本手工跑通、与发布块逐字节一致；**app 里点"确认切换"这条
-  UI 路径还没在真机上点过**。
+测试检查深浅色文字／按钮对比度，并在 WSL 的临时普通文件上执行实际写入命令，
+核对只改 misc 的 32 字节、回读一致、临时文件清理、OpenWrt 根内容不变。
+构建与静态检查通过不代表已在真机验证每种厂商主题。

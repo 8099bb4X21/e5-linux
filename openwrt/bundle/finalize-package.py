@@ -21,8 +21,23 @@ def digest(path):
     return h.hexdigest()
 
 
+def add_android_switcher(package):
+    source = HERE.parents[1] / 'tools/switch-apk'
+    apk = source / 'op-system-switcher.apk'
+    metadata = json.loads((source / 'op-system-switcher.json').read_text(encoding='utf-8'))
+    files = [source / 'AndroidManifest.xml', *(source / 'src').rglob('*.java'), *(source / 'res').rglob('*')]
+    expected = {p.relative_to(source).as_posix(): hashlib.sha256(p.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+                for p in sorted(files) if p.is_file()}
+    if metadata != {'source': expected, 'binary_sha256': digest(apk)}:
+        raise ValueError('Android switcher APK is stale; rebuild tools/switch-apk/build.sh first')
+    android = package / 'extras/android'; android.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(apk, android / apk.name)
+    shutil.copy2(source / 'README.md', package / 'docs/ANDROID-SWITCHER.md')
+
+
 def finalize(package, profile, bootctl):
     package, bootctl = Path(package), Path(bootctl)
+    add_android_switcher(package)
     files = package / 'files'
     for name in ('OpenWrt-Installer.py', 'START-HERE.md', 'files/android-bootchain.sh',
                  'files/collect-device-files.sh', 'files/android-loop.sh', 'files/ext4-tools.tar', 'scripts/tools/sprd-bt-config.py',

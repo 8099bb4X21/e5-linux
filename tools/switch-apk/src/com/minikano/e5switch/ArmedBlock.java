@@ -55,6 +55,16 @@ public final class ArmedBlock {
         if (slot != 'a' && slot != 'b') {
             throw new IllegalArgumentException("slot must be a or b");
         }
+        if (current[4] != 'B' || current[5] != 'C' || current[6] != 'A' || current[7] != 'B'
+                || current[8] != 1 || (current[9] & 7) != 2) {
+            throw new IllegalArgumentException("启动控制块格式不正确，未切换。");
+        }
+        CRC32 previous = new CRC32(); previous.update(current, 0, 28);
+        long checksum = 0;
+        for (int i = 0; i < 4; i++) checksum |= (long) (current[28 + i] & 0xff) << (8 * i);
+        if (previous.getValue() != checksum) {
+            throw new IllegalArgumentException("启动控制块校验失败，未切换。");
+        }
         byte[] block = current.clone();
         block[1] = (byte) slot;
         if (slot == 'b') {

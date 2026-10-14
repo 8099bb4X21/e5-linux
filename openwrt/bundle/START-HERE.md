@@ -62,7 +62,7 @@ EXE 和 PY 提供同一套菜单；通常不需要进入 `launchers/`，更不�
 | 2 — 缩容 userdata 安装 | 不用 TF，安装独立内置系统 | 缩容 userdata；加密 data 必须重置 Android |
 | 3 — 覆盖重装已有内置系统 | 重装原 OpenWrt 分区 | 原 OpenWrt 系统及配置，不重新缩容 Android |
 | 4 — 继续加密 data 的两阶段安装 | 缩容重置 Android 后续装 | 写入已准备的 OpenWrt 分区，不重复缩容 |
-| 5 — 从 Android 切回已安装的 OpenWrt | 系统已经安装，只想切回 | 不重新安装或格式化，检查后切槽并重启 |
+| 5 — 从 Android 临时启动 OpenWrt | 系统已经安装，只想切回 | 仅修改 misc，检查后切槽并重启，不更改默认启动设置 |
 | 6 — 更新 OpenWrt | 设备运行 OpenWrt，更新并保留设置 | 替换系统与内核，先备份重要文件 |
 | 7 — userdata 镜像安装【实验性】 | 在未加密 userdata 内创建镜像 | 占用所选容量，保留旧镜像备份；可能损坏 Android F2FS |
 | 0 — 退出 | 取消操作 | 不执行安装 |
@@ -206,8 +206,13 @@ E5 安装器当前按 userdata 缩容规划，不承诺支持 MU300 安装器的
 - APN、上网 SIM、热点等可进网页或屏幕设置；流量与短信等在公共服务中同步。
 - 回 Android：使用屏幕的系统切换，或 SSH 执行 `e5-next-boot android && reboot`。
 - Android 切回已装 OpenWrt：电脑打开根目录 EXE／PY，选 **5**，核验后会重启。
-  安装器会检测独立 `e5root`、TF 根或 userdata 镜像，不能仅凭旧的启动选择文件判断是否已安装。
+  只校验 B 槽启动镜像和启动链，再修改 misc 的 32 字节启动控制块并回读。
+  不挂载或修复 OpenWrt 文件系统，不改启动选择文件、默认启动设置，也不自动同步启动链。
+  进入 OpenWrt 后沿用原有默认启动策略；需要永久默认启动时在 OpenWrt 网页／屏幕中设置。
   也可另装独立的 `e5-linux-switch` 小模块，通过其“操作”按钮切回。
+  Android APK：本包 `extras/android/op-system-switcher.apk`，应用名为 **op系统切换器**，
+  在 Android 中安装并授予 root 后即可选择系统。新版仅修改 misc，不挂载 OpenWrt 根分区，
+  不更改默认启动设置。可以覆盖同签名旧版应用；详情见 `docs/ANDROID-SWITCHER.md`。
 - 不要把完整固件 ZIP 反复装入 Magisk来切系统，那会重新部署并清空所选 TF 目标。
 - 试启动失败会回退 Android；回退不等于安装成功，应保存启动日志后排查。
 

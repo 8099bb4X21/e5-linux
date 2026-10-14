@@ -135,8 +135,8 @@ reinstalls or resizes of that partition run from the running OpenWrt:
 * On the panel: 高级 -> 系统 -> 下次启动 Android (Settings -> System -> Boot Android once);
 * or over SSH: `e5-next-boot android && reboot`.
 
-From Android back to OpenWrt, with nothing reinstalled (the settings stay,
-and OpenWrt is the default boot again): connect the E5 and run
+To temporarily boot installed OpenWrt from Android, without reinstalling,
+mounting its root filesystem or changing persistent defaults, connect and run
 
 ```sh
 launchers/start-installer.cmd --boot-openwrt          (Windows; macOS / Linux: ./launchers/start-installer.sh --boot-openwrt)
@@ -145,8 +145,11 @@ launchers/start-installer.cmd --boot-openwrt          (Windows; macOS / Linux: .
 A failed OpenWrt boot falls back to Android on its
 own after two tries.
 
-`--boot-openwrt` and the Magisk switch module check/synchronize the chain before
-switching slots and rebooting. Android A/Linux B remains required. The existing
+The desktop `--boot-openwrt` checks the installed boot image and boot chain, then
+writes and verifies only the 32-byte misc boot-control block. It never mounts or
+repairs a root filesystem, updates root selectors/defaults, or synchronizes the
+boot chain. OpenWrt retains its existing default-boot policy. The separate Magisk
+switch module is a different entry point. Android A/Linux B remains required. The existing
 first TF partition (or unpartitioned whole card) is used in full, without OTA
 reserve space. Reverse-slot installation is not supported.
 

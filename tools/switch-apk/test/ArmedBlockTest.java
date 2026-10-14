@@ -40,6 +40,14 @@ public class ArmedBlockTest {
         }
         check("octal escapes", ARMED_B, rebuilt.toString());
 
+        for (int offset : new int[] {4, 8, 9, 20, 28}) {
+            byte[] corrupt = stock.clone(); corrupt[offset] ^= 1;
+            try {
+                ArmedBlock.armed(corrupt, 'b');
+                throw new AssertionError("Accepted corrupt boot control at " + offset);
+            } catch (IllegalArgumentException expected) { }
+        }
+
         System.out.println("ArmedBlock: all checks passed");
     }
 

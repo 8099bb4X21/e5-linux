@@ -26,6 +26,17 @@ firmware = runpy.run_path(str(BUNDLE / 'magisk-firmware.py'))
 
 
 class Package(unittest.TestCase):
+    def test_switcher_apk_is_in_extras_and_stale_apk_is_rejected(self):
+        add = finish['add_android_switcher']
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); (root / 'docs').mkdir()
+            add(root)
+            self.assertEqual((root / 'extras/android/op-system-switcher.apk').read_bytes(),
+                             (TOP / 'tools/switch-apk/op-system-switcher.apk').read_bytes())
+            self.assertTrue((root / 'docs/ANDROID-SWITCHER.md').is_file())
+            with patch.dict(add.__globals__, {'digest': lambda path: 'tampered'}):
+                with self.assertRaisesRegex(ValueError, 'APK is stale'): add(root)
+
     def fixture(self, root, profile):
         source = root / 'source'; source.mkdir()
         for name in ('flash.py', 'part-two-stage.py', 'userdata-image.sh', 'android-loop.sh', 'README.md', 'README.zh-CN.md', 'START-HERE.md'):

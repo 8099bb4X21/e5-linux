@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build e5-switch.apk with the SDK's own tools, no Gradle:
+# Build op-system-switcher.apk with the SDK's own tools, no Gradle:
 #   aapt2 compile/link -> javac -> d8 -> zipalign -> apksigner
 #
 #   ./build.sh                 uses ANDROID_HOME, or the SDK at /d/Android/Sdk
@@ -38,6 +38,7 @@ mkdir -p build/gen build/classes build/dex
 echo "== 0/6 boot control block test"
 javac -nowarn -d build/test src/com/minikano/e5switch/ArmedBlock.java test/ArmedBlockTest.java
 java -cp build/test ArmedBlockTest
+python test/test_switcher.py
 
 echo "== 1/6 resources"
 "$AAPT2" compile --dir res -o build/res.zip
@@ -80,10 +81,20 @@ if [ ! -f "$KS" ]; then
 fi
 "$APKSIGNER" sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
     --v1-signing-enabled true --v2-signing-enabled true --v4-signing-enabled false \
-    --out e5-switch.apk build/aligned.apk
+    --out op-system-switcher.apk build/aligned.apk
 
-"$APKSIGNER" verify --print-certs e5-switch.apk | head -3
-"$AAPT2" dump badging e5-switch.apk \
+"$APKSIGNER" verify --print-certs op-system-switcher.apk | head -3
+"$AAPT2" dump badging op-system-switcher.apk \
     | grep -E "^package:|^application-label:|^launchable-activity:|^sdkVersion:|^targetSdkVersion:" | head -5
-echo "APK: $HERE/e5-switch.apk"
-echo "安装 / install: adb install -r e5-switch.apk"
+echo "APK: $HERE/op-system-switcher.apk"
+echo "安装 / install: adb install -r op-system-switcher.apk"
+python - <<'PY'
+import hashlib, json
+from pathlib import Path
+files = [Path('AndroidManifest.xml'), *Path('src').rglob('*.java'), *Path('res').rglob('*')]
+sources = {p.as_posix(): hashlib.sha256(p.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+           for p in sorted(files) if p.is_file()}
+Path('op-system-switcher.json').write_text(json.dumps({
+    'source': sources, 'binary_sha256': hashlib.sha256(Path('op-system-switcher.apk').read_bytes()).hexdigest()
+}, indent=2) + '\n', encoding='utf-8')
+PY

@@ -515,7 +515,7 @@ OpenWrt Installer / 安装助手
   2. Install to internal storage / 缩容 userdata 安装
   3. Reinstall internal system / 覆盖重装已有内置系统
   4. Resume internal installation / 继续加密 data 的两阶段安装
-  5. Switch to OpenWrt / 从 Android 切回已安装的 OpenWrt
+  5. Boot OpenWrt once / 从 Android 临时启动已安装的 OpenWrt（仅修改 misc）
   6. Update OpenWrt / 更新已运行的 OpenWrt
   7. Install to userdata image [EXPERIMENTAL] / userdata 镜像安装【实验性：可能损坏 Android F2FS，仅未加密 data】
   0. Exit / 退出
@@ -1161,96 +1161,24 @@ def check(a):
     say('检查完成，未修改分区 / checked; no partitions changed (temporary staging files only)')
 
 
-def installed_openwrt():
-    # A prepared/empty e5root is not an installed system. Read marked roots
-    # without journal replay, and do not trust an obsolete userdata selector.
-    result = su_checked('识别已安装的系统 / locating installed OpenWrt', f'''
-probe=$(mktemp -d {TMP}/e5-root-probe.XXXXXX) || exit 1
-mounted=0
-cleanup() {{
-    if [ "$mounted" = 1 ]; then umount "$probe" || return 1; fi
-    rmdir "$probe"
-}}
-trap cleanup EXIT
-trap "exit 1" HUP INT TERM
-check_root() {{
-    dev=$1; marker=$2
-    [ -b "$dev" ] || return 1
-    mount -t ext4 -o ro,noload "$dev" "$probe" >/dev/null 2>&1 || return 1
-    mounted=1; found=0
-    if [ -x "$probe/sbin/init" ] && [ -f "$probe/etc/openwrt_release" ] &&
-       [ -f "$probe/etc/e5/$marker" ]; then found=1; fi
-    umount "$probe" || exit 1
-    mounted=0
-    [ "$found" = 1 ]
-}}
-data_dev=$(readlink -f /dev/block/by-name/userdata)
-emmc=${{data_dev##*/}}; emmc=${{emmc%p*}}
-case "$emmc" in mmcblk[0-9]*) ;; *) echo "Cannot identify internal storage" >&2; exit 1 ;; esac
-check_part() {{
-    for u in /sys/class/block/${{emmc}}p*/uevent; do
-        grep -qx PARTNAME=e5root "$u" 2>/dev/null || continue
-        n=${{u%/uevent}}; n=${{n##*/}}
-        check_root "/dev/block/$n" part-root && return 0
-    done
-    return 1
-}}
-check_sd() {{
-    for d in /sys/class/block/mmcblk*; do
-        n=${{d##*/}}
-        case "$n" in *p[0-9]*|*boot*|"$emmc") continue ;; esac
-        for card in /dev/block/$n /dev/block/${{n}}p*; do
-            check_root "$card" sd-root && return 0
-        done
-    done
-    return 1
-}}
-preferred=$(cat {D}/boot-os 2>/dev/null || true)
-seen=
-for target in "$preferred" part sd openwrt; do
-    case " $seen " in *" $target "*) continue ;; esac
-    seen="$seen $target"
-    case "$target" in
-        part) check_part || continue ;;
-        sd) check_sd || continue ;;
-        openwrt) [ -s {D}/openwrt.ext4 ] || continue ;;
-        *) continue ;;
-    esac
-    echo "E5-INSTALLED-ROOT=$target"
-    exit 0
-done
-echo E5-INSTALLED-ROOT=none
-''')
-    targets = re.findall(r'^E5-INSTALLED-ROOT=(part|sd|openwrt|none)$', result, re.M)
-    if len(targets) != 1:
-        die('installed-system detection did not complete / 已安装系统检测未正常完成')
-    return None if targets[0] == 'none' else targets[0]
-
-
 def boot_openwrt(a):
     steps(2)
     find_adb()
     android_checks()
     bj = boot_json()
-    target = installed_openwrt()
-    if target is None:
-        die('No readable installed OpenWrt was found in the internal partition, TF card or userdata image; '
-            'check the storage and installation / 未找到可读取的 OpenWrt，请检查独立分区、TF 卡或镜像')
     mb = bj['persist_log_offset'] // 1048576
     head = su(f'dd if=/dev/block/by-name/boot_b bs=1048576 count={mb} 2>/dev/null | sha256sum').split()[0:1]
     if head != [bj['sha256_head56m']]:
         # Resume/reinstall adds a verified command-line override. Accept only
         # that exact package-derived variant, never an arbitrary Linux image.
-        if target != 'part' or head != [part_boot_head(bj)]:
+        if head != [part_boot_head(bj)]:
             die('boot_b holds another boot image: use the package it was flashed with, or a first install')
-    bootchain('sync')
-    # OpenWrt the default again, not only for this boot (the screen's "boot
-    # Android" made Android the default); /etc/init.d/e5-boot-ok takes it
-    su_checked('保存启动目标 / saving the installed system selection',
-               f'mkdir -p {D}; rm -f {D}/boot-os-next; '
-               f'echo {target} > {D}/boot-os; echo linux > {D}/openwrt-default-boot; sync')
+    # Switching is a trial, not an install or a default-boot transaction.
+    # Check the boot chain without syncing it; never mount/probe a root or
+    # update its selectors/default markers from Android.
+    bootchain('check')
     arm_slot_b()
-    say('正在重启进 OpenWrt / rebooting into OpenWrt')
+    say('正在临时启动 OpenWrt（未更改默认设置）/ booting OpenWrt without changing defaults')
     adb('reboot')
 
 
