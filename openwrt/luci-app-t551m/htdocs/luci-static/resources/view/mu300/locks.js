@@ -44,20 +44,20 @@ return view.extend({
   <div class="mud-ctl" style="margin-top:7px;max-width:340px">
     <button class="mud-btn" id="mud-lock-auto-apply">开机自动应用</button>
   </div>
-  <div class="mud-note">关闭后只停止下次开机回放，已保存的网络、IMS、VoLTE 和 VoNR 设置不会被删除。</div>
+  <div class="mud-note">关闭后只停止下次开机回放，已保存的网络、VoLTE 和 VoNR 设置不会被删除。</div>
 </div>
 
 <div class="mud-sec">
-  <h3>IMS · VoLTE · VoNR</h3>
-  <div class="mud-note">IMS 为总开关，VoLTE 用于 4G 通话，VoNR 用于 5G SA 通话。设置按当前查看的 SIM 保存，并跟随“开机自动应用”。</div>
-  ${['ims','volte','vonr'].map(function(kind) {
-    var name = {ims:'IMS',volte:'VoLTE',vonr:'VoNR'}[kind];
-    return '<div class="mud-r"><span class="mud-k">'+name+'</span><span class="mud-v" id="mud-lock-'+kind+'-state">--</span></div>'+
-      '<div class="mud-ctl" style="max-width:340px;margin:7px 0 12px;grid-template-columns:1fr 1fr">'+
-      '<button class="mud-btn" data-voice="'+kind+'" data-enabled="on">开启</button>'+
-      '<button class="mud-btn" data-voice="'+kind+'" data-enabled="off">关闭</button></div>';
+  <h3>VoLTE · VoNR</h3>
+  <div class="mud-note">VoLTE 用于 4G 通话，VoNR 用于 5G SA 通话。设置按当前查看的 SIM 保存，并跟随“开机自动应用”。</div>
+  ${['volte','vonr'].map(function(kind) {
+    var name = {volte:'VoLTE',vonr:'VoNR'}[kind];
+    return '<div class="mud-r mud-voice-row"><span class="mud-k">'+name+'</span>'+
+      '<span class="mud-v" id="mud-lock-'+kind+'-state">--</span>'+
+      '<button type="button" class="mud-btn mud-voice-switch" data-voice="'+kind+'" role="switch" aria-label="'+name+'" aria-checked="false" disabled>'+
+      '<span class="mud-voice-track" aria-hidden="true"></span></button></div>';
   }).join('')}
-  <div class="mud-note">关闭 IMS 不等于屏蔽全部来电和短信，传统网络业务仍可能到达。</div>
+  <div class="mud-note">关闭 VoLTE 或 VoNR 不等于屏蔽全部来电和短信，传统网络业务仍可能到达。</div>
 </div>
 
 <div class="mud-sec">
@@ -113,10 +113,15 @@ return view.extend({
 		/* 主题化确认框替代浏览器 confirm；确认后再进入实际执行 */
 		var apply = function(kind, val, what, opts) {
 			opts = opts || {};
+			var slot = M.simSlot();
 			M.confirmBox('应用「' + what + '」？',
 				opts.noSfun ? '' : '蜂窝连接会重新建立，蜂窝断开约半分钟。',
 				{ danger: !opts.noSfun, okText: '应用' })
-				.then(function(go) { if (go) applyNow(kind, val, what, opts); });
+				.then(function(go) {
+					if (!go || self._disposed) return;
+					if (M.simSlot() !== slot) { self.note('查看卡槽已改变，请重新确认操作', 'info'); return; }
+					applyNow(kind, val, what, opts);
+				});
 		};
 		var applyNow = function(kind, val, what, opts) {
 			if (self._applying) { self.note('请等待当前操作完成', 'info'); return; }
@@ -173,8 +178,10 @@ return view.extend({
 		};
 		root.querySelectorAll('[data-voice]').forEach(function(btn) {
 			btn.onclick = function() {
-				var kind = btn.dataset.voice, val = btn.dataset.enabled;
-				var name = {ims:'IMS',volte:'VoLTE',vonr:'VoNR'}[kind];
+				var kind = btn.dataset.voice, state = (self.lastLock || {})[kind];
+				if (self._applying || btn.disabled || !state || typeof state.enabled !== 'boolean') return;
+				var val = state.enabled ? 'off' : 'on';
+				var name = {volte:'VoLTE',vonr:'VoNR'}[kind];
 				apply(kind, val, M.translate(val === 'on' ? '开启' : '关闭')+' '+name,
 					{btn:btn,noSfun:true});
 			};
@@ -365,7 +372,10 @@ return view.extend({
 		}).catch(function(error) {
 			self.note('应用失败：' + (error.message || error), 'error');
 			self.refresh();
-		}).then(function() { self._applying = false; M.busy(btn, false); });
+		}).then(function() {
+			self._applying = false; M.busy(btn, false);
+			if (!self._disposed) self.paintVoiceSwitches(self.lastLock || {});
+		});
 	},
 	refreshSoon: function() {
 		var self = this;
@@ -390,10 +400,28 @@ return view.extend({
 		});
 	},
 
+	paintVoiceSwitches: function(l) {
+		var self = this;
+		['volte','vonr'].forEach(function(kind) {
+			var state = l[kind] || {}, known = typeof state.enabled === 'boolean';
+			var text = M.translate(known ? (state.enabled ? '已开启' : '已关闭') : '状态暂不可读，请刷新后重试');
+			var status = self.Q('lock-'+kind+'-state');
+			if (status) status.textContent = text;
+			var box = self._root;
+			if (box) box.querySelectorAll('[data-voice="'+kind+'"]').forEach(function(btn) {
+				btn.className = 'mud-btn mud-voice-switch'+(known && state.enabled ? ' on' : '');
+				btn.setAttribute('aria-checked', String(known && state.enabled));
+				btn.setAttribute('aria-label', kind === 'volte' ? 'VoLTE' : 'VoNR');
+				btn.disabled = !!self._applying || !known;
+			});
+		});
+	},
+
 	paint: function() {
 		var l = this.lastLock || {};
 		var self = this;
 		this.loading('lock', false, l.error || (!l.mode ? '锁定状态读取失败，请刷新' : null));
+		this.paintVoiceSwitches(l);
 		var setR = function(id, txt) { var e = self.Q(id); if (e) e.textContent = (txt == null || txt === '') ? '--' : txt; };
 		if (l.error) { setR('lock-nrline', l.error); setR('lock-lteline', ''); return; }
 		var MODE_TXT = { auto: '自动（5G/4G）', '4g': '仅 4G', sa: '仅 5G SA', nsa: '仅 5G NSA' };
@@ -405,19 +433,6 @@ return view.extend({
 		if (eb) { eb.className = 'mud-btn' + (l.endc === '1' ? ' on' : ''); eb.textContent = l.endc === '1' ? 'EN-DC' : 'EN-DC'; }
 		var ab = this.Q('lock-auto-apply'), autoApply = l.auto_apply !== 0;
 		if (ab) { ab.className = 'mud-btn' + (autoApply ? ' on' : ''); ab.textContent = M.translate(autoApply ? '开机自动应用 ✓' : '开机自动应用'); }
-		['ims','volte','vonr'].forEach(function(kind) {
-			var state = l[kind] || {}, known = typeof state.enabled === 'boolean';
-			var text = M.translate(known ? (state.enabled ? '已开启' : '已关闭') : '状态暂不可读，请选择开启或关闭');
-			if (state.source === 'acknowledged') text += ' · '+M.translate('本次已应用');
-			setR('lock-'+kind+'-state', text);
-			var box = self._root;
-			if (box) box.querySelectorAll('[data-voice="'+kind+'"]').forEach(function(btn) {
-				var selected = known && state.enabled === (btn.dataset.enabled === 'on');
-				btn.className = 'mud-btn'+(selected ? ' on' : '');
-				btn.setAttribute('aria-pressed', String(selected));
-				btn.disabled = !!self._applying || selected;
-			});
-		});
 
 		/* NR 来自模组能力列表；LTE 使用平台配置，避免显示固件不接受的频段。 */
 		var caps = l.caps || {};

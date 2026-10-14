@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run packaged launchers and menu choices without ADB or disk operations."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,22 @@ flash = importlib.util.module_from_spec(spec); spec.loader.exec_module(flash)
 
 
 class Entrypoints(unittest.TestCase):
+    def test_userdata_image_menu_explicitly_warns_about_f2fs(self):
+        a=SimpleNamespace()
+        with patch.object(flash,'ask',return_value='7'), patch.object(sys,'stdout',io.StringIO()) as output:
+            self.assertTrue(flash.choose_install_action(a))
+        self.assertTrue(a.data)
+        self.assertIn('EXPERIMENTAL',output.getvalue())
+        self.assertIn('Android F2FS',output.getvalue())
+
+    def test_full_partition_is_default_but_explicit_no_remains_available(self):
+        for answer,expected in [('',1),('yes',1),('y',1),('no',0),('n',0)]:
+            with self.subTest(answer=answer), patch('builtins.input',return_value=answer):
+                self.assertEqual(flash.part_growth(SimpleNamespace(grow_fs=None,y=False)),expected)
+        for value,unattended,expected in [(None,True,1),(True,False,1),(False,False,0),(False,True,0)]:
+            with patch('builtins.input',side_effect=AssertionError('unnecessary prompt')):
+                self.assertEqual(flash.part_growth(SimpleNamespace(grow_fs=value,y=unattended)),expected)
+
     def source(self, path):
         path.mkdir()
         for name in ('flash.py', 'flash.cmd', 'flash.sh', 'part-two-stage.py', 'userdata-image.sh',

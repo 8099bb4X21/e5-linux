@@ -1,3 +1,5 @@
+Detailed user guide: open **START-HERE.md** in the package root. Start **OpenWrt-Installer.exe** or **OpenWrt-Installer.py** and select the menu action.
+
 # OpenWrt for E5 / T551M / VIPME M8 -- one-click flash package
 
 The complete ZIP supports native Magisk TF deployment and extraction for desktop installation.
@@ -119,7 +121,7 @@ What it does:
 `launchers/install-to-internal-storage.cmd` (Windows) or `bash launchers/install-to-internal-storage.sh` installs OpenWrt onto a
 partition of the phone's own storage: it shows the partition size range and
 asks for one (default: the image plus 1 GiB), then whether the system should
-**use the whole partition** (default: no, the image's own ~2 GiB allocation),
+**use the whole partition** (default: yes; choose no to retain the image's ~2 GiB allocation),
 then asks **three times** before staging anything. On the next boot the boot image shrinks userdata by that
 much, creates the `e5root` partition and writes OpenWrt into it; userdata is
 not formatted and Android keeps its files. The first boot is a trial: one that
@@ -175,8 +177,8 @@ launchers/start-installer.cmd --resume-part "backups/part-DATE-ID/transaction.js
 
 Do not repeat stage one. Backups contain device images and hotspot settings;
 keep them private. Unattended erasure requires `--part --format-userdata -y`.
-Use `--grow-fs` (or select full allocation interactively) to use the allocated
-partition capacity. Filesystem growth is offline and size-verified; a failed
+The filesystem fills the allocated partition capacity by default; use
+`--no-grow-fs` only to retain the initial image size. Growth is offline and size-verified; a failed
 resize is no longer reported as a successful installation. Progress is shown
 every two seconds, with actual bytes during image writing and elapsed time
 during filesystem checks/migration. Rebuild old packages before using this path.

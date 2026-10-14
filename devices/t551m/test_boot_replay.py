@@ -62,7 +62,7 @@ class BootReplay(unittest.TestCase):
     def test_voice_only_saved_setting_starts_pre_dial_replay(self):
         (self.state/'mode').unlink()
         (self.state/'sim1').mkdir()
-        for kind in ('ims', 'volte', 'vonr'):
+        for kind in ('volte', 'vonr'):
             with self.subTest(kind=kind):
                 path = self.state/'sim1'/kind;path.write_text('off')
                 attempt = Path(self.env['UNISOC_REPLAY_MARKER']+'-attempted')
@@ -72,6 +72,14 @@ class BootReplay(unittest.TestCase):
                 self.assertEqual(self.run_boot('early').returncode,0)
                 self.assertIn('lock:replay early',self.trace.read_text())
                 path.unlink()
+
+    def test_removed_ims_alone_never_starts_replay(self):
+        (self.state/'mode').unlink()
+        (self.state/'ims').write_text('off')
+        (self.state/'sim1').mkdir()
+        (self.state/'sim1/ims').write_text('on')
+        self.assertEqual(self.run_boot('early').returncode, 0)
+        self.assertFalse(self.trace.exists())
 
     def test_migrated_legacy_settings_do_not_override_disabled_slots(self):
         (self.state/'.per-sim-migrated').touch()

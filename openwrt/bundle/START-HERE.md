@@ -48,19 +48,30 @@ backups/                   电脑安装时自动生成的备份、续装记录�
 
 ## 3. 选哪一种方式
 
-| 需求 | 推荐入口 | 会清除什么 |
-| --- | --- | --- |
-| 不用电脑，装在 TF 卡上 | Magisk → 模块 → 从本地安装完整 ZIP | 整张 TF 卡 |
-| 用电脑装 TF 卡，可指定热点与 APN | `launchers/install-to-tf-card.cmd` / `.sh` | 整张 TF 卡 |
-| 不用 TF，装独立内置系统 | `launchers/install-to-internal-storage.cmd` / `.sh` | 缩容 userdata；加密 data 必须重置 Android |
-| 保留分区表，重装已有内置 OpenWrt | `launchers/reinstall-internal-system.cmd` / `.sh` | 原 OpenWrt 系统及配置，不清 Android userdata |
-| 加密 data 缩容重置后继续安装 | `launchers/resume-internal-install.cmd` / `.sh` | 写入已准备的 OpenWrt 分区，不重复缩容 |
-| 使用 userdata 里的镜像文件 | `launchers/install-to-userdata-image.cmd` / `.sh` | 新建镜像；旧镜像保留备份，需要额外空间 |
-| 已安装系统，只升级并保留设置 | `launchers/update-openwrt.cmd` / `.sh` | 由更新器替换系统；先自行备份重要设置 |
-| Android 切回已经安装的 OpenWrt | `launchers/switch-to-openwrt.cmd` / `.sh` | 不重新安装；核验后切槽并重启 |
-| 不确定，先看菜单 | `OpenWrt-Installer.exe` 或 `launchers/start-installer.cmd` / `.sh` | 选择并确认具体操作前不执行安装 |
+先运行根目录的 **`OpenWrt-Installer.exe`**，或在解压目录运行：
 
-Windows 用 `.cmd`，Linux/macOS 用 `.sh`。以下命令均从解压目录运行。
+```sh
+python3 OpenWrt-Installer.py
+```
+
+EXE 和 PY 提供同一套菜单；通常不需要进入 `launchers/`，更不要手动运行 `files/`、`scripts/` 内部脚本。
+
+| 菜单 | 什么时候选 | 会清除什么 |
+| --- | --- | --- |
+| 1 — TF 卡首次安装 | 有可清空的 TF 卡 | 清空第一分区；无分区时清空整卡 |
+| 2 — 缩容 userdata 安装 | 不用 TF，安装独立内置系统 | 缩容 userdata；加密 data 必须重置 Android |
+| 3 — 覆盖重装已有内置系统 | 重装原 OpenWrt 分区 | 原 OpenWrt 系统及配置，不重新缩容 Android |
+| 4 — 继续加密 data 的两阶段安装 | 缩容重置 Android 后续装 | 写入已准备的 OpenWrt 分区，不重复缩容 |
+| 5 — 从 Android 切回已安装的 OpenWrt | 系统已经安装，只想切回 | 不重新安装或格式化，检查后切槽并重启 |
+| 6 — 更新 OpenWrt | 设备运行 OpenWrt，更新并保留设置 | 替换系统与内核，先备份重要文件 |
+| 7 — userdata 镜像安装【实验性】 | 在未加密 userdata 内创建镜像 | 占用所选容量，保留旧镜像备份；可能损坏 Android F2FS |
+| 0 — 退出 | 取消操作 | 不执行安装 |
+
+**菜单 7 是实验性功能：userdata 镜像模式可能破坏 Android 的 F2FS 文件系统。**
+通常选择 TF 或独立内置分区；即使 userdata 未加密，也不能把镜像方式视为同等可靠。
+Experimental: userdata-image installation may damage Android's F2FS filesystem.
+
+`launchers/` 只是可选的快捷入口，不是另一套安装流程。下面均以根目录主安装器为准。
 
 ## 4. 在 Magisk 内部署 TF 卡
 
@@ -128,11 +139,7 @@ python3 OpenWrt-Installer.py --verify-package
 
 ### TF 首次安装
 
-运行 `launchers/install-to-tf-card.cmd`，或：
-
-```sh
-sh launchers/install-to-tf-card.sh
-```
+打开根目录 EXE／PY，选 **1**；命令行也可运行 `OpenWrt-Installer.exe --tf` 或 `python3 OpenWrt-Installer.py --tf`。
 
 按提示设置 APN、热点名和密码，确认清卡。提取与上传本机固件通过后才释放卡、写入所选目标。
 与 Magisk 入口一样，只清空所选目标并使用其全部容量，不重建分区表，也不预留 TF 更新空间。目标内的原文件不会保留；其他分区不写入。
@@ -140,15 +147,19 @@ sh launchers/install-to-tf-card.sh
 
 ### 内置独立分区：未加密 data
 
-运行 `launchers/install-to-internal-storage.cmd` 或对应 `.sh`。
-选择分区大小；若希望系统实际使用全部所选容量，需要明确选择扩满文件系统，或传入 `--grow-fs`：
+打开根目录 EXE／PY，选 **2**，选择分区大小。
+“完全使用空间”默认 **yes**，直接回车即可扩满所选分区；初始镜像约 2 GiB 不是最终容量。
+例如分配并使用完整 10 GiB：
 
 ```powershell
-.\OpenWrt-Installer.exe --part --part-size 10 --grow-fs
+.\OpenWrt-Installer.exe --part --part-size 10
 ```
 
-保数据流程会离线缩小 userdata、创建 `e5root` 并写入系统。离线阶段可能持续数分钟，
-屏幕显示阶段与耗时；不要因暂时没有百分比就强制重启。
+只有明确选择 no，或传入 `--no-grow-fs`，才保留初始镜像的文件系统容量。
+保数据流程会离线缩小 userdata、创建 `e5root` 并写入系统。
+**第一次开机正在执行缩容安装，通常需要数分钟，数据多或闪存慢时可能更久。**
+屏幕显示阶段与耗时；不要因暂时没有桌面或百分比就强制重启，保持供电。
+**缩容安装完成后会自动重启一次，再进入 OpenWrt。**
 该流程涉及分区表和文件系统修改，重要数据仍应提前备份。
 E5 安装器当前按 userdata 缩容规划，不承诺支持 MU300 安装器的 GPT 空洞优先分配流程。
 
@@ -157,10 +168,10 @@ E5 安装器当前按 userdata 缩容规划，不承诺支持 MU300 安装器的
 加密 data 不能由 initramfs 直接解密，不能走保数据缩容。脚本会要求明确同意清空 userdata：
 
 1. 电脑保存设备身份、分区计划、原 boot、GPT 和 misc 等备份。
-2. 刷入准备启动镜像并重启，在未挂载 data 的环境下调整分区。
-3. 进入原厂 recovery，由原厂完成 userdata 清空和加密初始化；必要时在机器上确认恢复出厂。
+2. 刷入准备启动镜像并重启，在未挂载 data 的环境下调整分区；首次离线缩容通常需数分钟，期间不要断电。
+3. 缩容完成后自动重启进入原厂 recovery，由原厂清空 userdata 并初始化加密；必要时在机器上确认恢复出厂，期间可能另外重启。
 4. 回到全新 Android，完成初始设置、打开 USB 调试、重新授权电脑并恢复 root/Shell 授权。
-5. 原安装器可继续等待；也可稍后运行续装入口并选择原 `transaction.json`。
+5. 原安装器可继续等待；也可重新打开根目录 EXE／PY，选 **4** 并提供原 `transaction.json`。
 6. 核验设备身份、分区边界、准备标记和系统载荷后，写入已准备的独立分区，最后写 boot、切槽。
 
 ```powershell
@@ -174,7 +185,7 @@ E5 安装器当前按 userdata 缩容规划，不承诺支持 MU300 安装器的
 
 ### userdata 镜像文件
 
-运行 `launchers/install-to-userdata-image.cmd` 或对应 `.sh`。
+**实验性：可能破坏 Android F2FS。** 打开根目录 EXE／PY，选 **7**，或使用下面的 `--data` 参数。
 仅适用于 OpenWrt 启动时可直接读取的**未加密 userdata**。
 程序按当前空闲空间给出范围，可以输入例如 `4`、`6.5`、`10` GiB：
 
@@ -194,20 +205,21 @@ E5 安装器当前按 userdata 缩容规划，不承诺支持 MU300 安装器的
 - 用安装输出里的热点名称/密码连接，或通过 USB 网络访问。电脑端网卡被禁用时需用户自行启用。
 - APN、上网 SIM、热点等可进网页或屏幕设置；流量与短信等在公共服务中同步。
 - 回 Android：使用屏幕的系统切换，或 SSH 执行 `e5-next-boot android && reboot`。
-- Android 切回已装 OpenWrt：电脑运行 `launchers/switch-to-openwrt`，核验后会重启。
+- Android 切回已装 OpenWrt：电脑打开根目录 EXE／PY，选 **5**，核验后会重启。
+  安装器会检测独立 `e5root`、TF 根或 userdata 镜像，不能仅凭旧的启动选择文件判断是否已安装。
   也可另装独立的 `e5-linux-switch` 小模块，通过其“操作”按钮切回。
 - 不要把完整固件 ZIP 反复装入 Magisk来切系统，那会重新部署并清空所选 TF 目标。
 - 试启动失败会回退 Android；回退不等于安装成功，应保存启动日志后排查。
 
 ## 7. 更新与重装的区别
 
-**更新**：设备正在运行 OpenWrt，电脑能访问其 USB 网络时运行 `launchers/update-openwrt`。
+**更新**：设备正在运行 OpenWrt，电脑能访问其 USB 网络时打开根目录 EXE／PY，选 **6**。
 安装器通过 SSH 主动上传，同一机型包才允许更新；保留设置，更新根与内核。TF 更新也统一使用这个电脑入口：重启进入 initramfs，将载荷校验并复制到内存，卸载根后更新原分区，扩回原容量并恢复配置和本机固件。
 不新建分区，不修改 GPT，不占用额外 OTA 空间。自行安装的软件包及未列入配置备份的其他文件不迁移，重要资料请自行备份。
 单根系统没有另一份 TF 根分区可自动回退，写入期间须保持供电。旧版多根卡仍能启动，更新只改当前根；不会自动合并旧分区。
 它不是 Android OTA，也不是 LuCI 的通用 sysupgrade 固件；不要把本 ZIP 直接交给 sysupgrade。
 
-**重装独立分区**：Android 中运行 `launchers/reinstall-internal-system`，
+**重装独立分区**：设备运行 Android 时打开电脑根目录 EXE／PY，选 **3**，
 只覆盖已有 `e5root` 与 boot_b，不重新缩容或重建 userdata；OpenWrt 原系统及配置会被替换。
 这是覆盖重装，不是保留设置升级。
 

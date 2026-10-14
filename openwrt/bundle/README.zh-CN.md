@@ -1,3 +1,5 @@
+详细使用流程请先看根目录 **START-HERE.md**，运行根目录 **OpenWrt-Installer.exe** 或 **OpenWrt-Installer.py** 后选择菜单。
+
 # OpenWrt 一键刷入包（E5 / T551M / VIPME M8）
 
 新版完整 ZIP 同时支持 Magisk 内首次部署 TF 卡和电脑解压自定义安装。**详细使用指南位于安装包顶层 `START-HERE.md`**。
@@ -94,7 +96,7 @@ Magisk 内刷入完整固件会清空所选 TF 目标（第一分区，无分区
 
 Windows 双击 `launchers/install-to-internal-storage.cmd`，Linux/macOS 运行 `bash launchers/install-to-internal-storage.sh`。
 脚本显示分区大小范围并让你输入（默认：镜像大小 + 1 GiB），再问是否**完全使用空间**把根
-文件系统扩满整个分区（默认否：按镜像约 2 GiB 分配），随后**确认三次**才开始落位。
+文件系统扩满整个分区（默认 yes：扩满所选分区，明确选 no 才保留镜像约 2 GiB 容量），随后**确认三次**才开始落位。
 下次启动由引导镜像完成三件事：把 userdata 缩到所选大小、建立 `e5root` 分区、把 OpenWrt
 写入其中——不格式化 userdata，Android 的文件保留。首次启动是试启动，起不来会自动回退。
 回 Android：屏幕或 shell 里 `e5-next-boot android`，或删掉 `/data/e5linux/boot-os` 后重启。

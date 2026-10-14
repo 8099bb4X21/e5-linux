@@ -5,8 +5,7 @@
   OpenWrt-Installer --tf    first install onto the **SD card**, from rooted
                             Android over adb: the first partition (or raw card) is
                             formatted and fully used for OpenWrt
-  OpenWrt-Installer --data  the same onto the phone's storage (userdata), the
-                            form before the SD card; it asks three times
+  OpenWrt-Installer --data  EXPERIMENTAL userdata image; may damage Android F2FS
   OpenWrt-Installer --part  first install onto an internal eMMC partition,
                             without an SD card: the next boot shrinks userdata,
                             creates the partition and writes OpenWrt into it
@@ -518,7 +517,7 @@ OpenWrt Installer / 安装助手
   4. Resume internal installation / 继续加密 data 的两阶段安装
   5. Switch to OpenWrt / 从 Android 切回已安装的 OpenWrt
   6. Update OpenWrt / 更新已运行的 OpenWrt
-  7. Install to userdata image / userdata 镜像安装（仅未加密 data）
+  7. Install to userdata image [EXPERIMENTAL] / userdata 镜像安装【实验性：可能损坏 Android F2FS，仅未加密 data】
   0. Exit / 退出
 ''')
     choice = ask('Choose / 请选择 [0]: ', '0')
@@ -1042,7 +1041,7 @@ def install_part(a):
     wipe = part_userdata_policy(a)
     node, udata_mib, used_mib, part_mib = part_target(a, raw_size)
     data_mib = udata_mib - part_mib
-    grow = 1 if a.grow_fs else 0
+    grow = int(a.grow_fs is not False)
     if not a.y:
         say("安装到内置分区 / installing to an internal partition")
         print(f'   userdata: {udata_mib / 1024:.2f} -> {data_mib / 1024:.2f} GiB, ' +
@@ -1052,9 +1051,7 @@ def install_part(a):
         print('   The shrink and the writing happen on the next boot, from the boot image;')
         print('   ' + ('userdata WILL BE FORMATTED.' if wipe else 'userdata is not formatted.') +
               ' Reboot manually when done.')
-        if not grow and confirm('   完全使用空间：把根文件系统扩满所选分区（默认 2 GiB 分配）/ '
-                                'use the whole partition for the system [no]: ', word='yes'):
-            grow = 1
+        grow = part_growth(a)
         print('   系统分配 / system allocation: ' +
               ('整个分区 / the whole partition' if grow else "镜像大小 / the image's size, about 2 GiB"))
         for n in (1, 2, 3):
@@ -1114,13 +1111,28 @@ def install_part(a):
 
     say('安装已就绪，请手动重启 / staged; reboot manually')
     print(f'''
-  下一次启动由引导镜像完成缩容、建分区并写入 OpenWrt（约几分钟），随后自动重启进入它。
+  首次开机需要离线检查、缩容、建分区和写入，通常数分钟；数据较多或闪存较慢时会更久。
+  这不是普通开机，请保持供电，不要中断；缩容安装完成后会自动重启一次，再进入 OpenWrt。
   The next boot shrinks userdata, creates the e5root partition and writes
   OpenWrt into it, then restarts once into it -- about a few minutes.
   热点 / hotspot:  {ssid}   密码 / key:  {key}
   管理 / admin:    http://192.168.9.1  (LuCI, root / root -- 请改密码 / change it)
   回 Android:      e5-next-boot android（或删掉 {D}/boot-os）后重启；首启是试启动，
   失败会回到 Android。If the first boot fails, the next one falls back.''')
+
+
+def part_growth(a):
+    if a.grow_fs is not None:
+        return int(a.grow_fs)
+    if a.y:
+        return 1
+    answer = ask('   完全使用空间：扩满所选分区（选 no 则保留镜像约 2 GiB 容量）/ '
+                 'use the whole partition [yes]: ', 'yes').lower()
+    if answer in ('yes', 'y'):
+        return 1
+    if answer in ('no', 'n'):
+        return 0
+    die('enter yes or no / 请输入 yes 或 no')
 
 
 def part_two_stage(action, *args):
@@ -1148,24 +1160,107 @@ def check(a):
     say('检查完成，未修改分区 / checked; no partitions changed (temporary staging files only)')
 
 
+def installed_openwrt():
+    # A prepared/empty e5root is not an installed system. Read marked roots
+    # without journal replay, and do not trust an obsolete userdata selector.
+    result = su_checked('识别已安装的系统 / locating installed OpenWrt', f'''
+probe=$(mktemp -d {TMP}/e5-root-probe.XXXXXX) || exit 1
+mounted=0
+cleanup() {{
+    if [ "$mounted" = 1 ]; then umount "$probe" || return 1; fi
+    rmdir "$probe"
+}}
+trap cleanup EXIT
+trap "exit 1" HUP INT TERM
+check_root() {{
+    dev=$1; marker=$2
+    [ -b "$dev" ] || return 1
+    mount -t ext4 -o ro,noload "$dev" "$probe" >/dev/null 2>&1 || return 1
+    mounted=1; found=0
+    if [ -x "$probe/sbin/init" ] && [ -f "$probe/etc/openwrt_release" ] &&
+       [ -f "$probe/etc/e5/$marker" ]; then found=1; fi
+    umount "$probe" || exit 1
+    mounted=0
+    [ "$found" = 1 ]
+}}
+data_dev=$(readlink -f /dev/block/by-name/userdata)
+emmc=${{data_dev##*/}}; emmc=${{emmc%p*}}
+case "$emmc" in mmcblk[0-9]*) ;; *) echo "Cannot identify internal storage" >&2; exit 1 ;; esac
+check_part() {{
+    for u in /sys/class/block/${{emmc}}p*/uevent; do
+        grep -qx PARTNAME=e5root "$u" 2>/dev/null || continue
+        n=${{u%/uevent}}; n=${{n##*/}}
+        check_root "/dev/block/$n" part-root && return 0
+    done
+    return 1
+}}
+check_sd() {{
+    for d in /sys/class/block/mmcblk*; do
+        n=${{d##*/}}
+        case "$n" in *p[0-9]*|*boot*|"$emmc") continue ;; esac
+        for card in /dev/block/$n /dev/block/${{n}}p*; do
+            check_root "$card" sd-root && return 0
+        done
+    done
+    return 1
+}}
+preferred=$(cat {D}/boot-os 2>/dev/null || true)
+seen=
+for target in "$preferred" part sd openwrt; do
+    case " $seen " in *" $target "*) continue ;; esac
+    seen="$seen $target"
+    case "$target" in
+        part) check_part || continue ;;
+        sd) check_sd || continue ;;
+        openwrt) [ -s {D}/openwrt.ext4 ] || continue ;;
+        *) continue ;;
+    esac
+    echo "E5-INSTALLED-ROOT=$target"
+    exit 0
+done
+echo E5-INSTALLED-ROOT=none
+''')
+    targets = re.findall(r'^E5-INSTALLED-ROOT=(part|sd|openwrt|none)$', result, re.M)
+    if len(targets) != 1:
+        die('installed-system detection did not complete / 已安装系统检测未正常完成')
+    return None if targets[0] == 'none' else targets[0]
+
+
 def boot_openwrt(a):
     steps(2)
     find_adb()
     android_checks()
     bj = boot_json()
-    if 'ok' not in su(f'{{ [ -f {D}/openwrt.ext4 ] || [ "$(cat {D}/boot-os 2>/dev/null)" = sd ]; }} && echo ok'):
-        die('OpenWrt is not installed: run the first install')
+    target = installed_openwrt()
+    if target is None:
+        die('No readable installed OpenWrt was found in the internal partition, TF card or userdata image; '
+            'check the storage and installation / 未找到可读取的 OpenWrt，请检查独立分区、TF 卡或镜像')
     mb = bj['persist_log_offset'] // 1048576
     head = su(f'dd if=/dev/block/by-name/boot_b bs=1048576 count={mb} 2>/dev/null | sha256sum').split()[0:1]
     if head != [bj['sha256_head56m']]:
-        die('boot_b holds another boot image: use the package it was flashed with, or a first install')
+        # Resume/reinstall adds a verified command-line override. Accept only
+        # that exact package-derived variant, never an arbitrary Linux image.
+        if target != 'part' or head != [part_boot_head(bj)]:
+            die('boot_b holds another boot image: use the package it was flashed with, or a first install')
     bootchain('sync')
     # OpenWrt the default again, not only for this boot (the screen's "boot
     # Android" made Android the default); /etc/init.d/e5-boot-ok takes it
-    su(f'echo linux > {D}/openwrt-default-boot')
+    su_checked('保存启动目标 / saving the installed system selection',
+               f'mkdir -p {D}; rm -f {D}/boot-os-next; '
+               f'echo {target} > {D}/boot-os; echo linux > {D}/openwrt-default-boot; sync')
     arm_slot_b()
     say('正在重启进 OpenWrt / rebooting into OpenWrt')
     adb('reboot')
+
+
+def part_boot_head(metadata):
+    helper = os.path.join(SCRIPTS, 'installer', 'part-two-stage.py')
+    if not os.path.isfile(helper):
+        helper = os.path.join(B, 'part-two-stage.py')
+    with open(os.path.join(F, 'boot.img'), 'rb') as stream:
+        image = stream.read()
+    patched = runpy.run_path(helper)['boot_command'](image, 'e5.root=part')
+    return hashlib.sha256(patched[:metadata['persist_log_offset']]).hexdigest()
 
 
 def local_ip(host):
@@ -1214,7 +1309,7 @@ def main():
     g.add_argument('--check', action='store_true')
     g.add_argument('--verify-package', action='store_true', help='verify package files without accessing a device')
     g.add_argument('--data', action='store_true',
-                   help="install to the phone's storage (userdata) as before; the SD card is the default")
+                   help='EXPERIMENTAL userdata image: may damage Android F2FS; unencrypted data only')
     g.add_argument('--part', action='store_true',
                    help="install to an internal eMMC partition, without an SD card; "
                         "the next boot shrinks userdata and creates it")
@@ -1228,8 +1323,12 @@ def main():
     ap.add_argument('--wifi-key')
     ap.add_argument('--image-size', help='userdata image size in GiB (e.g. 4 or 6.5); requires --data')
     ap.add_argument('--part-size', help='internal partition size in GiB (e.g. 4 or 6.5); requires --part')
-    ap.add_argument('--grow-fs', action='store_true',
-                    help="let the system's filesystem use the whole partition (default: the image's size)")
+    growth = ap.add_mutually_exclusive_group()
+    growth.add_argument('--grow-fs', dest='grow_fs', action='store_true',
+                        help='use the whole internal partition (default)')
+    growth.add_argument('--no-grow-fs', dest='grow_fs', action='store_false',
+                        help='keep the initial image filesystem size instead of filling the partition')
+    ap.set_defaults(grow_fs=None)
     ap.add_argument('--format-userdata', action='store_true',
                     help='erase ALL Android user data before internal-partition installation; requires --part')
     ap.add_argument('-y', action='store_true')
@@ -1243,8 +1342,8 @@ def main():
         ap.error('--image-size requires --data / install-userdata')
     if a.part_size is not None and not a.part:
         ap.error('--part-size requires --part / install-part')
-    if a.grow_fs and not a.part:
-        ap.error('--grow-fs requires --part / install-part')
+    if a.grow_fs is not None and not a.part:
+        ap.error('--grow-fs/--no-grow-fs requires --part / install-part')
     if a.format_userdata and not a.part:
         ap.error('--format-userdata requires --part / install-part')
     if a.reinstall_part and (a.part or a.format_userdata):
@@ -1265,6 +1364,8 @@ def main():
     elif a.check:
         check(a)
     elif a.data:
+        print('EXPERIMENTAL / 实验性功能：userdata 镜像模式可能破坏 Android 的 F2FS 文件系统。\n'
+              "This mode may damage Android's F2FS filesystem. Prefer TF or an independent internal partition.")
         install(a)          # the form before the SD card; three confirmations
     elif a.part:
         install_part(a)     # an internal partition; the boot image finishes it

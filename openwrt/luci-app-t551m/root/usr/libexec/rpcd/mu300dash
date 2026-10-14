@@ -246,7 +246,7 @@ m_lock_set() {
     kind=$(inp '@.kind')
     val=$(inp '@.val')
     case "$kind" in
-        mode|gran|endc|lte|nr|cell|ims|volte|vonr|auto_apply|bands_default) ;;
+        mode|gran|endc|lte|nr|cell|volte|vonr|auto_apply|bands_default) ;;
         *) printf '{"ok":0,"error":"unknown lock kind"}\n'; return ;;
     esac
     "$DASH/lock" start "$kind" "$val"

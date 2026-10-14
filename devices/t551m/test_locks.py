@@ -30,7 +30,7 @@ class LocksTest(unittest.TestCase):
         self.restarts = 0
         self.reset_mode_on_restart = False
         self.omit_final = None
-        self.voice = {'ims': True, 'volte': True, 'vonr': False}
+        self.voice = {'volte': True, 'vonr': False}
         p = patch.object(locks.subprocess, 'run', side_effect=self.run_command)
         p.start();self.addCleanup(p.stop)
         p = patch.object(locks.time, 'sleep');p.start();self.addCleanup(p.stop)
@@ -70,12 +70,11 @@ class LocksTest(unittest.TestCase):
         if cmd == 'AT+SPTESTMODE?': data = '+SPTESTMODE: '+','.join(map(str,self.tm))
         elif cmd == 'AT+SP5GRAN?': data = '+SP5GRAN: '+str(self.gran)
         elif cmd == 'AT+SPENDC?': data = '+ENDC: '+str(self.endc)
-        elif cmd == 'AT+IMSEN?': data = '+IMSEN: '+str(int(self.voice['ims']))
         elif cmd == 'AT+CAVIMS?': data = '+CAVIMS: '+str(int(self.voice['volte']))
         elif cmd == 'AT+SP5GCMDS="get nr synch_param",42':
             data = '+SP5GCMDS: "get nr synch_param",42,'+str(int(self.voice['vonr']))
-        elif cmd.startswith(('AT+IMSEN=', 'AT+CAVIMS=', 'AT+SP5GCMDS="set nr param",45,')):
-            key = 'ims' if cmd.startswith('AT+IMSEN=') else 'volte' if cmd.startswith('AT+CAVIMS=') else 'vonr'
+        elif cmd.startswith(('AT+CAVIMS=', 'AT+SP5GCMDS="set nr param",45,')):
+            key = 'volte' if cmd.startswith('AT+CAVIMS=') else 'vonr'
             if cmd != self.ignore: self.voice[key] = cmd[-1] == '1'
         elif cmd == 'AT+SP5GCMDS="get nr support_band"': data = '+SP5GCMDS: get nr support_band,6,41,78,1,8,28,5'
         elif cmd.startswith('AT+SPTESTMODE='):
@@ -156,55 +155,70 @@ class LocksTest(unittest.TestCase):
         base, run, marker = locks.STATE, locks.RUN, locks.MARKER
         with patch.dict(locks.os.environ):
             locks.scope(1, base, run, marker)
-            for kind, val in [('volte','off'), ('vonr','on'), ('ims','off')]:
+            for kind, val in [('volte','off'), ('vonr','on')]:
                 locks.apply(kind, val)
                 self.assertEqual((base/f'sim1/{kind}').read_text(), val)
                 self.assertFalse((base/f'sim0/{kind}').exists())
-            self.assertFalse(self.voice['ims'])
             self.assertFalse(self.voice['volte'])
             self.assertTrue(self.voice['vonr'])
             self.assertEqual(locks.CARD.read_text(), '0')
             self.assertEqual(self.restarts, 0)
             self.assertNotIn('AT+CASIMS=0', self.sent)
 
-    def test_unsupported_ims_read_keeps_other_locks_and_accepted_setting(self):
-        locks.apply('ims', 'off')
+    def test_failed_voice_read_keeps_other_locks_but_disables_toggle(self):
+        locks.apply('volte', 'off')
         def reject(command, timeout=8):
-            if command == 'AT+IMSEN?': raise RuntimeError('AT+IMSEN?: ERROR')
+            if command == 'AT+CAVIMS?': raise RuntimeError('AT+CAVIMS?: ERROR')
             return original(command, timeout)
         original = locks.at
         with patch.object(locks, 'at', side_effect=reject):
             state = locks.snapshot(refresh_voice=True)
             self.assertEqual(state['mode']['label'], '4g')
-            self.assertIs(state['ims']['enabled'], False)
-            self.assertEqual(state['ims']['source'], 'acknowledged')
-            self.assertIs(state['volte']['enabled'], True)
-            self.assertEqual(state['volte']['source'], 'modem')
-            locks.snapshot(refresh_voice=True)  # no repeated rejected probe
+            self.assertNotIn('ims', state)
+            self.assertIsNone(state['volte']['enabled'])
+            self.assertEqual(state['volte']['source'], 'unknown')
+            self.assertIs(state['vonr']['enabled'], False)
 
-    def test_voice_set_failure_never_saves_and_missing_ims_ok_is_not_success(self):
-        self.omit_final = 'AT+IMSEN=0'
-        self.assertEqual(locks.main(['apply', 'ims', 'off'])['state'], 'error')
-        self.assertFalse((locks.STATE/'ims').exists())
-        self.assertFalse((locks.RUN/'ims-applied.json').exists())
+    def test_voice_set_failure_never_saves_or_claims_success(self):
+        self.omit_final = 'AT+CAVIMS=0'
+        self.assertEqual(locks.main(['apply', 'volte', 'off'])['state'], 'error')
+        self.assertFalse((locks.STATE/'volte').exists())
+        self.assertFalse((locks.RUN/'volte-applied.json').exists())
         self.omit_final = None
         for kind, command in [('volte','AT+CAVIMS=0'), ('vonr','AT+SP5GCMDS="set nr param",45,1')]:
+            self.voice = {'volte': True, 'vonr': False}
             self.ignore = command
             self.assertEqual(locks.main(['apply',kind,'off' if kind=='volte' else 'on'])['state'], 'error')
             self.assertFalse((locks.STATE/kind).exists())
 
     def test_voice_only_boot_replay_is_once_and_preserves_preferences(self):
-        for kind, val in [('ims','off'), ('volte','off'), ('vonr','on')]:
+        (locks.STATE/'ims').write_text('off')  # removed settings must be inert
+        for kind, val in [('volte','off'), ('vonr','on')]:
             (locks.STATE/kind).write_text(val)
         result = locks.replay('early')
         self.assertEqual(result['state'], 'done')
-        self.assertEqual(result['applied'], ['volte','vonr','ims'])
+        self.assertEqual(result['applied'], ['volte','vonr'])
         count = len(self.sent)
         self.assertEqual(locks.replay('early')['skipped'], 1)
         self.assertEqual(len(self.sent), count)
         self.assertEqual(self.restarts, 0)
         self.assertNotIn('AT+IMSEN?', self.sent)
-        self.assertEqual(self.sent.count('AT+IMSEN=0'), 1)
+        self.assertNotIn('AT+IMSEN=0', self.sent)
+        self.assertEqual(self.sent.count('AT+CAVIMS=0'), 1)
+
+    def test_removed_ims_is_rejected_and_old_preference_never_replayed(self):
+        (locks.STATE/'ims').write_text('off')
+        self.assertEqual(locks.replay('early')['skipped'], 1)
+        with self.assertRaises(ValueError): locks.apply('ims', 'off')
+        self.assertEqual(self.sent, [])
+
+    def test_cavims_reports_native_state_not_saved_preference(self):
+        (locks.STATE/'volte').write_text('off')
+        state = locks.snapshot(refresh_voice=True)
+        self.assertIs(state['volte']['enabled'], True)
+        self.assertEqual(state['volte']['saved'], 'off')
+        self.assertEqual(state['volte']['source'], 'modem')
+        self.assertEqual(self.sent.count('AT+CAVIMS?'), 1)
 
     def test_malformed_voice_readback_cannot_be_saved_as_enabled(self):
         with patch.object(locks, 'value', return_value='get nr synch_param,41,1'):

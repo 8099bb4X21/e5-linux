@@ -41,7 +41,7 @@ def migrate_legacy(base):
     slot = int(CARD.read_text().strip())
     if slot not in (0, 1): raise ValueError('Invalid data SIM')
     dest = base / f'sim{slot}';dest.mkdir(parents=True, exist_ok=True)
-    for name in ['auto_apply','ims','volte','vonr','endc','mode','lte','nr','cell']:
+    for name in ['auto_apply','volte','vonr','endc','mode','lte','nr','cell']:
         if (base/name).exists() and not (dest/name).exists():
             atomic(dest/name, (base/name).read_text())
     atomic(marker, str(slot))  # Keep original flat files as the migration backup.
@@ -162,35 +162,28 @@ def read_voice(kind):
         if len(fields) < 3 or fields[:2] != ['get nr synch_param', '42'] or fields[2] not in ('0', '1'):
             raise RuntimeError('Invalid VoNR switch readback')
         return fields[2] == '1'
-    command, prefix = ('AT+IMSEN?', '+IMSEN') if kind == 'ims' else ('AT+CAVIMS?', '+CAVIMS')
-    raw = numbers(command, prefix)
+    raw = numbers('AT+CAVIMS?', '+CAVIMS')
     if len(raw) != 1 or raw[0] not in (0, 1):
         raise RuntimeError('Invalid voice switch readback')
     return bool(raw[0])
 
 
 def voice_state(kind, refresh=False):
-    # IMSEN is the stock RIL's IMS master switch, not CAVIMS (voice
-    # availability). Some CPs implement its setter but no read command.
-    # Distinguish a real readback from a receipt for this boot's accepted write.
     receipt = read_json(RUN / f'{kind}-applied.json')
     boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    enabled = receipt.get('enabled') if receipt.get('boot_id') == boot_id else None
-    source = receipt.get('source', 'acknowledged') if isinstance(enabled, bool) else 'unknown'
-    query = read_json(RUN / f'{kind}-query.json')
+    enabled = receipt.get('enabled') if receipt.get('boot_id') == boot_id and receipt.get('source') == 'modem' else None
+    source = 'modem' if isinstance(enabled, bool) else 'unknown'
     error = None
-    if refresh and not (query.get('boot_id') == boot_id and query.get('unsupported')):
+    if refresh:
         try:
             enabled, source = read_voice(kind), 'modem'
             write_json(RUN / f'{kind}-applied.json', {
                 'enabled': enabled, 'source': source, 'boot_id': boot_id})
         except RuntimeError as failure:
-            # A rejected optional query must not hide the other network locks.
-            # Do not repeatedly issue an unsupported probe on every refresh.
             error = str(failure)
-            if error.endswith(': ERROR') or re.search(r'\+CME ERROR:\s*4$', error):
-                write_json(RUN / f'{kind}-query.json', {'boot_id': boot_id, 'unsupported': True})
-    saved = (STATE / kind).read_text().strip() if (STATE / kind).exists() else None
+            enabled, source = None, 'unknown'
+    path = STATE / kind
+    saved = path.read_text().strip() if path.exists() else None
     return {'enabled': enabled, 'source': source, 'saved': saved, 'read_error': error}
 
 
@@ -208,7 +201,7 @@ def snapshot(refresh_voice=False):
             'm0': str(tm[0]), 'm1': str(tm[1]), 'prim': str(tm[2]), 'card': slot},
             'endc': '1' if endc == 1 else '0', 'lte': band_state('lte'), 'nr': band_state('nr'),
             'cells': cell_state('lte') + cell_state('nr'), 'caps': capabilities(),
-            **{kind: voice_state(kind, refresh_voice) for kind in ('ims', 'volte', 'vonr')}}
+            **{kind: voice_state(kind, refresh_voice) for kind in ('volte', 'vonr')}}
     data['cell'] = data['cells'][0] if data['cells'] else ''
     if active_card() != slot:
         raise RuntimeError('Active SIM changed while reading; refresh again')
@@ -222,7 +215,7 @@ def validate(kind, val):
     if kind == 'bands_default' and val == '': return
     if kind == 'gran' and val in ('sa','nsa'): return
     if kind == 'mode' and val in MODES: return
-    if kind in ('ims', 'volte', 'vonr', 'endc', 'auto_apply') and val in ('on', 'off'): return
+    if kind in ('volte', 'vonr', 'endc', 'auto_apply') and val in ('on', 'off'): return
     if kind in ('lte', 'nr'):
         if not val: return
         if not re.fullmatch(r'\d+(?:,\d+)*', val): raise ValueError('Invalid band list')
@@ -242,8 +235,6 @@ def validate(kind, val):
     raise ValueError('Invalid network setting')
 
 def verify(kind, val, expected):
-    if kind == 'ims':
-        return voice_state('ims')['enabled'] is (val == 'on')
     if kind in ('volte', 'vonr'):
         return read_voice(kind) is (val == 'on')
     if kind == 'mode':
@@ -293,14 +284,7 @@ def apply(kind, val, restart=True, persist=True, early=False):
         return
     slot = active_card()
     expected = None
-    if kind == 'ims':
-        # Match the vendor RIL: one explicit per-SIM command, no radio cycle.
-        # Missing OK is an error; never turn a timed-out write into success.
-        at('AT+IMSEN=' + ('1' if val == 'on' else '0'), 8)
-        write_json(RUN / 'ims-applied.json', {
-            'enabled': val == 'on', 'source': 'acknowledged',
-            'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip()})
-    elif kind in ('volte', 'vonr'):
+    if kind in ('volte', 'vonr'):
         command = ('AT+CAVIMS=' if kind == 'volte' else 'AT+SP5GCMDS="set nr param",45,')
         write_setting(command + ('1' if val == 'on' else '0'), 8, early,
                       lambda: verify(kind, val, expected))
@@ -342,7 +326,7 @@ def apply(kind, val, restart=True, persist=True, early=False):
         if attempt == 5: raise RuntimeError('Modem readback does not match requested setting')
         time.sleep(.5)
     if active_card() != slot: raise RuntimeError('Active SIM changed during operation')
-    if restart and kind not in ('endc', 'ims', 'volte', 'vonr'):
+    if restart and kind not in ('endc', 'volte', 'vonr'):
         r = subprocess.run([RESTART], capture_output=True, text=True, timeout=75)
         if r.returncode: raise RuntimeError('Setting accepted, but reconnect failed: ' + (r.stderr or r.stdout)[-240:])
         if not verify(kind, val, expected): raise RuntimeError('Setting did not survive reconnect')
@@ -379,7 +363,7 @@ def spawn(*args):
 
 def saved_settings():
     saved = {}
-    for kind in ['endc', 'mode', 'lte', 'nr', 'cell', 'volte', 'vonr', 'ims']:
+    for kind in ['endc', 'mode', 'lte', 'nr', 'cell', 'volte', 'vonr']:
         path = STATE / kind
         if path.exists():
             saved[kind] = path.read_text().strip()
@@ -388,7 +372,7 @@ def saved_settings():
     return saved
 
 def matches_saved(kind, val, state):
-    if kind in ('ims', 'volte', 'vonr'): return state.get(kind, {}).get('enabled') is (val == 'on')
+    if kind in ('volte', 'vonr'): return state.get(kind, {}).get('enabled') is (val == 'on')
     if kind == 'mode':
         return (int(state['mode']['work']), int(state['mode']['gran'])) == MODES[val]
     if kind == 'endc': return state['endc'] == ('1' if val == 'on' else '0')
