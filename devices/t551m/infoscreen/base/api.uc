@@ -1505,7 +1505,7 @@ global.handle_request = function(env) {
 		if (!post && path == '/sms')
 			return reply_json(200, { messages: sms_list() });
 		if (post && path == '/sms-read')
-			return reply_json(200, { ok: system('e5-sms-notify read >/dev/null 2>&1 || : > ' + SMS_UNREAD) == 0 });
+			return reply_json(200, { ok: system('e5-sms-notify read >/dev/null 2>&1') == 0 });
 		if (post && path == '/sms-delete')
 			return reply_json(200, { ok: sms_delete(read_body(env).id ?? -1) });
 		if (post && path == '/sms-send') {

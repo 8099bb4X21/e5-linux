@@ -12,7 +12,7 @@
 # names (the property area), which Windows cannot store.  Everything owned by
 # root: bionic refuses a property area that is not.
 OUT=${1:?out} FW=${2:?firmware}
-S=/data/local/tmp/e5-devfiles
+S=${E5_COLLECT_WORK:-/data/local/tmp/e5-devfiles}
 rm -rf "$S"
 mkdir -p "$S/opt/e5/android" "$S/lib/firmware" || exit 1
 elf_class=$(od -An -tu1 -j4 -N1 /vendor/bin/modem_control | tr -d ' \n')

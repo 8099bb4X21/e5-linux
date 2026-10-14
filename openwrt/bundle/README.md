@@ -1,5 +1,13 @@
 # OpenWrt for E5 / T551M / VIPME M8 -- one-click flash package
 
+The complete ZIP supports native Magisk TF deployment and extraction for desktop installation.
+Read **`START-HERE.md` at the package root** first (detailed Chinese guide). Shortcut scripts live in `launchers/`,
+images/checksums in `files/`, and supporting files in `scripts/`, `docs/` and `extras/`.
+Installing this firmware ZIP in Magisk erases the entire TF card; it is not the separate switch-only module.
+Native deployment prepares this device's firmware before erasing, verifies root and boot readback, and never reboots automatically.
+The new native path still requires per-model hardware validation.
+
+
 > 中文：[`README.zh-CN.md`](README.zh-CN.md)
 
 Use the package matching your device. `files/device-profile.json` identifies
@@ -19,6 +27,7 @@ Public entry names are descriptive English names. Use `.cmd` on Windows or `.sh`
 | --- | --- |
 | `OpenWrt-Installer.exe` / `start-installer` | Choose an action; the Windows exe needs no separate Python |
 | `install-to-tf-card` | First install, erasing the entire TF card |
+| `install-to-userdata-image` | Configurable image on unencrypted userdata |
 | `install-to-internal-storage` | Shrink userdata and create an independent root partition |
 | `reinstall-internal-system` | Rewrite an existing e5root without shrinking or wiping Android data |
 | `resume-internal-install` | Resume using the saved transaction.json |
@@ -33,7 +42,7 @@ Public entry names are descriptive English names. Use `.cmd` on Windows or `.sh`
 * Android running from slot a (as it comes from the factory);
 * an **SD card of 4 GB or more** (8 GB recommended): it is partitioned and erased, and
   its free space stays free for more partitions later -- or run
-  `install-to-internal-storage.cmd` / `bash install-to-internal-storage.sh` and no card is needed;
+  `launchers/install-to-internal-storage.cmd` / `bash launchers/install-to-internal-storage.sh` and no card is needed;
 * a Windows, macOS or Linux computer with:
   * **Python 3.8 or newer** (unnecessary on Windows when `OpenWrt-Installer.exe` is included);
   * **adb** (Android platform-tools, https://developer.android.com/tools/releases/platform-tools:
@@ -47,11 +56,11 @@ Public entry names are descriptive English names. Use `.cmd` on Windows or `.sh`
 2. Grant **Shell** superuser access in Magisk (the phone asks the first time).
 3. Unpack the package and run, in its directory:
 
-   * **Windows**: double-click `start-installer.cmd` (or run `start-installer.cmd` in a command prompt);
-   * **macOS / Linux**: `./start-installer.sh`
+   * **Windows**: double-click `launchers/start-installer.cmd` (or run `launchers/start-installer.cmd` in a command prompt);
+   * **macOS / Linux**: `./launchers/start-installer.sh`
 
-   To see first that the device is fine, with nothing written: `start-installer.cmd --check` /
-   `./start-installer.sh --check`.
+   To see first that the device is fine, with nothing written: `launchers/start-installer.cmd --check` /
+   `./launchers/start-installer.sh --check`.
 
    It asks for the APN, the hotspot's name and key.  For the APN just press
    Enter: OpenWrt picks it from the SIM's operator (China Mobile `cmnet`,
@@ -60,8 +69,8 @@ Public entry names are descriptive English names. Use `.cmd` on Windows or `.sh`
    shown at the end.  Or give them on the command line:
 
    ```sh
-   start-installer.cmd --ssid E5-OpenWrt --wifi-key 12345678 -y        (Windows)
-   ./start-installer.sh --ssid E5-OpenWrt --wifi-key 12345678 -y       (macOS / Linux)
+   launchers/start-installer.cmd --ssid E5-OpenWrt --wifi-key 12345678 -y        (Windows)
+   ./launchers/start-installer.sh --ssid E5-OpenWrt --wifi-key 12345678 -y       (macOS / Linux)
    ```
 
    It asks once more before it partitions and formats the **SD card** -- type
@@ -109,7 +118,7 @@ What it does:
 
 ### Without an SD card (`install-part`)
 
-`install-to-internal-storage.cmd` (Windows) or `bash install-to-internal-storage.sh` installs OpenWrt onto a
+`launchers/install-to-internal-storage.cmd` (Windows) or `bash launchers/install-to-internal-storage.sh` installs OpenWrt onto a
 partition of the phone's own storage: it shows the partition size range and
 asks for one (default: the image plus 1 GiB), then whether the system should
 **use the whole partition** (default: no, the image's own ~2 GiB allocation),
@@ -130,7 +139,7 @@ From Android back to OpenWrt, with nothing reinstalled (the settings stay,
 and OpenWrt is the default boot again): connect the E5 and run
 
 ```sh
-start-installer.cmd --boot-openwrt          (Windows; macOS / Linux: ./start-installer.sh --boot-openwrt)
+launchers/start-installer.cmd --boot-openwrt          (Windows; macOS / Linux: ./launchers/start-installer.sh --boot-openwrt)
 ```
 
 A failed OpenWrt boot falls back to Android on its
@@ -163,7 +172,7 @@ prepared layout before writing directly to the independent e5root partition.
 To continue after closing the script, keep the same package and run:
 
 ```
-start-installer.cmd --resume-part "backups/part-DATE-ID/transaction.json"
+launchers/start-installer.cmd --resume-part "backups/part-DATE-ID/transaction.json"
 ```
 
 Do not repeat stage one. Backups contain device images and hotspot settings;
@@ -182,9 +191,9 @@ into it while keeping Android's user data, the userdata filesystem and the
 partition table, use the rewrite:
 
 ```text
-reinstall-internal-system.cmd                       (the same as start-installer.cmd --reinstall-part; POSIX: ./reinstall-internal-system.sh)
-start-installer.cmd --reinstall-part          (interactive: prints the geometry and the settings, one confirmation)
-start-installer.cmd --reinstall-part -y       (unattended)
+launchers/reinstall-internal-system.cmd                       (the same as launchers/start-installer.cmd --reinstall-part; POSIX: ./launchers/reinstall-internal-system.sh)
+launchers/start-installer.cmd --reinstall-part          (interactive: prints the geometry and the settings, one confirmation)
+launchers/start-installer.cmd --reinstall-part -y       (unattended)
 ```
 
 It reads the device's current userdata/e5root geometry, pulls this unit's own
@@ -201,7 +210,7 @@ recorded under `backups/reinstalls/DATE-ID/transaction.json`.
 With the E5 running OpenWrt and connected over USB, run the new package's:
 
 ```sh
-start-installer.cmd --update                (Windows; macOS / Linux: ./start-installer.sh --update)
+launchers/start-installer.cmd --update                (Windows; macOS / Linux: ./launchers/start-installer.sh --update)
 ```
 
 It updates the boot image and the OpenWrt image over the USB network and
@@ -213,7 +222,7 @@ partition of the card -- made in the card's free space by the first update,
 reused after that -- while the old one keeps running; userdata is not touched.
 The reboot starts the new one.  Its first boot is a trial: if it does not come
 up, the next start of Linux goes back to the previous system, settings as they
-were (if the E5 fell back to Android meanwhile: `./start-installer.sh --boot-openwrt`).
+were (if the E5 fell back to Android meanwhile: `./launchers/start-installer.sh --boot-openwrt`).
 The update needs about the image's size free on the card (1 GiB and a little
 more).
 

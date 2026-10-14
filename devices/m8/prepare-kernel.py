@@ -17,6 +17,7 @@ def apply(kernel):
     head = subprocess.check_output(['git', '-C', str(kernel), 'rev-parse', 'HEAD'], text=True).strip()
     if not head.startswith(BASE):
         raise ValueError('Expected linux-lts-e5 ' + BASE)
+    runpy.run_path(str(HERE.parent / 'common/emmc.py'))['apply'](kernel)
     for name in ('drivers/power/supply/board-charge-profile.h',
                  'drivers/unisoc_platform/sprd_disp/t551m-backlight.h'):
         if (kernel / name).exists():

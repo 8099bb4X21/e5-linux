@@ -188,6 +188,14 @@ class Diagnostics(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 flash.unmount_android_sd('/dev/card')
 
+    def test_adopted_storage_holder_aborts_even_without_a_direct_sd_mount(self):
+        def checked(stage, command, timeout=600):
+            return '/sys/class/block/cardp1/holders/dm-1' if 'holders/' in command else ''
+        with patch.object(flash, 'sd_device_numbers', return_value={'179:1'}), \
+             patch.object(flash, 'su_checked', checked), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                flash.unmount_android_sd('/dev/card')
+
     def test_gzip_checks_crc_and_real_size(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'image.gz'
@@ -196,6 +204,20 @@ class Diagnostics(unittest.TestCase):
             data = bytearray(path.read_bytes()); data[-8] ^= 1; path.write_bytes(data)
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 flash.gz_usize(path)
+
+    def test_userdata_image_rejects_encrypted_mapped_or_unknown_data_before_staging(self):
+        for state,kind,source,ok in [('unencrypted','','/dev/block/mmcblk0p70',True),
+                                     ('encrypted','file','/dev/block/mmcblk0p70',False),
+                                     ('encrypted','block','/dev/block/dm-0',False),
+                                     ('unencrypted','','/dev/block/dm-0',False),
+                                     ('','','/dev/block/mmcblk0p70',False)]:
+            with self.subTest(state=state,kind=kind,source=source), \
+                 patch.object(flash,'sh',side_effect=[state,kind]), \
+                 patch.object(flash,'su_checked',return_value=source+' /data f2fs rw 0 0'), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                if ok:flash.check_userdata_image_source()
+                else:
+                    with self.assertRaises(SystemExit):flash.check_userdata_image_source()
 
     def simulate_install(self, failure=None, ssid='test'):
         calls = []

@@ -138,6 +138,16 @@ async function loadAdvanced() {
 	setText('ad-freshness', a.radio_error ? (lang == 'zh' ? '部分无线信息暂不可用' : 'Some radio details unavailable') : '');
 	$('ad-freshness').hidden = !a.radio_error;''')
     api = (HERE / 'base/api.uc').read_text(encoding='utf-8')
+    api = replace(api, 'function status() {', '''function boot_status() {
+    let state = read_trim('/etc/e5linux/default-boot') ?? 'android';
+    if (state != 'linux' && state != 'android') state = 'unknown';
+    let trial = match(read_trim('/proc/cmdline') ?? '', /(^| )e5\\.openwrt=/) != null;
+    let control = stat('/run/e5linux/misc-bc-slot-b-trial.bin') ?? stat('/etc/e5linux/misc-bc-slot-b-trial.bin');
+    return { default: state, temporary: state == 'unknown' ? null : state != 'linux',
+             can_set_default: !trial && control != null && stat('/opt/e5/e5-next-boot') != null };
+}
+function status() {''')
+    api = replace(api, '\t\ttime: t,', '\t\ttime: t,\n\t\tboot: boot_status(),')
     api = replace(api, 'function status() {', (HERE / 'sims.uc').read_text(encoding='utf-8') + '\nfunction status() {')
     api = replace(api, '\tlet m = modem_status();\n\treturn {', '\tlet sims = sim_status();\n\tlet m = card_modem(modem_status(), sims);\n\treturn {\n\t\tsims,')
     api = replace(api, "model: 'Rongyue E5',", "model: ubus_call('system', 'board')?.model ?? null,")

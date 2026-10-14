@@ -169,17 +169,18 @@ def verify():
             if name in members:
                 raise ValueError('duplicate bundle member: ' + name)
             stream = archive.extractfile(entry)
-            if name in ('SHA256SUMS', 'files/VERSION', 'files/boot.json'):
+            if name in ('SHA256SUMS', 'files/SHA256SUMS', 'files/VERSION', 'files/boot.json'):
                 content = stream.read()
                 data[name] = content
                 members[name] = hashlib.sha256(content).hexdigest()
             else:
                 members[name] = digest(stream)
     listed = {}
-    for line in data['SHA256SUMS'].decode().splitlines():
+    sums = 'files/SHA256SUMS' if 'files/SHA256SUMS' in data else 'SHA256SUMS'
+    for line in data[sums].decode().splitlines():
         checksum, name = line.split(None, 1)
         listed[name] = checksum
-    expected_members = {name: checksum for name, checksum in members.items() if name != 'SHA256SUMS'}
+    expected_members = {name: checksum for name, checksum in members.items() if name != sums}
     if listed != expected_members:
         raise ValueError('bundle SHA256SUMS mismatch')
     for name, path in [('files/boot.img', TOP / 'work/boot-linux-slotb-bundle-mainline.img'),
@@ -197,8 +198,11 @@ def verify():
     with zipfile.ZipFile(zipath) as archive:
         if archive.testzip() is not None:
             raise ValueError('ZIP CRC check failed')
+        prefix = '' if 'module.prop' in archive.namelist() else stem + '/'
+        if set(archive.namelist()) != {prefix + name for name in members}:
+            raise ValueError('ZIP and tar file lists differ')
         for name, checksum in members.items():
-            with archive.open(stem + '/' + name) as stream:
+            with archive.open(prefix + name) as stream:
                 if digest(stream) != checksum:
                     raise ValueError('ZIP differs from tar: ' + name)
     modules = list((TOP / 'out/magisk').glob(f'e5-linux-switch-*-{info["timestamp"]}.zip'))
@@ -231,9 +235,10 @@ def verify():
         f'编译时间（UTC+8）：**{info["build_started_at"]}**\n\n'
         f'OpenWrt {info["openwrt_version"]} · 内核 `{info["kernel_release"]}` · '
         f'信息屏 {info["infoscreen_version"]} · 电话插件 {info["phone_version"]}\n\n'
-        '下载 ZIP 或 TAR.GZ，解压后运行 `flash.cmd`（Windows）或 `./flash.sh`（macOS/Linux）。'
-        '已安装 OpenWrt 使用 `--update` 保留设置。刷入说明在包内 README。\n\n'
-        'Magisk ZIP 用于已 root Android 手动切回已安装的 Linux，在模块列表点击「操作」。\n\n'
+        '完整固件 ZIP 可在 Android Magisk 内安装到 TF 卡（清空整卡），'
+        '也可解压后运行 `OpenWrt-Installer.exe` 或 `launchers/start-installer.sh`。'
+        '详细使用指南在包内顶层 `START-HERE.md`，已安装系统用更新入口保留设置。\n\n'
+        '另附的小型 e5-linux-switch Magisk ZIP 仅用于手动切回已安装的 Linux，不负责首次部署。\n\n'
         '镜像不含设备固件和 Android vendor 运行库；安装器从目标设备提取。'
         'CI 已验证文件和模块一致性，硬件实测仍需在 E5 上进行。\n\n'
         f'源码版本：\n\n{refs}\n\n[构建记录]({info.get("run_url")})\n')

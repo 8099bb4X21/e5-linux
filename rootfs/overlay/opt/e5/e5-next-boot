@@ -33,10 +33,11 @@ BC_B=/run/e5linux/misc-bc-slot-b-trial.bin
 MISC=$(cat /run/e5linux/misc-dev 2>/dev/null || readlink -f /dev/block/by-name/misc)
 
 write_bc() {
-    dd if="$1" of="$MISC" bs=1 seek=2048 conv=notrunc 2>/dev/null
-    sync
+    [ "$(wc -c < "$1")" = 32 ] || { echo "invalid boot control block size" >&2; return 1; }
+    dd if="$1" of="$MISC" bs=1 seek=2048 conv=notrunc 2>/dev/null || return 1
+    sync || return 1
     [ "$(dd if="$MISC" bs=1 skip=2048 count=32 2>/dev/null | od -An -tx1 -v | tr -d ' \n')" = "$(od -An -tx1 -v "$1" | tr -d ' \n')" ] \
-        || { echo "misc verify failed" >&2; exit 1; }
+        || { echo "misc verify failed" >&2; return 1; }
 }
 
 slot_state() {
@@ -69,10 +70,42 @@ next_target() {
 # default boot -- boot/init writes android into its default-boot on every boot, and this refuses
 trial() { case " $(cat /proc/cmdline) " in *" e5.openwrt="*) true ;; *) false ;; esac; }
 
+# Serialize the complete misc+intent transaction; never advertise a successful
+# default change before misc readback. Preserve old misc if persistence fails.
+set_default() (
+    target=$1
+    mkdir -p "${CONF%/*}" /run || exit 1
+    candidate=$(mktemp "${CONF}.XXXXXX") || exit 1
+    previous=$(mktemp /run/openwrt-boot-bc.XXXXXX) || { rm -f "$candidate"; exit 1; }
+    old_conf=$(mktemp "${CONF}.backup.XXXXXX") || { rm -f "$candidate" "$previous"; exit 1; }
+    had_conf=false
+    if [ -e "$CONF" ]; then cp -p "$CONF" "$old_conf" || exit 1; had_conf=true; fi
+    trap 'rm -f "$candidate" "$previous" "$old_conf"' EXIT
+    printf '%s\n' "$target" > "$candidate" || exit 1
+    dd if="$MISC" of="$previous" bs=1 skip=2048 count=32 2>/dev/null || exit 1
+    [ "$(wc -c < "$previous")" = 32 ] || exit 1
+    if ( if [ "$target" = linux ]; then write_bc "$BC_B"; else write_bc "$BC_A"; fi ); then
+        if mv -f "$candidate" "$CONF" && sync && [ "$(cat "$CONF")" = "$target" ]; then
+            exit 0
+        fi
+    fi
+    if "$had_conf"; then mv -f "$old_conf" "$CONF"; else rm -f "$CONF"; fi
+    ( write_bc "$previous" ) || echo "boot control rollback failed" >&2
+    exit 1
+)
+
+# Include the successful-boot rearm in the same lock: an Android selection
+# must not be overwritten by a concurrently finishing startup service.
+case "${1:-status}" in
+    linux|android|--rearm|attempts)
+        exec 9>/run/openwrt-default-boot.lock
+        flock -n 9 || { echo "boot control busy" >&2; exit 1; } ;;
+esac
+
 case "${1:-status}" in
     linux)   trial && { echo "a trial image (e5.openwrt=) is never the default boot" >&2; exit 1; }
-             mkdir -p /etc/e5linux; echo linux > "$CONF"; write_bc "$BC_B"; echo "default boot: linux (slot b armed)" ;;
-    android) mkdir -p /etc/e5linux; echo android > "$CONF"; write_bc "$BC_A"; echo "next boot: android (slot a)" ;;
+             set_default linux; echo "default boot: linux (slot b armed)" ;;
+    android) set_default android; echo "next boot: android (slot a)" ;;
     --rearm) [ "$(cat "$CONF" 2>/dev/null)" = linux ] && write_bc "$BC_B" && echo "slot b re-armed" || echo "default boot is not linux, nothing to do" ;;
     status)  echo "default boot: $(cat "$CONF" 2>/dev/null || echo android)"
              echo "next boot: $(next_target)"

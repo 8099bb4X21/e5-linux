@@ -120,6 +120,8 @@ jobs:
           printf '%s  %s\n' "$checksum" "work/openwrt/$file" | sha256sum --check
           docker import --platform linux/arm64 "work/openwrt/$file" "e5-openwrt-base:$E5_WRT_VER"
           python3 openwrt/tests/flash-diagnostics.py
+          python3 openwrt/tests/install-entrypoints.py
+          python3 openwrt/tests/hybrid-package.py
           python3 tools/tests/android-bootchain.py
           python3 openwrt/tests/block-probe.py
           E5_TEST_IMAGE="e5-openwrt-base:$E5_WRT_VER" python3 openwrt/tests/gpt-plan.py

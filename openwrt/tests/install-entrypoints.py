@@ -22,14 +22,15 @@ flash = importlib.util.module_from_spec(spec); spec.loader.exec_module(flash)
 class Entrypoints(unittest.TestCase):
     def source(self, path):
         path.mkdir()
-        for name in ('flash.py', 'flash.cmd', 'flash.sh', 'part-two-stage.py'):
+        for name in ('flash.py', 'flash.cmd', 'flash.sh', 'part-two-stage.py', 'userdata-image.sh',
+                     'README.md', 'README.zh-CN.md', 'START-HERE.md'):
             shutil.copy2(TOP / 'openwrt/bundle' / name, path / name)
 
     def test_menu_selects_exact_action_and_cancel_does_not_install(self):
         for choice, field in [('1','tf'),('2','part'),('3','reinstall_part'),('4','resume_part'),
-                              ('5','boot_openwrt'),('6','update'),('0',None)]:
+                              ('5','boot_openwrt'),('6','update'),('7','data'),('0',None)]:
             a=SimpleNamespace(tf=False,part=False,reinstall_part=False,resume_part=None,
-                              boot_openwrt=False,update=False)
+                              boot_openwrt=False,update=False,data=False)
             with patch.object(flash,'ask',side_effect=[choice,'"a path/transaction.json"']):
                 result=flash.choose_install_action(a)
             self.assertEqual(result, field is not None)
@@ -43,6 +44,10 @@ class Entrypoints(unittest.TestCase):
             self.assertFalse((package/'flash.py').exists())
             self.assertFalse((package/'install-part.cmd').exists())
             self.assertTrue((package/'scripts/installer/part-two-stage.py').exists())
+            self.assertTrue((package/'files/userdata-image.sh').exists())
+            self.assertTrue((package/'docs/README.zh-CN.md').exists())
+            self.assertEqual({p.name for p in package.iterdir() if p.is_file()},
+                             {'OpenWrt-Installer.py','START-HERE.md'})
             self.assertTrue(all(p.name.isascii() for p in package.rglob('*')))
             output=root/'args.json'
             (package/'OpenWrt-Installer.py').write_text(
@@ -51,12 +56,32 @@ class Entrypoints(unittest.TestCase):
                 'raise SystemExit(7)\n')
             extension='cmd' if os.name=='nt' else 'sh'
             for name,flag in api['ACTIONS'].items():
-                args=['C:/saved files/transaction.json'] if name=='resume-internal-install' else ['--ssid','a hotspot']
-                entry=package/(name+'.'+extension)
+                args=['C:/saved files/transaction.json','-y'] if name=='resume-internal-install' else ['--ssid','a hotspot']
+                entry=package/'launchers'/(name+'.'+extension)
                 command=['cmd','/d','/c','.\\'+entry.name,*args] if os.name=='nt' else ['sh',str(entry),*args]
-                result=subprocess.run(command,input='\n',text=True,capture_output=True,timeout=20,cwd=package)
+                result=subprocess.run(command,input='\n',text=True,capture_output=True,timeout=20,cwd=entry.parent)
                 self.assertEqual(result.returncode,7,(name,result.stderr,result.stdout))
-                self.assertEqual(json.loads(output.read_text()),[flag,*args])
+                self.assertEqual(json.loads(output.read_text()),(['--no-pause'] if os.name=='nt' else [])+[flag,*args])
+
+    def test_global_flags_do_not_skip_the_menu_and_erase_tf_by_default(self):
+        for flags in ([], ['--no-pause'], ['--pause']):
+            with patch.object(sys,'argv',['OpenWrt-Installer.py',*flags]), \
+                 patch.object(flash,'choose_install_action',return_value=False) as menu, \
+                 patch.object(flash,'install_sd') as install:
+                self.assertFalse(flash.main())
+                menu.assert_called_once()
+                install.assert_not_called()
+
+    def test_exit_status_and_pause_after_success_failure_and_cancel(self):
+        import io
+        for result,error,expected in ((True,None,0),(None,SystemExit(7),7),(False,None,0)):
+            with patch.object(sys,'argv',['OpenWrt-Installer.py','--pause']), \
+                 patch.object(flash,'main',return_value=result,side_effect=error), \
+                 patch.object(sys,'stdout',io.StringIO()) as output, \
+                 patch('builtins.input',return_value='') as pause:
+                self.assertEqual(flash.run_cli(),expected)
+                pause.assert_called_once()
+                self.assertIn('FAILED' if error else 'SUCCESS' if result else 'CANCELLED',output.getvalue())
 
     def test_stale_windows_binary_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -52,7 +52,9 @@ set -euo pipefail
 # 16: include shared APN, pre-dial replay and recovery glue in APK upgrades too.
 # 17: replace the complete netifd snapshot so old addresses/DNS do not survive.
 # 18: standalone mask conversion and retry a rejected address update safely.
-E5REV=19
+# 20: isolate ambiguous dual-SIM CMTI indices and restore scoped SMS AT context.
+# 21: keep compound SMS prompt transactions out of context restoration.
+E5REV=21
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"
@@ -73,6 +75,7 @@ cp "$HERE/tests/voice-urc.py" "$WORK/voice-urc.py"
 cp "$HERE/tests/voice-recovery.py" "$WORK/voice-recovery.py"
 cp "$HERE/tests/data-priority-hook.py" "$WORK/data-priority-hook.py"
 cp "$HERE/tests/modem-mobility.py" "$WORK/modem-mobility.py"
+cp "$HERE/tests/sms-isolation.py" "$WORK/sms-isolation.py"
 cp "$HERE/files/modemmanager-unisoc-renew" "$WORK/modemmanager-unisoc-renew"
 mkdir -p "$WORK/devices/t551m" "$WORK/openwrt/overlay/usr/libexec"
 cp "$TOP/devices/t551m/network-startup.py" "$WORK/devices/t551m/network-startup.py"
@@ -169,6 +172,7 @@ python3 /work/voice-urc.py "$(dirname "$voice_source")"
 python3 /work/voice-recovery.py "$(dirname "$voice_source")"
 python3 /work/data-priority-hook.py "$(dirname "$voice_source")"
 python3 /work/modem-mobility.py "$(dirname "$voice_source")" /work/modemmanager-unisoc-renew
+python3 /work/sms-isolation.py "$(dirname "$voice_source")"
 rm -f /out/modemmanager*.apk
 find bin/packages -name "modemmanager*-r$((rel + 900 + E5REV)).apk" -exec cp {} /out/ \;
 ls -la /out/modemmanager*.apk

@@ -146,7 +146,7 @@ def main():
     names = subprocess.check_output(['git', '-c', 'safe.directory=' + str(TOP), '-C', str(TOP),
                                      'ls-files', '--cached', '--others', '--exclude-standard', '-z']).decode().split('\0')
     for n in sorted(set(names)):
-        if n.startswith(('boot/', 'devices/', 'openwrt/', 'rootfs/overlay/', 'tools/', 'upstream/')) and (TOP / n).is_file():
+        if n.startswith(('boot/', 'devices/', 'magisk/', 'openwrt/', 'rootfs/overlay/', 'tools/', 'upstream/')) and (TOP / n).is_file():
             sources[n] = digest(TOP / n)
     info = {'name': name, 'profile': a.profile, 'source_commit': rev,
             'build_epoch': epoch, 'kernel_release': release, 'openwrt': '25.12.5',
@@ -159,7 +159,7 @@ def main():
             'compiled_helpers': helpers,
             'modemmanager_sha256': digest(root / 'usr/sbin/ModemManager'),
             'sources': sources}
-    for dest in (root / 'etc/e5/build.json', package / 'BUILD.json'):
+    for dest in (root / 'etc/e5/build.json', files / 'BUILD.json'):
         dest.write_text(json.dumps(info, ensure_ascii=False, indent=2) + '\n')
     (root / 'etc/e5/image-version').write_text(name + '\n')
     (root / 'etc/e5/build-time').write_text(str(epoch) + '\n')
@@ -176,9 +176,8 @@ def main():
         run('gzip', '-1', '-c', image, stdout=out)
     runpy.run_path(str(TOP / 'openwrt/prepare-ext4-tools.py'))['build'](root, files / 'ext4-tools.tar')
     runpy.run_path(str(TOP / 'openwrt/bundle/install-entrypoints.py'))['assemble'](package)
-    for n in ('README.md', 'README.zh-CN.md'):
-        shutil.copy2(TOP / 'openwrt/bundle' / n, package / n)
-    shutil.copy2(TOP / 'openwrt/bundle/【插件】mu300系统切换器.js', package / 'openwrt-system-switch-plugin.js')
+    extras = package / 'extras'; extras.mkdir()
+    shutil.copy2(TOP / 'openwrt/bundle/【插件】mu300系统切换器.js', extras / 'openwrt-system-switch-plugin.js')
     for n in ('device-install-image.sh', 'device-flash-boot.sh', 'device-install-part.sh', 'device-stage-part-update.sh'):
         shutil.copy2(TOP / 'openwrt' / n, files / n)
     (files / 'part-write.sh').write_bytes((TOP / 'openwrt/bundle/part-write.sh').read_bytes().replace(b'\r\n', b'\n'))
@@ -191,26 +190,13 @@ def main():
     for n in ('e5-telnet.py', 'e5-update.py', 'sprd-bt-config.py'):
         shutil.copy2(TOP / 'tools' / n, tools / n)
     shutil.copytree(TOP / 'tools/vbc-profile', tools / 'vbc-profile', ignore=shutil.ignore_patterns('__pycache__'))
-    shutil.copy2(TOP / 'LICENSE', package / 'LICENSE')
+    shutil.copy2(TOP / 'LICENSE', package / 'docs/LICENSE')
     (files / 'device-profile.json').write_text(json.dumps({'profile': a.profile, 'android_models': MODELS[a.profile]}) + '\n')
     (files / 'VERSION').write_text(name + ' (' + release + ')\n')
-    (package / 'START-HERE.zh-CN.md').write_text(f'''# {MODELS[a.profile][0]} TF 卡安装包
-
-仅用于 {MODELS[a.profile][0]}，不要跨机型刷入。解压后运行 OpenWrt-Installer.exe 或 start-installer.cmd（Windows）；Linux/macOS 用 bash start-installer.sh。
-选择 TF 卡首次安装可用 install-to-tf-card；无需 TF 卡时用 install-to-internal-storage（Windows .cmd，Linux/macOS .sh）。
-需要 Python 3.8+、ADB、已解锁且已 root 的 Android A 槽、Magisk BusyBox。
-首次安装会重新分区并清空整张 TF 卡：至少 4 GB，建议 8 GB 以上。
-系统分区约 2 GiB，其余容量留作后续扩展/升级；不是使用已有分区全容量的安装方式。
-先检查包和启动链、提取本机固件，再释放卡、备份同步有差异的 B 槽启动链、写系统并只读校验，最后写 boot_b 和切槽。
-安装器不会自动重启；成功后自行重启进入 OpenWrt。Android A 的启动分区不覆盖。
-此包不包含私有固件、NV、用户配置、主机密钥；安装时从目标机提取固件。
-首次登录 192.168.9.1，账号 root，密码 root；进入后修改密码。
-保留 Docker/KVM 内核支持，不预装 Docker。
-已完成离线文件系统、模块/内核匹配、包校验；这份完整 TF 包尚未实机安装测试。
-详细步骤见 README.zh-CN.md。
-''', encoding='utf-8')
-    checks = {p.relative_to(package).as_posix(): digest(p) for p in sorted(package.rglob('*')) if p.is_file()}
-    (package / 'SHA256SUMS').write_text(''.join(v + '  ' + k + '\n' for k, v in checks.items()))
+    run(a.cc, '-static', '-Os', '-s', '-Wall', '-Wextra', '-Werror',
+        '-o', files / 'e5-bootctl', TOP / 'magisk/e5-linux-switch/bootctl.c')
+    checks = runpy.run_path(str(TOP / 'openwrt/bundle/finalize-package.py'))['finalize'](
+        package, a.profile, files / 'e5-bootctl')
     spec = importlib.util.spec_from_file_location('packaged_flash', package / 'OpenWrt-Installer.py')
     flash = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(flash)
@@ -218,15 +204,11 @@ def main():
     assert flash.gz_usize(str(files / 'openwrt.ext4.gz')) == 2147483648
     a.output.mkdir(parents=True, exist_ok=True)
     archive = a.work / (name + '.zip')
-    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
-        for src in sorted(package.rglob('*')):
-            if src.is_file() and '__pycache__' not in src.parts:
-                z.write(src, name + '/' + src.relative_to(package).as_posix(),
-                        compress_type=zipfile.ZIP_STORED if src.suffix == '.gz' else zipfile.ZIP_DEFLATED)
+    runpy.run_path(str(TOP / 'openwrt/bundle/finalize-package.py'))['write_zip'](package, archive)
     with zipfile.ZipFile(archive) as z:
         assert z.testzip() is None
         for n, want in checks.items():
-            with z.open(name + '/' + n) as stream:
+            with z.open(n) as stream:
                 h = hashlib.sha256()
                 while chunk := stream.read(1024 * 1024):
                     h.update(chunk)
@@ -235,7 +217,7 @@ def main():
     shutil.copyfile(archive, target)
     assert digest(target) == digest(archive)
     (a.output / (archive.name + '.sha256')).write_text(digest(target) + '  ' + target.name + '\n')
-    shutil.copyfile(package / 'BUILD.json', a.output / (name + '.json'))
+    shutil.copyfile(files / 'BUILD.json', a.output / (name + '.json'))
     print('RELEASE:', target, target.stat().st_size, flush=True)
 
 
@@ -253,7 +235,7 @@ def audit(root, profile, release):
     assert (root / 'etc/machine-id').read_text() == ''
     for name in ('sbin/block', 'lib/libblkid-tiny.so', 'etc/init.d/fstab',
                  'usr/sbin/ModemManager', 'usr/libexec/e5-infoscreen/session',
-                 'usr/bin/openssl', 'usr/bin/msmtp'):
+                 'usr/bin/openssl', 'usr/bin/msmtp', 'usr/bin/python3'):
         assert (root / name).stat().st_size, name
     modem = (root / 'etc/config/unisoc_modem').read_text()
     assert ('auto_work_mode' in modem) == (profile == 't551m')

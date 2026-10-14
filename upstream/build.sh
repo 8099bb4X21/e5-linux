@@ -19,12 +19,14 @@ if [ -z "${E5_IN_CONTAINER:-}" ]; then
         -e TZ=CST-8 -e KBUILD_BUILD_TIMESTAMP="${KBUILD_BUILD_TIMESTAMP:-}" \
         -e E5_OUTPUT_UID="$(id -u)" -e E5_OUTPUT_GID="$(id -g)" \
         -v "$K":/src/linux -v e5-mainline-out:/out -v "$HERE":/work \
+        -v "$HERE/../devices/common":/policy:ro \
         e5-mainline-build bash /work/build.sh "$@"
 fi
 
 # An empty variable overrides kbuild's default, so unset it for local builds.
 [ -n "${KBUILD_BUILD_TIMESTAMP:-}" ] || unset KBUILD_BUILD_TIMESTAMP
 cd /src/linux
+python3 /policy/emmc.py .
 KV=$(make -s kernelversion)
 O=/out/$KV
 mkdir -p "$O"

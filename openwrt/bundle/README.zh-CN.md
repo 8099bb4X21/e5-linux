@@ -1,5 +1,11 @@
 # OpenWrt 一键刷入包（E5 / T551M / VIPME M8）
 
+新版完整 ZIP 同时支持 Magisk 内首次部署 TF 卡和电脑解压自定义安装。**详细使用指南位于安装包顶层 `START-HERE.md`**。
+快捷 `.cmd`/`.sh` 全部放在 `launchers/`；镜像和校验清单位于 `files/`，其他辅助文件在 `scripts/`、`docs/`、`extras/`。
+Magisk 内刷入完整固件会清空整张 TF 卡，不是仅安装切换按钮；需要稳定供电及足够的 Android 临时空间。
+原生 Magisk 入口使用本机固件、先校验再写盘，成功后手动重启。新流程仍需逐机型实刷验证。
+
+
 > English: [`README.md`](README.md)
 
 请使用与机型对应的包，不能跨机型刷入。包内 `files/device-profile.json` 标明目标机型；
@@ -16,6 +22,7 @@
 | --- | --- |
 | `OpenWrt-Installer.exe` / `start-installer` | 打开方式选择菜单；Windows 有 exe 时无需另装 Python |
 | `install-to-tf-card` | TF 卡首次安装，会清空整张卡 |
+| `install-to-userdata-image` | 未加密 userdata 内创建指定大小的镜像 |
 | `install-to-internal-storage` | 缩容 userdata、创建独立根分区；加密 data 需同意清空 |
 | `reinstall-internal-system` | 覆盖已有 e5root，不重新缩容、不格式化 Android data |
 | `resume-internal-install` | 输入之前保存的 transaction.json，继续两阶段安装 |
@@ -29,7 +36,7 @@
 * 与安装包对应的设备，**bootloader 已解锁**，Android 已用 **Magisk** 获取 root；
 * Android 在 slot a 运行（出厂状态就是）；
 * 卡槽里插一张 **4 GB 以上的 SD 卡**（建议 8 GB）：它会被重新分区并清空，其余空间留给以后加分区；
-  或者运行 `install-to-internal-storage.cmd` / `bash install-to-internal-storage.sh`，无需插卡；
+  或者运行 `launchers/install-to-internal-storage.cmd` / `bash launchers/install-to-internal-storage.sh`，无需插卡；
 * 一台 Windows、macOS 或 Linux 电脑，装有：
   * **Python 3.8 或更新版本**（Windows 包内有 `OpenWrt-Installer.exe` 时无需安装；其他情况从 https://www.python.org/downloads/ 安装）；
   * **adb**（Android platform-tools：https://developer.android.com/tools/releases/platform-tools ，
@@ -43,18 +50,18 @@
 2. 在 Magisk 里给 **Shell** 超级用户权限（第一次运行时手机会弹窗，选允许）；
 3. 解压刷机包，在目录里运行：
 
-   * **Windows**：双击 `start-installer.cmd`（或在命令提示符里运行 `start-installer.cmd`）；
-   * **macOS / Linux**：`./start-installer.sh`
+   * **Windows**：双击 `launchers/start-installer.cmd`（或在命令提示符里运行 `launchers/start-installer.cmd`）；
+   * **macOS / Linux**：`./launchers/start-installer.sh`
 
-   想先确认设备没问题、什么都不写入，可以先运行 `start-installer.cmd --check` / `./start-installer.sh --check`。
+   想先确认设备没问题、什么都不写入，可以先运行 `launchers/start-installer.cmd --check` / `./launchers/start-installer.sh --check`。
 
    脚本会询问 APN、热点名称和密码。APN 直接回车即可：OpenWrt 会按 SIM 卡的运营商自动选择
    （移动 `cmnet`、联通 `3gnet`、电信 `ctnet`、广电 `cbnet`；其他运营商用网络默认的 APN），
    换卡后也会自动更新。密码直接回车会生成随机密码并在最后显示。也可以写在命令行里：
 
    ```sh
-   start-installer.cmd --ssid E5-OpenWrt --wifi-key 12345678 -y        (Windows)
-   ./start-installer.sh --ssid E5-OpenWrt --wifi-key 12345678 -y       (macOS / Linux)
+   launchers/start-installer.cmd --ssid E5-OpenWrt --wifi-key 12345678 -y        (Windows)
+   ./launchers/start-installer.sh --ssid E5-OpenWrt --wifi-key 12345678 -y       (macOS / Linux)
    ```
 
    在分区、格式化 **SD 卡** 之前会再确认一次，需要输入 `yes`；输入别的或不回答都会中止，
@@ -86,7 +93,7 @@
 
 ### 安装到内置分区（无需 TF 卡）
 
-Windows 双击 `install-to-internal-storage.cmd`，Linux/macOS 运行 `bash install-to-internal-storage.sh`。
+Windows 双击 `launchers/install-to-internal-storage.cmd`，Linux/macOS 运行 `bash launchers/install-to-internal-storage.sh`。
 脚本显示分区大小范围并让你输入（默认：镜像大小 + 1 GiB），再问是否**完全使用空间**把根
 文件系统扩满整个分区（默认否：按镜像约 2 GiB 分配），随后**确认三次**才开始落位。
 下次启动由引导镜像完成三件事：把 userdata 缩到所选大小、建立 `e5root` 分区、把 OpenWrt
@@ -108,7 +115,7 @@ Windows 双击 `install-to-internal-storage.cmd`，Linux/macOS 运行 `bash inst
 从 Android 再回到 OpenWrt（不重装，设置都在，之后默认启动也恢复为 OpenWrt）：连上电脑运行
 
 ```sh
-start-installer.cmd --boot-openwrt          (Windows；macOS / Linux：./start-installer.sh --boot-openwrt)
+launchers/start-installer.cmd --boot-openwrt          (Windows；macOS / Linux：./launchers/start-installer.sh --boot-openwrt)
 ```
 
 如果 OpenWrt 启动失败，设备会在两次尝试后自动回到 Android。
@@ -119,7 +126,7 @@ TF 仍采用预留更新空间的 GPT 布局，不采用占满第一分区的安
 
 ## 加密 userdata 的内置分区安装
 
-运行 `install-to-internal-storage.cmd`（Linux/macOS 用 `./install-to-internal-storage.sh`）。未加密 data 默认保留原有缩容安装流程；
+运行 `launchers/install-to-internal-storage.cmd`（Linux/macOS 用 `./launchers/install-to-internal-storage.sh`）。未加密 data 默认保留原有缩容安装流程；
 检测到 FBE、metadata 或块级加密，必须明确同意清空 Android 用户数据，改走两阶段安装：
 
 1. 选择 OpenWrt 分区大小。若需要用满，选择扩展整个文件系统，或传入 `--grow-fs`。
@@ -133,7 +140,7 @@ TF 仍采用预留更新空间的 GPT 布局，不采用占满第一分区的安
 电脑脚本会等待重新授权；也可以退出，稍后运行：
 
 ```text
-start-installer.cmd --resume-part "backups/part-日期-标识/transaction.json"
+launchers/start-installer.cmd --resume-part "backups/part-日期-标识/transaction.json"
 ```
 
 保留原安装包及整个备份目录，不要再次从第一阶段开始。备份目录含设备镜像和热点设置，请勿公开。
@@ -150,9 +157,9 @@ start-installer.cmd --resume-part "backups/part-日期-标识/transaction.json"
 **保留 Android 用户数据、userdata 文件系统和分区表**，用覆盖重装：
 
 ```text
-reinstall-internal-system.cmd                       （等同于 start-installer.cmd --reinstall-part；macOS/Linux：./reinstall-internal-system.sh）
-start-installer.cmd --reinstall-part          （交互：打印几何与热点设置，确认一次）
-start-installer.cmd --reinstall-part -y       （无人值守）
+launchers/reinstall-internal-system.cmd                       （等同于 launchers/start-installer.cmd --reinstall-part；macOS/Linux：./launchers/reinstall-internal-system.sh）
+launchers/start-installer.cmd --reinstall-part          （交互：打印几何与热点设置，确认一次）
+launchers/start-installer.cmd --reinstall-part -y       （无人值守）
 ```
 
 它会：读设备上现有的 userdata/e5root 几何 → 从 Android 拉取本机固件 → 把包里的新镜像写进 e5root
@@ -170,7 +177,7 @@ start-installer.cmd --reinstall-part -y       （无人值守）
 设备正在运行 OpenWrt、用 USB 线连着电脑时，用新的刷机包运行：
 
 ```sh
-start-installer.cmd --update                (Windows；macOS / Linux：./start-installer.sh --update)
+launchers/start-installer.cmd --update                (Windows；macOS / Linux：./launchers/start-installer.sh --update)
 ```
 
 它会通过 USB 网络的 SSH 主动上传并校验更新文件，不需要电脑开放入站 HTTP 端口。Windows EXE 已内置 SSH 依赖；直接运行 Python 脚本时需要先安装 paramiko。随后更新启动镜像和 OpenWrt 镜像，**保留 OpenWrt 的设置**（`/etc/config`、密码、
@@ -179,7 +186,7 @@ SSH 密钥、流量记录、信息屏上装的应用）。用 `apk` 另装的软
 **装在 SD 卡上**（默认方式）时，新系统写进卡上的第二个分区——第一次更新时在卡的空闲空间里建好，
 以后轮流使用——旧系统照常运行，手机存储（userdata）完全不动。重启后启动新系统。新系统的第一次
 启动是试运行：如果没能启动起来，下一次进入 Linux 时会回到之前的系统，设置保持原样（如果设备
-已经自动回到了 Android，运行 `./start-installer.sh --boot-openwrt`）。更新需要卡上
+已经自动回到了 Android，运行 `./launchers/start-installer.sh --boot-openwrt`）。更新需要卡上
 有约 2.25 GiB 未分配空间（本包镜像 2 GiB，加更新预留）。
 
 装在手机存储里（`--data`）时，新镜像在重启后生效，旧镜像保留为

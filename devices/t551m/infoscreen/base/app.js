@@ -16,7 +16,7 @@ const I18N = {
 		call_volume: '通话音量',
 		overview: '概览', signal: '信号', sms: '短信', hotspot: '热点', device: '设备',
 		back: '返回', delete: '删除', delete_confirm: '再按一次删除', deleted: '已删除',
-		no_sms: '没有短信', unknown_sender: '未知号码', new_sms: '新短信',
+		no_sms: '没有短信', unknown_sender: '未知号码', new_sms: '新短信', unread_sms: '未读短信',
 		advanced: '高级', adv_info: '高级信息', model: '型号',
 		traffic: '流量', today: '今日', this_month: '本月', last_days: '最近 7 天', counting_since: '开始统计于',
 		notifications: '应用通知', notification_open: '查看', notification_later: '稍后', settings: '高级', apps: '应用', no_apps: '没有安装应用', press_again: '再按一次确认', unlocked: '已解锁', pic_close: '按任意键或点一下关闭', app_store: '应用商店', store_install: '安装', store_update: '更新到', store_have: '已安装', store_backend: '含后台（以 root 运行）', store_refresh: '刷新', store_empty: '商店里还没有应用', store_fail: '无法获取应用商店', store_installing: '正在安装…', store_note: '应用来自 github.com/Enceka/infoscreen-plugins，经检查后发布；含后台的应用以 root 运行，只装你信任的', usb_none: '未连接', usb_charger: '仅充电（充电器）', usb_host: '已接电脑，未识别', usb_enumerated: '已连接电脑', usb_lease: '电脑已获取地址', usb_online: '电脑正通过 E5 上网', donate_note: '关闭后不再弹出，以后如有意愿，可以在“高级 → 关于 → 赞赏”里赞赏',
@@ -58,7 +58,7 @@ const I18N = {
 		call_volume: 'Call volume',
 		overview: 'Overview', signal: 'Signal', sms: 'Messages', hotspot: 'Hotspot', device: 'Device',
 		back: 'Back', delete: 'Delete', delete_confirm: 'Press again to delete', deleted: 'Deleted',
-		no_sms: 'No messages', unknown_sender: 'Unknown', new_sms: 'New message',
+		no_sms: 'No messages', unknown_sender: 'Unknown', new_sms: 'New message', unread_sms: 'Unread messages',
 		advanced: 'Advanced', adv_info: 'Details', model: 'Model',
 		traffic: 'Traffic', today: 'Today', this_month: 'This month', last_days: 'Last 7 days', counting_since: 'Counting since',
 		notifications: 'App notification', notification_open: 'Open', notification_later: 'Later', settings: 'Settings', apps: 'Apps', no_apps: 'No apps installed', press_again: 'Press again', unlocked: 'Unlocked', pic_close: 'Any key or a tap closes this', app_store: 'App store', store_install: 'Install', store_update: 'Update to', store_have: 'Installed', store_backend: 'with a backend (runs as root)', store_refresh: 'Refresh', store_empty: 'No apps in the store yet', store_fail: 'Cannot reach the app store', store_installing: 'Installing…', store_note: 'Apps from github.com/Enceka/infoscreen-plugins, checked before they are published; an app with a backend runs as root: install what you trust', usb_none: 'Not connected', usb_charger: 'Charging only (a charger)', usb_host: 'A computer, not enumerated', usb_enumerated: 'Connected to a computer', usb_lease: 'The computer has an address', usb_online: 'The computer is online through the E5', donate_note: 'This is not shown again; it stays under Settings -> About -> Donate',
@@ -122,6 +122,7 @@ let brightness = 120;
 let smsList = [];          // the last /api/sms
 let smsOpen = null;        // the id of the message on screen
 let smsUnread = null;      // the unread ids at the last poll
+let smsReading = false;
 let notificationList = [], notificationSeen = new Set(), notificationDismissed = new Set(), notificationCurrent = null;
 let smsArmed = null;       // the delete button's second-press timer
 
@@ -240,8 +241,7 @@ function renderBar(st) {
 	bat.classList.toggle('charging', chargeState(b) == 'charging');
 	setText('bar-batpct', b.capacity == null ? '--' : cap + '%');
 	tickClock();
-	const n_sms = st.sms?.unread?.length ?? 0;
-	setText('bar-sms', n_sms ? '✉ ' + n_sms : '');
+	renderSmsIndicator(st.sms?.unread);
 	setText('bar-notifications', notificationList.length ? '• ' + notificationList.length : '');
 }
 
@@ -1030,12 +1030,25 @@ function disarmDelete() {
 	b.textContent = t('delete');
 }
 
-function markSmsRead() {
-	if (blank || !(last?.sms?.unread?.length)) return;
-	post('sms-read');
-	last.sms.unread = [];
-	smsUnread = [];
-	setText('bar-sms', '');
+function renderSmsIndicator(ids) {
+	const count = ids?.length ?? 0, icon = $('bar-sms');
+	if (icon.hidden !== !count) icon.hidden = !count;
+	const label = count ? `${t('unread_sms')} (${count})` : '';
+	if (icon.getAttribute('aria-label') !== label) icon.setAttribute('aria-label', label);
+}
+
+async function markSmsRead() {
+	if (blank || locked || window.T551M?.isLocked() || smsReading || !(last?.sms?.unread?.length)) return;
+	const ids = new Set(last.sms.unread);
+	smsReading = true;
+	try {
+		const result = await post('sms-read');
+		if (!result?.ok) return;  // Keep the indication until the shared inbox acknowledges the read.
+		if (last?.sms) last.sms.unread = (last.sms.unread ?? []).filter(id => !ids.has(id));
+		if (smsUnread) smsUnread = smsUnread.filter(id => !ids.has(id));
+		for (const message of smsList) if (ids.has(message.id)) message.unread = false;
+		renderSmsIndicator(last?.sms?.unread);
+	} finally { smsReading = false; }
 }
 
 // a message in the unread list that was not there at the last poll: light

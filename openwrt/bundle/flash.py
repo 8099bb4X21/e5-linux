@@ -178,7 +178,7 @@ def default_hotspot_name():
 def check_package():
     say('检查刷机包 / checking the package')
     bad = None
-    with busy('校验文件 / verifying the files'), open(os.path.join(B, 'SHA256SUMS')) as f:
+    with busy('校验文件 / verifying the files'), open(checksum_path()) as f:
         for line in f:
             want, name = line.split(None, 1)
             name = name.strip()
@@ -191,6 +191,11 @@ def check_package():
         print('   ' + f.read().strip())
 
 
+def checksum_path():
+    modern = os.path.join(F, 'SHA256SUMS')
+    return modern if os.path.isfile(modern) else os.path.join(B, 'SHA256SUMS')
+
+
 # ------------------------------------------------------------------ adb
 
 ADB = None
@@ -199,7 +204,8 @@ SU = None
 
 def find_adb():
     global ADB
-    for c in (shutil.which('adb'), os.path.join(B, 'platform-tools', 'adb.exe'),
+    for c in (shutil.which('adb'), os.path.join(B, 'tools', 'adb.exe'),
+              os.path.join(B, 'tools', 'adb'), os.path.join(B, 'platform-tools', 'adb.exe'),
               os.path.join(B, 'platform-tools', 'adb')):
         if c and os.path.isfile(c):
             ADB = c
@@ -512,11 +518,12 @@ OpenWrt Installer / 安装助手
   4. Resume internal installation / 继续加密 data 的两阶段安装
   5. Switch to OpenWrt / 从 Android 切回已安装的 OpenWrt
   6. Update OpenWrt / 更新已运行的 OpenWrt
+  7. Install to userdata image / userdata 镜像安装（仅未加密 data）
   0. Exit / 退出
 ''')
     choice = ask('Choose / 请选择 [0]: ', '0')
     modes = {'1': 'tf', '2': 'part', '3': 'reinstall_part',
-             '5': 'boot_openwrt', '6': 'update'}
+             '5': 'boot_openwrt', '6': 'update', '7': 'data'}
     if choice == '0':
         return False
     if choice == '4':
@@ -594,6 +601,12 @@ def unmount_android_sd(dev):
         die(f'{dev} is still mounted at {", ".join(remaining)}. '
             'Unmount the SD volume in Android storage settings (leave the card inserted) '
             'and retry. The partition table was not changed.')
+    name = dev.rsplit('/', 1)[-1]
+    holders = su_checked('检查 SD 映射占用 / checking SD device-mapper holders',
+                         f'for p in /sys/class/block/{name}/holders/* /sys/class/block/{name}p*/holders/*; do '
+                         '[ ! -e "$p" ] || echo "$p"; done; true').strip()
+    if holders:
+        die(f'{dev} still has active mapped devices: {holders}. No partition was changed.')
 
 
 def install_sd(a):
@@ -841,6 +854,7 @@ def install(a):
     steps(6)
     find_adb()
     android_checks()
+    check_userdata_image_source()
     bj = boot_json()
     install_preflight()
     img = os.path.join(F, 'openwrt.ext4.gz')
@@ -932,6 +946,19 @@ def install(a):
   回 Android:      屏幕 高级 -> 系统 -> 下次启动 Android, or: e5-next-boot android; reboot
   若启动失败，设备会在两次尝试后自动回到 Android。
   If the boot fails, the E5 falls back to Android after two tries.''')
+
+
+def check_userdata_image_source():
+    """Android can read decrypted /data while initramfs cannot. Refuse early."""
+    state = sh('getprop ro.crypto.state').strip()
+    kind = sh('getprop ro.crypto.type').strip()
+    mounts = su_checked('检查 userdata 镜像的启动条件 / checking plaintext userdata', 'cat /proc/mounts')
+    source = next((line.split()[0] for line in mounts.splitlines()
+                   if len(line.split()) > 2 and line.split()[1] == '/data'), '')
+    if (state != 'unencrypted' or kind in ('file', 'block') or not source.startswith('/dev/block/')
+            or source.startswith(('/dev/block/dm-', '/dev/mapper/'))):
+        die('userdata image requires confirmed unencrypted, unmapped /data; '
+            'use TF or independent internal installation instead. No image or boot was written.')
 
 
 def part_userdata_policy(a):
@@ -1201,6 +1228,7 @@ def main():
     g.add_argument('--update', action='store_true')
     g.add_argument('--boot-openwrt', action='store_true')
     g.add_argument('--check', action='store_true')
+    g.add_argument('--verify-package', action='store_true', help='verify package files without accessing a device')
     g.add_argument('--data', action='store_true',
                    help="install to the phone's storage (userdata) as before; the SD card is the default")
     g.add_argument('--part', action='store_true',
@@ -1221,9 +1249,12 @@ def main():
     ap.add_argument('--format-userdata', action='store_true',
                     help='erase ALL Android user data before internal-partition installation; requires --part')
     ap.add_argument('-y', action='store_true')
+    ap.add_argument('--no-pause', action='store_true', help='do not wait for Enter on exit')
+    ap.add_argument('--pause', action='store_true', help='wait for Enter on exit')
     a = ap.parse_args()
-    if (a.menu or len(sys.argv) == 1) and not choose_install_action(a):
-        return
+    if (a.menu or not any((a.tf, a.data, a.part, a.reinstall_part, a.resume_part,
+                          a.update, a.boot_openwrt, a.check, a.verify_package))) and not choose_install_action(a):
+        return False
     if a.image_size is not None and not a.data:
         ap.error('--image-size requires --data / install-userdata')
     if a.part_size is not None and not a.part:
@@ -1237,7 +1268,9 @@ def main():
     if sys.version_info < (3, 8):
         die('Python 3.8 or newer is needed')
     check_package()
-    if a.resume_part:
+    if a.verify_package:
+        print('Package verified / 安装包校验通过，未连接设备。')
+    elif a.resume_part:
         part_two_stage('resume', a)
     elif a.reinstall_part:
         part_two_stage('reinstall', a)
@@ -1253,6 +1286,36 @@ def main():
         install_part(a)     # an internal partition; the boot image finishes it
     else:
         install_sd(a)
+    return True
+
+
+def run_cli():
+    started = time.monotonic()
+    rc, outcome = 0, 'SUCCESS / 成功'
+    try:
+        if main() is False:
+            outcome = 'CANCELLED / 已取消'
+    except KeyboardInterrupt:
+        rc, outcome = 130, 'CANCELLED / 已中断，请检查当前安装阶段后再操作'
+    except SystemExit as error:
+        rc = error.code if isinstance(error.code, int) else 1
+        if not rc:
+            return 0  # argparse help
+        if not isinstance(error.code, int):
+            print(str(error.code), file=sys.stderr, flush=True)
+        outcome = 'FAILED / 失败；请保留上方错误与备份，不要盲目重跑分区步骤'
+    except Exception as error:
+        rc, outcome = 1, 'FAILED / 失败'
+        print('\n错误 / error: ' + str(error), file=sys.stderr, flush=True)
+    print('\n' + '=' * 60)
+    print(f'[{outcome}]  {time.monotonic() - started:.1f} s', flush=True)
+    print('=' * 60, flush=True)
+    if '--no-pause' not in sys.argv and ('--pause' in sys.argv or sys.stdin.isatty()):
+        try:
+            input('按 Enter 关闭 / Press Enter to close...')
+        except (EOFError, KeyboardInterrupt):
+            pass
+    return rc
 
 
 if __name__ == '__main__':
@@ -1263,7 +1326,4 @@ if __name__ == '__main__':
         sys.argv = [os.path.basename(_tool), *sys.argv[3:]]
         runpy.run_path(_tool, run_name='__main__')
         sys.exit(0)
-    try:
-        main()
-    except KeyboardInterrupt:
-        die('interrupted')
+    sys.exit(run_cli())

@@ -14,6 +14,7 @@ def apply(kernel):
     head = subprocess.check_output(['git', '-C', str(kernel), 'rev-parse', 'HEAD'], text=True).strip()
     if not head.startswith(COMMIT):
         raise ValueError('Expected E5 kernel ' + COMMIT)
+    runpy.run_path(str(SHARED.parent / 'common/emmc.py'))['apply'](kernel)
     # A separate checkout is essential: the donor replaces the charger and
     # disables E5's touch firmware and amplifier. Never build E5 from that tree.
     for path in ('drivers/power/supply/bq2560x-charger.c',

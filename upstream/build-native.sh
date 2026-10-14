@@ -25,6 +25,7 @@ export CCACHE_DIR="$TOP/work/ccache"
 echo "== cross gcc $("$X"gcc -dumpversion) ($X)"
 
 cd "$K"
+python3 "$TOP/devices/common/emmc.py" .
 KV=$(make -s kernelversion)
 O="${E5_OUTDIR:-$TOP/work/build/$KV}"
 mkdir -p "$O"

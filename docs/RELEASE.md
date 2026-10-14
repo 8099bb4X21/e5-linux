@@ -60,7 +60,8 @@ ModemManager 构建结束后会生成 `out/openwrt/e5-modemmanager-build.json`�
 
 每个 Release 提供：
 
-- ZIP 和 TAR.GZ 一键刷入包。
+- ZIP 和 TAR.GZ 一键刷入包。新版 ZIP 顶层直接放置 Magisk 入口，可在 Android 内首次部署 TF 卡；
+  ZIP 和 TAR.GZ 也可解压后使用电脑安装器。TAR.GZ 不可直接交给 Magisk。
 - `e5-linux-switch-*.zip`：Android 切回已安装 Linux 的 [Magisk 模块](../magisk/README.md)。
 - `SHA256SUMS`：刷入包和 Magisk 模块的 SHA-256。
 - `build.json`：UTC+8 时间、软件版本、源码提交和输入归档 SHA-256。
@@ -72,3 +73,23 @@ ModemManager 构建结束后会生成 `out/openwrt/e5-modemmanager-build.json`�
 
 当前工作流发布 OpenWrt。Debian 一键安装器仍使用独立构建的 Debian 镜像，其通用
 发布准备不属于此工作流。
+
+## 新版安装包目录与验证
+
+顶层保留 `OpenWrt-Installer.exe`、`OpenWrt-Installer.py`、详细指南 `START-HERE.md` 和
+Magisk 必需的 `module.prop/customize.sh/skip_mount`；快捷脚本在 `launchers/`，
+镜像与包内 SHA-256 清单在 `files/`，许可证和补充说明在 `docs/`。
+ZIP 中不再套一层包名目录，保证 Magisk 能识别根部入口。TAR.GZ 仍以包名目录封装，
+发布校验按相对路径比较两者，不要求外层目录相同。
+
+E5/T551M/M8 共用 `install-entrypoints.py` 和 `finalize-package.py`；
+只保留一份 `files/openwrt.ext4.gz`，Magisk 与电脑安装共用，不再额外打包第二份 rootfs。
+Magisk 在 Android 的临时镜像中使用目标 OpenWrt 的 Python 转换本机音频/蓝牙固件，
+完成固件与启动链检查、释放 TF、写根并只读校验后，最后写 boot 和启动控制。
+保留 E5 的 Android A / OpenWrt B 约定及 TF 更新预留空间，不采用 MU300 的整分区布局。
+这个新入口尚未逐机型实刷验证，离线测试通过不能替代实机确认。
+
+修改 `openwrt/bundle/flash.py` 后，需要在 Windows 运行
+`python tools/build-flash-exe.py` 再生成发行包；旧 EXE 指纹会被打包器拒绝。
+两个打包入口还会静态编译 ARM64 `e5-bootctl`，不把构建机的可执行文件误当作设备程序。
+本轮仅修改源码与离线测试，尚未更新 EXE 或重新生成发行固件。
