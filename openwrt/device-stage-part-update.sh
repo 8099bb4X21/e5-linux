@@ -3,7 +3,7 @@
 set -eu
 stage=${1:?upload directory}
 case "$stage" in /tmp/e5-update-*) ;; *) exit 1 ;; esac
-if [ ! -f /etc/e5/part-root ]; then
+if [ ! -f /etc/e5/part-root ] && [ ! -f /etc/e5/sd-root ]; then
     E5_IMAGE_SIZE=${E5_IMAGE_SIZE:?} sh "$stage/device-install-image.sh" "$stage/openwrt.ext4.gz"
     exit
 fi
@@ -11,9 +11,16 @@ exec 9>/run/e5-part-update.lock
 flock -n 9 || { echo 'another partition update is running' >&2; exit 1; }
 [ ! -e /.e5-update/request ] || { echo 'an update is already pending' >&2; exit 1; }
 [ ! -L /.e5-update ] || { echo 'unsafe update staging directory' >&2; exit 1; }
-dev=$(cat /run/e5linux/part-root-dev)
+kind=part
+[ ! -f /etc/e5/sd-root ] || kind=sd
+dev=$(cat "/run/e5linux/$kind-root-dev")
 node=${dev##*/}; disk=${node%p*}
-[ -b "$dev" ] && grep -qx PARTNAME=e5root "/sys/class/block/$node/uevent"
+[ -b "$dev" ]
+if [ "$kind" = part ]; then
+    grep -qx PARTNAME=e5root "/sys/class/block/$node/uevent"
+else
+    [ "$(cat /sys/class/block/$disk/device/type)" = SD ]
+fi
 [ "$(awk '$2=="/" {print $1}' /proc/mounts | tail -1)" = "$dev" ]
 [ "$(cat /etc/e5/device-profile)" = "${E5_UPDATE_PROFILE:?}" ]
 bytes=$(( $(cat "/sys/class/block/$node/size") * 512 ))
@@ -21,7 +28,7 @@ bytes=$(( $(cat "/sys/class/block/$node/size") * 512 ))
 case "${E5_IMAGE_SHA256:?}" in *[!0-9a-f]*|'') exit 1 ;; esac
 [ "${#E5_IMAGE_SHA256}" = 64 ]
 gzip -t "$stage/openwrt.ext4.gz"
-# All persistent staging data lives on e5root; encrypted userdata is untouched.
+# Persistent staging lives on the selected root; Android userdata is untouched.
 mkdir -p /.e5-update
 chmod 700 /.e5-update
 cp "$stage/openwrt.ext4.gz" "$stage/ext4-tools.tar" /.e5-update/
@@ -56,9 +63,9 @@ payload=$(du -k openwrt.ext4.gz firmware.tar settings.tar ext4-tools.tar | awk '
 }
 cid=$(cat "/sys/class/block/$disk/device/cid")
 {
-    echo VERSION=1; echo CID="$cid"; echo ROOT_BYTES="$bytes"
+    echo VERSION=1; echo KIND="$kind"; echo CID="$cid"; echo ROOT_BYTES="$bytes"
     echo RAW_BYTES="$E5_IMAGE_SIZE"; echo RAW_SHA256="$E5_IMAGE_SHA256"
     echo PROFILE="$E5_UPDATE_PROFILE"
 } > request.ready
 sync
-echo '== staged independent-partition update; settings and firmware saved'
+echo '== staged offline root update (no partition changes); settings and firmware saved'

@@ -25,7 +25,7 @@ def finalize(package, profile, bootctl):
     package, bootctl = Path(package), Path(bootctl)
     files = package / 'files'
     for name in ('OpenWrt-Installer.py', 'START-HERE.md', 'files/android-bootchain.sh',
-                 'files/collect-device-files.sh', 'scripts/tools/sprd-bt-config.py',
+                 'files/collect-device-files.sh', 'files/ext4-tools.tar', 'scripts/tools/sprd-bt-config.py',
                  'scripts/tools/vbc-profile/vbc-profile.py'):
         if not (package / name).is_file():
             raise ValueError('missing package component: ' + name)
@@ -46,7 +46,7 @@ def finalize(package, profile, bootctl):
             raw_hash.update(chunk)
     if size <= 0 or size % 512:
         raise ValueError('root image must have a positive sector-aligned size')
-    for name in ('magisk-tf-install.sh', 'magisk-firmware.py'):
+    for name in ('magisk-tf-install.sh', 'magisk-firmware.py', 'android-tf.sh'):
         (files / name).write_bytes((HERE / name).read_bytes().replace(b'\r\n', b'\n'))
     shutil.copyfile(HERE / 'MU300-INSTALLER-LICENSE', package / 'docs/MU300-INSTALLER-LICENSE')
     target = files / 'e5-bootctl'
@@ -58,7 +58,7 @@ def finalize(package, profile, bootctl):
     (package / 'module.prop').write_text(
         f'id=e5_openwrt_tf_{profile}\nname={MODELS[profile]} OpenWrt TF Installer\n'
         'version=1.0\nversionCode=1\nauthor=e5-linux contributors\n'
-        'description=ERASES THE ENTIRE TF CARD and deploys OpenWrt. Android userdata is preserved. Reboot manually.\n',
+        'description=ERASES THE SELECTED TF PARTITION (or unpartitioned card) and deploys OpenWrt. Android userdata is preserved. Reboot manually.\n',
         encoding='utf-8', newline='\n')
     values = {'PROFILE': profile, 'ANDROID_MODEL': MODELS[profile],
               'DEFAULT_SSID': {'e5': 'E5', 't551m': 'T551M', 'm8': 'M8'}[profile] + '-OpenWrt',

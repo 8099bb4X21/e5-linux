@@ -1,13 +1,13 @@
-# Sourced by init: the only write target is the existing, unmounted e5root.
+# Sourced by init: replace only the verified, unmounted internal or TF root.
 part_update_pending() {
+    [ ! -e /run/tf-update-conflict ] || return 1
     [ -s /run/part-update-pending ] || return 0
     local dev= node disk mp=/part-update-old ram=/run/part-update
-    local VERSION= CID= ROOT_BYTES= RAW_BYTES= RAW_SHA256= PROFILE= kv actual want got producer writer rc1 rc2
+    local KIND=part VERSION= CID= ROOT_BYTES= RAW_BYTES= RAW_SHA256= PROFILE= kv actual want got producer writer rc1 rc2
     dev=$(cat /run/part-update-pending)
     node=${dev##*/}
-    grep -qx PARTNAME=e5root "/sys/class/block/$node/uevent" || return 1
     mkdir -p "$mp"
-    mount -t ext4 -o ro "$dev" "$mp" || return 0
+    mount -t ext4 -o ro,noload "$dev" "$mp" || return 0
     [ -f "$mp/.e5-update/request" ] || { umount "$mp"; return 0; }
     . /etc/part-progress.sh
     part_progress_start
@@ -15,18 +15,24 @@ part_update_pending() {
     node=${dev##*/}; disk=${node%p*}
     for kv in $(cat "$mp/.e5-update/request"); do
         case "$kv" in
+            KIND=*) KIND=${kv#*=} ;;
             VERSION=*) VERSION=${kv#*=} ;; CID=*) CID=${kv#*=} ;;
             ROOT_BYTES=*) ROOT_BYTES=${kv#*=} ;; RAW_BYTES=*) RAW_BYTES=${kv#*=} ;;
             RAW_SHA256=*) RAW_SHA256=${kv#*=} ;; PROFILE=*) PROFILE=${kv#*=} ;;
             *) umount "$mp"; part_fail 'unknown update request field'; return 1 ;;
         esac
     done
+    case "$KIND" in
+        part) grep -qx PARTNAME=e5root "/sys/class/block/$node/uevent" || { umount "$mp"; return 1; } ;;
+        sd) [ "$(cat /sys/class/block/$disk/device/type)" = SD ] || { umount "$mp"; return 1; } ;;
+        *) umount "$mp"; return 1 ;;
+    esac
     case "$ROOT_BYTES:$RAW_BYTES" in *[!0-9:]*|:*|*:) umount "$mp"; part_fail 'invalid update size'; return 1 ;; esac
     case "$RAW_SHA256" in *[!0-9a-f]*|'') umount "$mp"; part_fail 'invalid image hash'; return 1 ;; esac
     if [ "$VERSION" != 1 ] || [ "$CID" != "$(cat /sys/class/block/$disk/device/cid)" ] ||
        [ "$ROOT_BYTES" != "$(blockdev --getsize64 "$dev")" ] ||
        [ "$PROFILE" != "$(cat "$mp/etc/e5/device-profile")" ] ||
-       [ ! -f "$mp/etc/e5/part-root" ] || [ "$RAW_BYTES" -le 0 ] || [ "$RAW_BYTES" -gt "$ROOT_BYTES" ]; then
+       [ ! -f "$mp/etc/e5/$KIND-root" ] || [ "$RAW_BYTES" -le 0 ] || [ "$RAW_BYTES" -gt "$ROOT_BYTES" ]; then
         umount "$mp"; part_fail 'update device/geometry verification'; return 1
     fi
     # Copy EVERY payload off the old root before unmounting/overwriting it.
@@ -82,10 +88,17 @@ part_update_pending() {
     tar -xf firmware.tar -C "$new" && tar -xf settings.tar -C "$new" || { part_fail 'restore archives'; return 1; }
     cp -a "$ram/new-phone/." "$new/etc/e5-infoscreen/plugins/phone/"
     cp "$ram/new-version/"* "$new/etc/e5/"
-    rm -f "$new/etc/e5/sd-root" "$new/etc/e5/sd-trial"
-    printf 'e5root /dev/%s\n' "$disk" > "$new/etc/e5/part-root"
-    touch "$new/etc/e5/part-autoboot"
-    echo 1 > "$new/etc/e5/part-trial"
+    if [ "$KIND" = part ]; then
+        rm -f "$new/etc/e5/sd-root" "$new/etc/e5/sd-trial"
+        printf 'e5root /dev/%s\n' "$disk" > "$new/etc/e5/part-root"
+        touch "$new/etc/e5/part-autoboot"
+        echo 1 > "$new/etc/e5/part-trial"
+    else
+        # Restored sd-gen/sd-system keep existing multi-root cards selectable.
+        # Updating never allocates another root or modifies the registry/GPT.
+        rm -f "$new/etc/e5/part-root" "$new/etc/e5/part-autoboot" "$new/etc/e5/part-trial" "$new/etc/e5/sd-trial"
+        [ -f "$new/etc/e5/sd-root" ] || { part_fail 'TF boot marker'; return 1; }
+    fi
     [ -x "$new/sbin/init" ] && [ -s "$new/lib/firmware/wcnmodem.bin" ] &&
         [ "$PROFILE" = "$(cat "$new/etc/e5/device-profile")" ] || { part_fail 'restored system verification'; return 1; }
     (cd "$new" && find etc lib/firmware opt/e5/android -type f -exec sha256sum '{}' ';') > "$ram/restored.sha256" || {

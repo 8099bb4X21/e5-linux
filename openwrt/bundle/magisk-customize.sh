@@ -6,7 +6,7 @@ SKIPUNZIP=0
 [ "$(uname -m)" = aarch64 ] || abort '需要 ARM64 内核 / ARM64 kernel required'
 ui_print '***************************************'
 ui_print ' OpenWrt TF deployment / TF 卡部署'
-ui_print ' TF 卡原有数据将全部清空 / ENTIRE TF CARD WILL BE ERASED'
+ui_print ' TF 第一分区（无分区则整卡）清空 / SELECTED TF TARGET WILL BE ERASED'
 ui_print ' 不格式化 userdata；不写 NV / No userdata format or NV writes'
 ui_print '***************************************'
 E5_PACKAGE=$MODPATH

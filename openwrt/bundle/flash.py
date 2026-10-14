@@ -3,15 +3,15 @@
 
   OpenWrt-Installer         choose the installation or maintenance action
   OpenWrt-Installer --tf    first install onto the **SD card**, from rooted
-                            Android over adb: the card is partitioned and
-                            formatted, OpenWrt goes onto it
+                            Android over adb: the first partition (or raw card) is
+                            formatted and fully used for OpenWrt
   OpenWrt-Installer --data  the same onto the phone's storage (userdata), the
                             form before the SD card; it asks three times
   OpenWrt-Installer --part  first install onto an internal eMMC partition,
                             without an SD card: the next boot shrinks userdata,
                             creates the partition and writes OpenWrt into it
   OpenWrt-Installer --update update, from the running e5-linux over the USB LAN
-                            (OpenWrt's settings and installed apps kept)
+                            (OpenWrt settings kept; extra packages not migrated)
   OpenWrt-Installer --boot-openwrt from Android back to installed OpenWrt (adb)
   OpenWrt-Installer --check the checks and the device's files, from Android, and
                             nothing written (a dry run of the first install)
@@ -512,7 +512,7 @@ def confirm(prompt, word='yes'):
 def choose_install_action(a):
     print('''
 OpenWrt Installer / 安装助手
-  1. Install to TF card / TF 卡首次安装（清空整张卡）
+  1. Install to TF card / TF 卡首次安装（清空第一分区，无分区则整卡）
   2. Install to internal storage / 缩容 userdata 安装
   3. Reinstall internal system / 覆盖重装已有内置系统
   4. Resume internal installation / 继续加密 data 的两阶段安装
@@ -612,26 +612,28 @@ def unmount_android_sd(dev):
 def install_sd(a):
     """The default first install: OpenWrt onto the SD card.
 
-    The card is partitioned (GPT, one Linux partition) and the generic OpenWrt
-    image is written onto the partition -- the partition *is* the filesystem, so
-    boot/init mounts it directly (the marked card, /etc/e5/sd-root) instead of a
-    file on userdata.  The device's own firmware is unpacked into it, so the
-    card carries the whole system and userdata is not the root's home. The
-    differing B-slot boot chain is backed up and synchronized from Android A;
-    boot_b and the boot target/control are committed after root verification."""
+    The existing first partition is used in full; an unpartitioned card uses
+    its whole device. No GPT changes or alternate OTA roots are made. Only the
+    selected target is erased. Firmware and root readback precede boot writes.
+    """
     steps(9)
     find_adb()
     android_checks()
     bj = boot_json()
     install_preflight()
     sd = device_sd()
-    capacity = device_size(sd)
+    push(os.path.join(F, 'android-tf.sh'), f'{TMP}/e5-android-tf.sh', 'TF helper')
+    part = su_checked('选择 TF 目标 / selecting TF target',
+                      f'sh {TMP}/e5-android-tf.sh target {sd}').strip()
+    if part not in (sd, sd + 'p1'):
+        die('unexpected TF target: ' + part)
+    capacity = device_size(part)
     img = os.path.join(F, 'openwrt.ext4.gz')
     raw_size, raw_sha = gz_metadata(img)
-    needed = raw_size + (2 << 20) + 34 * 512
+    needed = raw_size
     if capacity < max(needed, 2 << 30):
         die(f'SD capacity is insufficient: {sd} has {capacity / (1 << 20):.1f} MiB; '
-            f'image/GPT/alignment require {needed / (1 << 20):.1f} MiB '
+            f'the image requires {needed / (1 << 20):.1f} MiB '
             '(minimum supported card: 2048 MiB). Nothing was written.')
     readonly = su_checked('检查 SD 只读状态 / checking card write protection',
                           f'cat /sys/class/block/{sd.rsplit("/", 1)[-1]}/ro').strip()
@@ -652,10 +654,10 @@ def install_sd(a):
         die("the hotspot key must have 8-63 characters, and no ' anywhere")
 
     say(f'准备 SD 卡 / preparing the card ({sd})')
-    print(f'   {sd}  {device_size(sd) >> 30} GiB')
+    print(f'   {part}  {capacity / (1 << 30):.2f} GiB; no OTA space reserved')
     if not a.y:
-        print('   OpenWrt 会装到这张卡上，卡上现有的数据会全部丢失。')
-        print('   OpenWrt goes onto this card and everything on it is erased.')
+        print('   OpenWrt 会清空所选 TF 目标并使用其全部容量；不修改分区表。')
+        print('   All data on the selected TF target is erased; its partition table is unchanged.')
         if not confirm('   输入 yes 继续 / type yes to continue: '):
             die('aborted: nothing was written, the card is untouched')
 
@@ -665,32 +667,15 @@ def install_sd(a):
         size = pull_device_files(work, f'{TMP}/e5-device-files.tar')
         push(img, f'{TMP}/openwrt.ext4.gz', 'openwrt.ext4.gz')
         push(os.path.join(F, 'boot.img'), f'{TMP}/e5-boot.img', 'boot.img')
-        su_checked('检查 SD 分区工具 / checking partition tools',
-                   'command -v sgdisk >/dev/null; command -v blockdev >/dev/null')
-        say(f'分区并格式化 / partitioning and formatting the card')
+        push(os.path.join(F, 'ext4-tools.tar'), f'{TMP}/e5-tf-ext4-tools.tar', 'ext4 tools')
+        su_checked('检查 TF 工具 / checking TF tools', 'command -v blockdev >/dev/null')
         unmount_android_sd(sd)
         bootchain('sync')
-        # The root partition is only as large as the image: the rest of the card
-        # stays free, for more systems (another partition the initramfs can be
-        # pointed at) and a persistent store of its own.  So the filesystem is
-        # not grown to the card -- it fills the partition exactly as built.
-        sec = (raw_size + 511) // 512 + 2048       # a MiB of slack past it
-        su_checked('清理 GPT / clearing partition table', f'sgdisk --zap-all {sd}')
-        su_checked('建立 SD 根分区 / creating root partition',
-                   f'sgdisk --new=1:0:+{sec} --typecode=1:8300 --change-name=1:e5root {sd}')
-        su_checked('刷新 SD 分区表 / refreshing kernel partition table', f'blockdev --rereadpt {sd}')
-        part = sd + 'p1'
-        for _ in range(20):
-            if 'ok' in su(f'[ -b {part} ] && echo ok'):
-                break
-            time.sleep(1)
-        else:
-            details = su(f'ls -l {sd}*; cat /proc/partitions; dmesg | grep -iE "mmc|sdhci|error|crc" | tail -15')
-            die(f'{part} did not appear within 20 seconds after partitioning.\n{details}')
-        actual_size = device_size(part)
-        if actual_size < raw_size or actual_size != sec * 512:
-            die(f'{part} has an unexpected size: {actual_size} bytes; expected {sec * 512}. '
-                'The kernel may still hold the old partition table; no image was written.')
+        # Revalidate selection and geometry after vold releases the card.
+        selected = su_checked('重新检查 TF / rechecking TF target',
+                              f'sh {TMP}/e5-android-tf.sh target {sd}').strip()
+        if selected != part or device_size(part) != capacity:
+            die('TF target changed after preflight; no image was written')
 
         say('写入 OpenWrt / OpenWrt -> the card')
         with busy('解压到 SD 卡 / unpacking onto the card'):
@@ -702,9 +687,10 @@ def install_sd(a):
                        f'[ "$(head -c {raw_size} {part} | sha256sum | cut -d " " -f1)" = {raw_sha} ]',
                        timeout=900)
         su(f'rm -f {TMP}/openwrt.ext4.gz')
-        # (no e2fsck here: the image is built by a newer e2fsprogs than the
-        # device's, whose feature set -- metadata_csum_seed, orphan_file -- the
-        # device's e2fsck calls an error.  The mount below is the check.)
+        with busy('检查并扩容到 TF 目标全部容量 / checking and growing TF filesystem'):
+            su_checked('扩容 TF / growing TF filesystem',
+                       f'sh {TMP}/e5-android-tf.sh grow {part} {TMP}/e5-tf-ext4-tools.tar '
+                       f'{TMP}/e5-tf-tools-{uuid.uuid4().hex}', timeout=1800)
 
         say('这台设备的文件和首次启动设置 / this device\'s files and the first boot\'s settings')
         conf = os.path.join(work, 'install.conf')
@@ -759,9 +745,7 @@ def install_sd(a):
         su_checked('卸载并同步 SD / unmounting card', f'sync; umount {m}')
         su(f'rm -f {TMP}/e5-device-files.tar {checksums}')
         print(f'   OpenWrt and {size} bytes of device files are on the card')
-        free = device_size(sd) - device_size(part)
-        print(f'   {free >> 30}.{(free % (1 << 30)) * 10 // (1 << 30)} GiB of the card '
-              'are left free, for more partitions (systems, a store)')
+        print(f'   TF filesystem uses {capacity / (1 << 30):.2f} GiB; updates use the PC installer')
 
         say('写入启动镜像 / boot image -> boot_b')
         with busy('写入并校验 boot_b / writing and verifying boot_b'):
@@ -783,7 +767,7 @@ def install_sd(a):
     say('安装完成，请手动重启进入 OpenWrt / installed; reboot manually to enter OpenWrt')
     print(f'''
   第一次启动约 2 分钟 / the first boot takes about 2 minutes.
-  OpenWrt 在 SD 卡上 / OpenWrt is on the SD card ({sd}p1).
+  OpenWrt 在 SD 卡上 / OpenWrt is on the SD card ({part}).
   热点 / hotspot:  {ssid}   密码 / key:  {key}
   管理 / admin:    http://192.168.9.1  (LuCI, root / root -- 请改密码 / change it)
   回 Android:      屏幕 高级 -> 系统 -> 下次启动 Android, or: e5-next-boot android; reboot
@@ -1224,7 +1208,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group()
     g.add_argument('--menu', action='store_true', help='choose an installation or maintenance action')
-    g.add_argument('--tf', action='store_true', help='first install onto the TF card (erases the whole card)')
+    g.add_argument('--tf', action='store_true', help='first install onto the existing TF first partition (whole card only if unpartitioned); erases that target')
     g.add_argument('--update', action='store_true')
     g.add_argument('--boot-openwrt', action='store_true')
     g.add_argument('--check', action='store_true')

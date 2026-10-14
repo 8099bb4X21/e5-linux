@@ -132,6 +132,8 @@ def main():
     package = a.work / name
     files = package / 'files'
     files.mkdir(parents=True)
+    shutil.copyfile(a.kernel / 'config', files / 'kernel.config')
+    shutil.copyfile(a.kernel / 'modules.in-tree', files / 'modules.in-tree')
     init = a.work / 'init'
     init.write_bytes((TOP / 'boot/init').read_bytes().replace(b'\r\n', b'\n'))
     run('python3', TOP / 'boot/build-boot-image.py', '--stock-boot', a.stock_boot,

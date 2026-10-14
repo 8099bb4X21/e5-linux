@@ -60,6 +60,9 @@ cd "$K"
 args=(O="$O" ARCH=arm64 LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu-)
 make "${args[@]}" allnoconfig > "$O/config.log"
 scripts/kconfig/merge_config.sh -m -O "$O" "$O/.config" "$O/m8.config" >> "$O/config.log"
+if grep -q '^config NFS_V4_1$' fs/nfs/Kconfig; then
+    scripts/config --file "$O/.config" --enable NFS_V4_1
+fi
 make "${args[@]}" olddefconfig >> "$O/config.log"
 for option in SPRD_UMS9620_CLK USB_DWC3 USB_DWC3_DUAL_ROLE USB_XHCI_PLATFORM USB_ROLE_SWITCH USB_RTL8152 USB_USBNET USB_STORAGE USB_HID USB_SPRD_UMS9620_SSPHY MMC_SDHCI_SPRD F2FS_FS DEVTMPFS; do
     grep -qx "CONFIG_${option}=y" "$O/.config" || { echo "Missing $option" >&2; exit 1; }

@@ -300,7 +300,8 @@ def main():
                         'script_sha256': hashlib.sha256((HERE / 'f2fs-repair.sh').read_bytes()).hexdigest()},
         'part_install': {'trigger': 'e5linux/part-install.conf on userdata (flash.py --part)',
                          'script_sha256': hashlib.sha256((HERE / 'install-part.sh').read_bytes()).hexdigest()},
-        'part_update': {'version': 1, 'trigger': '/.e5-update/request on e5root; firmware-mount event',
+        'tf_update': {'version': 1, 'layout': 'single-root; PC installer; no GPT changes'},
+        'part_update': {'version': 1, 'trigger': '/.e5-update/request on internal e5root or TF root; offline initramfs',
                         'script_sha256': hashlib.sha256((HERE / 'part-update.sh').read_bytes()).hexdigest()},
     }
     a.out.with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')

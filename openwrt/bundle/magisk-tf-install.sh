@@ -1,6 +1,6 @@
 #!/system/bin/sh
-# E5/T551M/M8 native Magisk TF deployment. Keep E5's small first root and
-# unallocated TF update space; MU300's full-partition layout is incompatible.
+# E5/T551M/M8 native Magisk TF deployment. Use the existing first partition
+# or an unpartitioned whole card, at full capacity. No OTA partition reserve.
 # Android loop resolution follows MU300's desktop/android-loop.sh pattern,
 # MIT, Copyright (c) 2026 dikeckaan; see docs/MU300-INSTALLER-LICENSE in packages.
 set -eu
@@ -35,6 +35,11 @@ preflight() {
     [ "$(getprop ro.product.model)" = "$ANDROID_MODEL" ] || fail 'wrong device model for this package'
     [ "$(getprop ro.boot.slot_suffix)" = _a ] || fail 'Android A / OpenWrt B only'
     [ "$(getprop ro.boot.verifiedbootstate)" = orange ] || fail 'bootloader must be unlocked'
+    [ -s "$P/files/ext4-tools.tar" ] || fail 'missing bundled ext4 tools'
+    tar -tf "$P/files/ext4-tools.tar" > "$STATE/ext4-tools.list"
+    for tool in lib/ld-musl-aarch64.so.1 usr/sbin/e2fsck usr/sbin/resize2fs SHA256SUMS; do
+        grep -qx "$tool" "$STATE/ext4-tools.list" || fail "missing ext4 tool: $tool"
+    done
     [ ! -L /data/e5linux ] || fail 'unsafe boot selector directory'
     for selector in boot-os boot-os-next openwrt-default-boot; do
         [ ! -L "/data/e5linux/$selector" ] || fail 'unsafe boot selector'
@@ -43,7 +48,6 @@ preflight() {
     [ "$(blockdev --getsize64 /dev/block/by-name/boot_b)" = "$BOOT_BYTES" ] || fail 'boot partition size mismatch'
     "$P/files/e5-bootctl" check
     sh "$P/files/android-bootchain.sh" check
-    command -v sgdisk >/dev/null || fail 'Android sgdisk is required'
     command -v mount >/dev/null
     emmc=$(readlink -f /dev/block/by-name/misc); emmc=${emmc##*/}; emmc=${emmc%p*}
     cards=
@@ -57,10 +61,11 @@ preflight() {
     [ "$#" = 1 ] || fail 'expected exactly one removable TF card'
     SD=/dev/block/$1
     [ "$(cat /sys/class/block/$1/ro)" = 0 ] || fail 'TF card is read-only'
-    [ "$(blockdev --getsize64 "$SD")" -ge $((RAW_BYTES + 4194304)) ] || fail 'TF card is too small'
+    PART=$(sh "$P/files/android-tf.sh" target "$SD")
+    [ "$(blockdev --getsize64 "$PART")" -ge "$RAW_BYTES" ] || fail 'TF target is too small'
     free=$(df -Pk "$STATE" | awk 'END {print $4}')
     [ "$free" -ge $((RAW_BYTES / 1024 + BOOT_BYTES / 1024 + 262144)) ] || fail 'insufficient Android temporary space (raw image + boot backup + 256 MiB required)'
-    echo "[TF] Model $ANDROID_MODEL, target $SD; ENTIRE TF CARD WILL BE ERASED"
+    echo "[TF] Model $ANDROID_MODEL, target $PART; SELECTED TF TARGET WILL BE ERASED (no repartitioning)"
 }
 prepare_firmware() {
     gzip -dc "$P/files/openwrt.ext4.gz" > "$STATE/convert.ext4"
@@ -133,22 +138,16 @@ release_card() {
     for holder in /sys/class/block/"$name"/holders/* /sys/class/block/"$name"p*/holders/*; do
         [ ! -e "$holder" ] || fail 'TF card still has active mapped devices; no partition was changed'
     done
-    # Snapshot both GPT regions as recovery evidence. All old TF data is still
-    # intentionally erased by this deployment, and GPT copies are not a backup.
+    # Snapshot both GPT regions as recovery evidence. The partition table is unchanged;
+    # these copies are diagnostic evidence, not a backup of the erased target.
     sectors=$(blockdev --getsz "$SD")
     dd if="$SD" of="$STATE/tf-first.bin" bs=512 count=34
     dd if="$SD" of="$STATE/tf-last.bin" bs=512 skip=$((sectors-33)) count=33
 }
 write_root() {
     sh "$P/files/android-bootchain.sh" sync
-    sectors=$(( (RAW_BYTES + 511) / 512 + 2048 ))
-    sgdisk --zap-all "$SD"
-    sgdisk --new=1:0:+"$sectors" --typecode=1:8300 --change-name=1:e5root "$SD"
-    blockdev --rereadpt "$SD"
-    part=${SD}p1
-    n=0
-    until [ -b "$part" ]; do n=$((n+1)); [ "$n" -le 20 ] || fail 'new TF partition never appeared'; sleep 1; done
-    [ "$(blockdev --getsize64 "$part")" = $((sectors * 512)) ] || fail 'kernel still has old TF partition size'
+    [ "$(sh "$P/files/android-tf.sh" target "$SD")" = "$PART" ] || fail 'TF target changed'
+    part=$PART
     gzip -dc "$P/files/openwrt.ext4.gz" > "$part"
     sync
     blockdev --flushbufs "$part"
@@ -157,6 +156,7 @@ write_root() {
     truncate -s "$RAW_BYTES" "$STATE/root.readback"
     [ "$(sha "$STATE/root.readback")" = "$RAW_SHA256" ] || fail 'TF image readback mismatch'
     rm "$STATE/root.readback"
+    sh "$P/files/android-tf.sh" grow "$part" "$P/files/ext4-tools.tar" "$STATE/ext4-tools"
     mount -t ext4 "$part" "$STATE/view"
     tar -xf "$STATE/device-files.tar" -C "$STATE/view"
     mkdir -p "$STATE/view/etc/e5"

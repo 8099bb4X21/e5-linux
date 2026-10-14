@@ -18,9 +18,8 @@ A=/opt/e5/android
 [ -x "$A/vendor/bin/modem_control" ] || { echo "no Android vendor subset in $A" >&2; exit 4; }
 
 echo "stage=ownership"
-chown -R root:root "$A/apex" "$A/system" "$A/vendor" 2>/dev/null || true
-chown -R root:root "$A/dev/__properties__" 2>/dev/null || true
-chmod 0444 "$A/dev/__properties__"/* 2>/dev/null || true
+. /opt/e5/android-import-perms.sh
+android_import_perms "$A" dev/__properties__ || { echo "Cannot repair imported Android permissions" >&2; exit 4; }
 
 echo "stage=dev-nodes"
 mkdir -p /dev/block/by-name /dev/socket

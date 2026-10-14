@@ -300,6 +300,7 @@ do_list() {
 	"forward_status": { "profile": "String" },
 	"forward_set": { "payload": "String" },
 	"forward_test": { "profile": "String" },
+	"forward_log_clear": { },
 	"traffic_get": { "slot": "String" },
 	"traffic_set": { "payload": "String", "slot": "String" },
 	"traffic_clear": { "slot": "String", "confirm": false },
@@ -367,6 +368,7 @@ call)
         sms_delete) run_m sms_delete 'm_sms_delete' ;;
         sms_sync)   run_m sms_sync   'm_sms_sync' ;;
         forward_get) "$DASH/sms-forward" get "$(inp '@.profile' shared)" ;;
+        forward_log_clear) "$DASH/sms-forward" log-clear ;;
         forward_status) "$DASH/sms-forward" status "$(inp '@.profile' shared)" ;;
         forward_set) payload=$(inp '@.payload'); printf '%s' "$payload" | "$DASH/sms-forward" set ;;
         forward_test) "$DASH/sms-forward" test-start "$(inp '@.profile' shared)" ;;

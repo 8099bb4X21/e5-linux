@@ -27,6 +27,8 @@ fi
 [ -n "${KBUILD_BUILD_TIMESTAMP:-}" ] || unset KBUILD_BUILD_TIMESTAMP
 cd /src/linux
 python3 /policy/emmc.py .
+python3 /policy/eic.py .
+python3 /policy/thermal.py .
 KV=$(make -s kernelversion)
 O=/out/$KV
 mkdir -p "$O"
@@ -42,6 +44,10 @@ if [ -n "${E5_RELEASE:-}" ]; then
 fi
 make O="$O" ARCH=arm64 allnoconfig >/dev/null
 ./scripts/kconfig/merge_config.sh -m -O "$O" "$O/.config" "$CFG" >/dev/null
+# PR #228: NFSv4.1 is a separate prerequisite only on kernels exposing it.
+if grep -q '^config NFS_V4_1$' fs/nfs/Kconfig; then
+    scripts/config --file "$O/.config" --enable NFS_V4_1
+fi
 make O="$O" ARCH=arm64 olddefconfig >/dev/null
 # options Kconfig did not take: known ones are listed in config-ignored.txt, any other stops the build
 # (mu300-linux: a silently dropped option has cost a working feature before)

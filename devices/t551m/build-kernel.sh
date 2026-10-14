@@ -1,5 +1,6 @@
 #!/bin/bash
 # Linux host/WSL. Keep source and objects on a native Linux filesystem.
+# T551M_RELEASE=1 omits the forced userdata path for TF/partition installers.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 TOP=$(cd "$HERE/../.." && pwd)
@@ -9,7 +10,7 @@ DEST=${T551M_OUT:-$TOP/out/t551m/kernel}
 command -v pahole >/dev/null || { echo 'BTF requires pahole (Ubuntu: apt install pahole)' >&2; exit 1; }
 mkdir -p "$O" "$DEST/modules"
 python3 "$HERE/prepare-kernel.py" "$K"
-python3 - "$TOP/upstream/e5-mainline.config" "$O/t551m.config" <<'PY'
+python3 - "$TOP/upstream/e5-mainline.config" "$O/t551m.config" "${T551M_RELEASE:-0}" <<'PY'
 import pathlib, sys
 s = pathlib.Path(sys.argv[1]).read_text()
 s = s.replace('CONFIG_LOCALVERSION="-e5"', 'CONFIG_LOCALVERSION="-t551m-otg10"')
@@ -17,7 +18,8 @@ s += '\n' + (pathlib.Path(sys.argv[1]).parents[1] / 'devices/t551m/cpufreq/confi
 s += '\n# T551M ships 32-bit ARM Android modem executables.\nCONFIG_COMPAT=y\nCONFIG_COMPAT_32BIT_TIME=y\n'
 s += '\n# USB host storage and common removable-disk formats.\nCONFIG_SCSI=m\nCONFIG_BLK_DEV_SD=m\nCONFIG_USB_STORAGE=m\nCONFIG_USB_UAS=m\nCONFIG_EXFAT_FS=m\nCONFIG_NTFS3_FS=m\nCONFIG_NLS_UTF8=m\n'
 s += '\n# Host-side USB Ethernet (Realtek, ASIX, CDC and RNDIS).\nCONFIG_USB_USBNET=m\nCONFIG_USB_RTL8152=m\nCONFIG_USB_NET_AX8817X=m\nCONFIG_USB_NET_AX88179_178A=m\nCONFIG_USB_NET_CDCETHER=m\nCONFIG_USB_NET_CDC_NCM=m\nCONFIG_USB_NET_RNDIS_HOST=m\nCONFIG_USB_NET_SMSC75XX=m\nCONFIG_USB_NET_SMSC95XX=m\n'
-s = s.replace(' e5.openwrt=openwrt-mainline.ext4', ' e5.openwrt=openwrt-t551m.ext4')
+s = s.replace(' e5.openwrt=openwrt-mainline.ext4',
+              '' if sys.argv[3] == '1' else ' e5.openwrt=openwrt-t551m.ext4')
 s = s.replace('CONFIG_CHARGER_AW32257=m', 'CONFIG_CHARGER_AW32257=n\nCONFIG_CHARGER_BQ2560X_SPRD=m')
 s = s.replace('CONFIG_SND_SOC_UNISOC_PA_AW87XXX=m', 'CONFIG_SND_SOC_UNISOC_PA_AW87XXX=n')
 pathlib.Path(sys.argv[2]).write_text(s)
@@ -26,6 +28,10 @@ cd "$K"
 make_args=(O="$O" ARCH=arm64 LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu-)
 make "${make_args[@]}" allnoconfig
 scripts/kconfig/merge_config.sh -m -O "$O" "$O/.config" "$O/t551m.config"
+# PR #228: NFSv4.1 is a separate prerequisite only on kernels exposing it.
+if grep -q '^config NFS_V4_1$' fs/nfs/Kconfig; then
+    scripts/config --file "$O/.config" --enable NFS_V4_1
+fi
 make "${make_args[@]}" olddefconfig
 python3 - "$O/t551m.config" "$O/.config" "$TOP/upstream/config-ignored.txt" <<'PY'
 import pathlib, sys

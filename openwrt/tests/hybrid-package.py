@@ -34,6 +34,7 @@ class Package(unittest.TestCase):
         entries['assemble'](package, source)
         files = package / 'files'
         (files / 'boot.img').write_bytes(b'fake boot payload')
+        (files / 'ext4-tools.tar').write_bytes(b'ext4 tools fixture; never executed')
         (files / 'boot.json').write_text(json.dumps({'overlay_files': 0, 'sha256': finish['digest'](files / 'boot.img')}))
         (files / 'device-profile.json').write_text(json.dumps({'profile': profile, 'android_models': [finish['MODELS'][profile]]}))
         (files / 'VERSION').write_text('hybrid fixture\n')

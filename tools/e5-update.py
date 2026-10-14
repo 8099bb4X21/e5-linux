@@ -87,10 +87,12 @@ def main():
         layout = execute(client, 'if [ -f /etc/e5/part-root ]; then echo part; '
             'elif [ -f /etc/e5/sd-root ]; then echo sd; else echo image; fi').strip()
         boot = json.loads((files / 'boot.json').read_text())
-        if layout == 'part' and not boot.get('part_update'):
+        if layout in ('part', 'sd') and not boot.get('part_update'):
             raise RuntimeError('this package has no independent-partition update support; use a newer package')
-        if layout == 'part':
-            execute(client, 'dev=$(cat /run/e5linux/part-root-dev); '
+        if layout == 'sd' and not boot.get('tf_update'):
+            raise RuntimeError('this package has no single-root TF update support; rebuild the package')
+        if layout in ('part', 'sd'):
+            execute(client, 'dev=$(cat /run/e5linux/' + layout + '-root-dev); '
                 '[ -b "$dev" ] && [ "$(awk \'$2=="/" {print $1}\' /proc/mounts | tail -1)" = "$dev" ]; '
                 'sectors=$(cat /sys/class/block/${dev##*/}/size); '
                 'test "$((sectors * 512))" -ge ' + str(a.raw_size))
@@ -122,7 +124,7 @@ def main():
             command += '; sh ' + stage + '/device-flash-boot.sh ' + stage + '/boot-head.img ' + \
                     hashlib.sha256(head.read_bytes()).hexdigest() + ' ' + str(boot['persist_log_offset'] >> 20)
             # Publish an internal update request only after boot readback passes.
-            if layout == 'part':
+            if layout in ('part', 'sd'):
                 command += '; mv /.e5-update/request.ready /.e5-update/request; sync'
             else:
                 command += '; e5-os openwrt'

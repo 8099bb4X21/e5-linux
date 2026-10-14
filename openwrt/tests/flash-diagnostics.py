@@ -227,6 +227,8 @@ class Diagnostics(unittest.TestCase):
                 raise SystemExit('injected failure')
         def checked(stage, command, timeout=600):
             record('command', command)
+            if 'e5-android-tf.sh target' in command:
+                return '/dev/block/mmcblk1p1'
             return '0' if '/ro' in command else ''
         def firmware(*args):
             record('firmware', 'firmware')
@@ -242,7 +244,7 @@ class Diagnostics(unittest.TestCase):
                 'install_preflight': lambda: record('preflight'),
                 'boot_json': lambda: {'sha256': 'abc'},
                 'device_sd': lambda: '/dev/block/mmcblk1',
-                'device_size': lambda dev: (5 << 20) if dev.endswith('p1') else (16 << 30),
+                'device_size': lambda dev: (15 << 30) if dev.endswith('p1') else (16 << 30),
                 'gz_usize': lambda path: 4 << 20,
                 'gz_metadata': lambda path: (4 << 20, 'rawsha'),
                 'su_checked': checked, 'pull_device_files': firmware,
@@ -266,10 +268,13 @@ class Diagnostics(unittest.TestCase):
     def test_install_order_and_no_automatic_reboot(self):
         calls = self.simulate_install()
         index = lambda kind, text='': next(i for i, (k, t) in enumerate(calls) if k == kind and text in t)
-        self.assertLess(index('firmware'), index('command', '--zap-all'))
-        self.assertLess(index('push', 'boot.img'), index('command', '--zap-all'))
+        self.assertLess(index('firmware'), index('command', 'gzip -dc'))
+        self.assertLess(index('push', 'boot.img'), index('command', 'gzip -dc'))
         self.assertLess(index('release'), index('chain', 'sync'))
-        self.assertLess(index('chain', 'sync'), index('command', '--zap-all'))
+        self.assertLess(index('chain', 'sync'), index('command', 'gzip -dc'))
+        self.assertLess(index('command', 'head -c'), index('command', 'e5-android-tf.sh grow'))
+        self.assertLess(index('command', 'e5-android-tf.sh grow'), index('command', 'mount -t ext4'))
+        self.assertFalse(any('sgdisk' in text or '--rereadpt' in text for _, text in calls))
         self.assertLess(index('command', 'ro,noload'), index('command', 'of=/dev/block/by-name/boot_b'))
         self.assertLess(index('command', 'echo sd'), index('arm'))
         self.assertNotIn(('adb', 'reboot'), calls)
@@ -284,6 +289,10 @@ class Diagnostics(unittest.TestCase):
 
     def test_image_readback_failure_never_writes_boot_or_arms_slot(self):
         calls = self.simulate_install('head -c')
+        self.assertFalse(any('of=/dev/block/by-name/boot_b' in text or kind == 'arm' for kind, text in calls))
+
+    def test_growth_failure_never_writes_boot_or_arms_slot(self):
+        calls = self.simulate_install('e5-android-tf.sh grow')
         self.assertFalse(any('of=/dev/block/by-name/boot_b' in text or kind == 'arm' for kind, text in calls))
 
     def test_chinese_ssid_is_utf8_even_on_a_gbk_host(self):

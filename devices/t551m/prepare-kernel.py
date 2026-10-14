@@ -133,6 +133,8 @@ def main():
     if not head.startswith(KERNEL_COMMIT):
         raise SystemExit('Expected linux-lts-e5 commit ' + KERNEL_COMMIT)
     runpy.run_path(str(Path(__file__).resolve().parents[1] / 'common/emmc.py'))['apply'](k)
+    runpy.run_path(str(Path(__file__).resolve().parents[1] / 'common/eic.py'))['apply'](k)
+    runpy.run_path(str(Path(__file__).resolve().parents[1] / 'common/thermal.py'))['apply'](k)
     url = ('https://raw.githubusercontent.com/Enceka/kernel_sprd_ums9158/'
            + VENDOR_COMMIT + '/drivers/power/supply/bq2560x-charger.c')
     source = urllib.request.urlopen(url, timeout=60).read()

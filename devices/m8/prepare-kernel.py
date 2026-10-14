@@ -18,6 +18,8 @@ def apply(kernel):
     if not head.startswith(BASE):
         raise ValueError('Expected linux-lts-e5 ' + BASE)
     runpy.run_path(str(HERE.parent / 'common/emmc.py'))['apply'](kernel)
+    runpy.run_path(str(HERE.parent / 'common/eic.py'))['apply'](kernel)
+    runpy.run_path(str(HERE.parent / 'common/thermal.py'))['apply'](kernel)
     for name in ('drivers/power/supply/board-charge-profile.h',
                  'drivers/unisoc_platform/sprd_disp/t551m-backlight.h'):
         if (kernel / name).exists():

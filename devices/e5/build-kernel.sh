@@ -28,6 +28,10 @@ cd "$K"
 args=(O="$O" ARCH=arm64 LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu-)
 make "${args[@]}" allnoconfig
 scripts/kconfig/merge_config.sh -m -O "$O" "$O/.config" "$O/features.config"
+# PR #228: NFSv4.1 is a separate prerequisite only on kernels exposing it.
+if grep -q '^config NFS_V4_1$' fs/nfs/Kconfig; then
+    scripts/config --file "$O/.config" --enable NFS_V4_1
+fi
 make "${args[@]}" olddefconfig
 python3 - "$O/features.config" "$O/.config" "$TOP/upstream/config-ignored.txt" <<'PY'
 from pathlib import Path

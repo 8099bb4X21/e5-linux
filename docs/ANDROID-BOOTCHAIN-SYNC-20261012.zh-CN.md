@@ -1,5 +1,7 @@
 # Android / TF 安装启动链同步（2026-10-12）
 
+> 2026-10-14 更新：下文 TF 预留空间/重建 GPT/双根更新描述为旧版流程。新版使用已有第一分区（无分区则整卡）的全部容量，更新统一走电脑安装器；见 [TF-SINGLE-ROOT-20261014.zh-CN.md](TF-SINGLE-ROOT-20261014.zh-CN.md)。
+
 参考本地 `mu300-linux-clean-tf-7.2/tools/android-bootchain.sh` 的 OTA 兼容方案，
 在本仓库增加公共 `tools/android-bootchain.sh`。Android OTA 后两槽启动链可能
 不同；Linux 运行当前 Android 的厂商程序时，不应未经检查继续使用另一槽的旧链。

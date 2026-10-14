@@ -3,7 +3,7 @@
 The complete ZIP supports native Magisk TF deployment and extraction for desktop installation.
 Read **`START-HERE.md` at the package root** first (detailed Chinese guide). Shortcut scripts live in `launchers/`,
 images/checksums in `files/`, and supporting files in `scripts/`, `docs/` and `extras/`.
-Installing this firmware ZIP in Magisk erases the entire TF card; it is not the separate switch-only module.
+Installing this firmware ZIP in Magisk erases the selected TF partition (or unpartitioned card); it is not the separate switch-only module.
 Native deployment prepares this device's firmware before erasing, verifies root and boot readback, and never reboots automatically.
 The new native path still requires per-model hardware validation.
 
@@ -16,8 +16,7 @@ file are for E5 only. Never flash a different model's package.
 
 Installs OpenWrt 25.12 (5G WAN, hotspot, LuCI and the info screen on the
 panel) next to Android: Android stays as it is, OpenWrt
-goes onto the **SD card** (a partition of its own; the rest of the card is left
-free) and boots from `boot_b`.  Android is always one step away.  Without a
+goes onto the **SD card** (the existing first partition, or the whole unpartitioned card, used in full) and boots from `boot_b`.  Android is always one step away.  Without a
 card, `install-part` installs to a partition of the phone's own storage
 instead (userdata is shrunk; Android keeps its files).
 
@@ -26,7 +25,7 @@ Public entry names are descriptive English names. Use `.cmd` on Windows or `.sh`
 | Entry | Action |
 | --- | --- |
 | `OpenWrt-Installer.exe` / `start-installer` | Choose an action; the Windows exe needs no separate Python |
-| `install-to-tf-card` | First install, erasing the entire TF card |
+| `install-to-tf-card` | First install, erasing the selected TF target |
 | `install-to-userdata-image` | Configurable image on unencrypted userdata |
 | `install-to-internal-storage` | Shrink userdata and create an independent root partition |
 | `reinstall-internal-system` | Rewrite an existing e5root without shrinking or wiping Android data |
@@ -40,8 +39,8 @@ Public entry names are descriptive English names. Use `.cmd` on Windows or `.sh`
 
 * a matching device with an **unlocked bootloader** and Android rooted with **Magisk**;
 * Android running from slot a (as it comes from the factory);
-* an **SD card of 4 GB or more** (8 GB recommended): it is partitioned and erased, and
-  its free space stays free for more partitions later -- or run
+* an **SD card of 4 GB or more**: the selected target is erased and used in full,
+  without repartitioning or OTA reserve space -- or run
   `launchers/install-to-internal-storage.cmd` / `bash launchers/install-to-internal-storage.sh` and no card is needed;
 * a Windows, macOS or Linux computer with:
   * **Python 3.8 or newer** (unnecessary on Windows when `OpenWrt-Installer.exe` is included);
@@ -73,7 +72,7 @@ Public entry names are descriptive English names. Use `.cmd` on Windows or `.sh`
    ./launchers/start-installer.sh --ssid E5-OpenWrt --wifi-key 12345678 -y       (macOS / Linux)
    ```
 
-   It asks once more before it partitions and formats the **SD card** -- type
+   It asks once more before it formats the selected **SD target** -- type
    `yes`.  Anything else, or no answer, stops it with the card untouched.  (-y
    skips the questions.)
 
@@ -94,11 +93,10 @@ What it does:
   images from both slots under `/data/adb/e5-bootchain/`, then copies A to B and
   verifies readback. Identical images are not rewritten. On failure it attempts
   to restore changed B images and stops without switching slots. NV is excluded;
-* partitions the **SD card** (GPT, one Linux partition) and writes the OpenWrt
-  image onto it: the partition *is* the root filesystem, which the initramfs
-  mounts straight (the card is marked `/etc/e5/sd-root`).  The partition is only
-  as large as the image, so the rest of the card stays free for more systems or
-  a store of its own;
+* uses the existing first SD partition, or the whole card only when no
+  partitions exist. Writes the root image and grows its filesystem to the
+  target's full capacity. The partition table is unchanged; no OTA space is
+  reserved. A card with other partitions but no first partition is rejected;
 * unpacks this device's files into it and writes the first boot's settings to
   its `/etc/e5/install.conf`. Unmounts, flushes and remounts read-only to check
   critical files and firmware hashes before writing boot;
@@ -146,16 +144,16 @@ A failed OpenWrt boot falls back to Android on its
 own after two tries.
 
 `--boot-openwrt` and the Magisk switch module check/synchronize the chain before
-switching slots and rebooting. Android A/Linux B and the GPT layout with reserved
-update space remain required; reverse-slot installation and whole-partition
-formatting are not enabled by this change.
+switching slots and rebooting. Android A/Linux B remains required. The existing
+first TF partition (or unpartitioned whole card) is used in full, without OTA
+reserve space. Reverse-slot installation is not supported.
 
 If installation fails, keep the complete terminal error. It identifies the
 failed stage (partitioning, writing, mounting, extracting device files or
 verifying content), the device's error/exit code and relevant SD/ext4 kernel
 messages. Content verification lists the missing, empty or non-executable
-files. Capacity and write protection are checked before repartitioning; an
-Android volume that remains mounted stops installation before the GPT changes.
+files. Capacity and write protection are checked before writing; a mounted
+Android volume stops installation. The TF partition table is never changed.
 
 ## Encrypted userdata: two-stage internal partition installation
 
@@ -217,14 +215,16 @@ It updates the boot image and the OpenWrt image over the USB network and
 **keeps OpenWrt's settings** (`/etc/config`, passwords, SSH keys, the traffic
 records, the info screen's apps); packages added with `apk` are not kept.
 
-On an **SD card install** (the default) the new system goes into a second
-partition of the card -- made in the card's free space by the first update,
-reused after that -- while the old one keeps running; userdata is not touched.
-The reboot starts the new one.  Its first boot is a trial: if it does not come
-up, the next start of Linux goes back to the previous system, settings as they
-were (if the E5 fell back to Android meanwhile: `./launchers/start-installer.sh --boot-openwrt`).
-The update needs about the image's size free on the card (1 GiB and a little
-more).
+On an **SD card install**, updates use this PC installer too. It uploads and
+verifies the payload, preserves settings and firmware, and verifies boot before
+publishing a request. After reboot, initramfs copies all payloads to RAM, verifies
+them, unmounts the root and updates that same target offline. The filesystem
+grows back to its original capacity. No GPT changes or alternate roots are made.
+Keep power connected: a single root has no second TF root for automatic rollback.
+Back up important files; extra packages and files outside the settings backup
+are not migrated. Legacy multiple-root cards remain bootable; updating preserves
+the running root's generation and leaves other partitions alone. Small existing
+partitions are not expanded across adjacent partitions or unallocated space.
 
 ## Uninstall
 

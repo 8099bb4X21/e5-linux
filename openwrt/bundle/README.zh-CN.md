@@ -2,7 +2,7 @@
 
 新版完整 ZIP 同时支持 Magisk 内首次部署 TF 卡和电脑解压自定义安装。**详细使用指南位于安装包顶层 `START-HERE.md`**。
 快捷 `.cmd`/`.sh` 全部放在 `launchers/`；镜像和校验清单位于 `files/`，其他辅助文件在 `scripts/`、`docs/`、`extras/`。
-Magisk 内刷入完整固件会清空整张 TF 卡，不是仅安装切换按钮；需要稳定供电及足够的 Android 临时空间。
+Magisk 内刷入完整固件会清空所选 TF 目标（第一分区，无分区则整卡），不是仅安装切换按钮；需要稳定供电及足够的 Android 临时空间。
 原生 Magisk 入口使用本机固件、先校验再写盘，成功后手动重启。新流程仍需逐机型实刷验证。
 
 
@@ -12,7 +12,7 @@ Magisk 内刷入完整固件会清空整张 TF 卡，不是仅安装切换按钮
 安装和升级会检查机型。没有此文件的旧包仅适用于 E5。
 
 把 OpenWrt 25.12（带 5G 上网、热点、LuCI 和屏幕信息屏）装到设备上，与原来的 Android
-共存：Android 不动，OpenWrt 装到 **SD 卡**（独立分区，卡上其余空间保留）上，从 `boot_b` 启动。
+共存：Android 不动，OpenWrt 装到 **SD 卡**（已有第一分区，无分区表时整卡；所选目标用满）上，从 `boot_b` 启动。
 随时可以回到 Android。没有 TF 卡时可用 `install-part` 装到手机存储自己的一块内部分区
 （对 userdata 缩容，Android 的文件保留）。
 
@@ -21,7 +21,7 @@ Magisk 内刷入完整固件会清空整张 TF 卡，不是仅安装切换按钮
 | 入口 | 用途 |
 | --- | --- |
 | `OpenWrt-Installer.exe` / `start-installer` | 打开方式选择菜单；Windows 有 exe 时无需另装 Python |
-| `install-to-tf-card` | TF 卡首次安装，会清空整张卡 |
+| `install-to-tf-card` | TF 卡首次安装，会清空所选 TF 目标 |
 | `install-to-userdata-image` | 未加密 userdata 内创建指定大小的镜像 |
 | `install-to-internal-storage` | 缩容 userdata、创建独立根分区；加密 data 需同意清空 |
 | `reinstall-internal-system` | 覆盖已有 e5root，不重新缩容、不格式化 Android data |
@@ -35,7 +35,7 @@ Magisk 内刷入完整固件会清空整张 TF 卡，不是仅安装切换按钮
 
 * 与安装包对应的设备，**bootloader 已解锁**，Android 已用 **Magisk** 获取 root；
 * Android 在 slot a 运行（出厂状态就是）；
-* 卡槽里插一张 **4 GB 以上的 SD 卡**（建议 8 GB）：它会被重新分区并清空，其余空间留给以后加分区；
+* 卡槽里插一张 **4 GB 以上的 SD 卡**（建议 8 GB）：所选目标会清空并用满，不修改分区表；
   或者运行 `launchers/install-to-internal-storage.cmd` / `bash launchers/install-to-internal-storage.sh`，无需插卡；
 * 一台 Windows、macOS 或 Linux 电脑，装有：
   * **Python 3.8 或更新版本**（Windows 包内有 `OpenWrt-Installer.exe` 时无需安装；其他情况从 https://www.python.org/downloads/ 安装）；
@@ -64,7 +64,7 @@ Magisk 内刷入完整固件会清空整张 TF 卡，不是仅安装切换按钮
    ./launchers/start-installer.sh --ssid E5-OpenWrt --wifi-key 12345678 -y       (macOS / Linux)
    ```
 
-   在分区、格式化 **SD 卡** 之前会再确认一次，需要输入 `yes`；输入别的或不回答都会中止，
+   在清空所选 **SD 目标** 之前会再确认一次，需要输入 `yes`；输入别的或不回答都会中止，
    卡不会被改动。（`-y` 跳过所有询问。）
 
 4. 等脚本显示“完成”，再手动重启进入 OpenWrt；安装器不自动重启，第一次启动约 2 分钟。
@@ -80,9 +80,8 @@ Magisk 内刷入完整固件会清空整张 TF 卡，不是仅安装切换按钮
 * 检查两槽的 `uboot/sml/teecfg/trustos/vbmeta`。Android 释放 TF 后，对有差异的
   启动链先备份 A、B 两份至 `/data/adb/e5-bootchain/`，再从 A 同步到 B 并回读校验。
   相同项不重写；失败尝试恢复 B 原内容，任何失败都不会继续切槽。不会同步 NV。
-* 给 **SD 卡** 分区（GPT，一个 Linux 分区）并把 OpenWrt 镜像写上去：这个分区**就是**根文件系统，
-  initramfs 直接挂载它（卡上写有 `/etc/e5/sd-root` 标记）。分区只做到镜像大小，卡上其余空间保留，
-  留给以后加更多系统或独立的存储分区；
+* 使用 **SD 卡** 已有第一分区，无任何分区时才使用整卡。写入 OpenWrt 镜像，离线检查并扩到
+  所选目标全部容量；initramfs 通过 `/etc/e5/sd-root` 标记直接挂载。分区表不变，不预留 OTA 空间；
 * 把这台设备自己的文件解包进去，首次启动的设置写到它的 `/etc/e5/install.conf`；
   卸载、刷新缓存后以只读方式重新挂载，复核关键文件和固件 SHA-256，通过后才写 boot。
 * 把启动镜像写入 `boot_b` 并校验，然后让下次启动走 slot b。**slot a 的 Android 不会被改动。**
@@ -122,7 +121,7 @@ launchers/start-installer.cmd --boot-openwrt          (Windows；macOS / Linux�
 
 `--boot-openwrt` 和 Magisk 切回模块也会先检查、同步启动链，再切槽重启。
 本安装器仍要求 Android A、Linux B，不能在 Android B 下反向安装。
-TF 仍采用预留更新空间的 GPT 布局，不采用占满第一分区的安装方式。
+TF 与 MU300 一样使用已有第一分区（无任何分区时才用整卡）的全部容量，不预留更新空间、不改 GPT。
 
 ## 加密 userdata 的内置分区安装
 
@@ -183,11 +182,11 @@ launchers/start-installer.cmd --update                (Windows；macOS / Linux�
 它会通过 USB 网络的 SSH 主动上传并校验更新文件，不需要电脑开放入站 HTTP 端口。Windows EXE 已内置 SSH 依赖；直接运行 Python 脚本时需要先安装 paramiko。随后更新启动镜像和 OpenWrt 镜像，**保留 OpenWrt 的设置**（`/etc/config`、密码、
 SSH 密钥、流量记录、信息屏上装的应用）。用 `apk` 另装的软件包不会保留。
 
-**装在 SD 卡上**（默认方式）时，新系统写进卡上的第二个分区——第一次更新时在卡的空闲空间里建好，
-以后轮流使用——旧系统照常运行，手机存储（userdata）完全不动。重启后启动新系统。新系统的第一次
-启动是试运行：如果没能启动起来，下一次进入 Linux 时会回到之前的系统，设置保持原样（如果设备
-已经自动回到了 Android，运行 `./launchers/start-installer.sh --boot-openwrt`）。更新需要卡上
-有约 2.25 GiB 未分配空间（本包镜像 2 GiB，加更新预留）。
+**装在 SD 卡上**（默认方式）时，统一由电脑安装器通过 SSH 上传及校验。
+保存配置和固件，校验新 boot 后发布请求，重启到 initramfs，再把载荷复制到内存并验证，
+卸载原根后离线更新它，扩回原分区容量，恢复配置和本机固件。不创建新根分区、不改 GPT，
+也不需要未分配的 OTA 空间。原始写入期间请保持供电，单根系统没有 TF 双根回退能力。
+旧多根卡仍可启动，更新只改当前根并保留其代数；不自动删除或合并其他旧分区。
 
 装在手机存储里（`--data`）时，新镜像在重启后生效，旧镜像保留为
 `/mnt/e5-data/e5linux/openwrt.ext4.old`。
@@ -197,7 +196,7 @@ SSH 密钥、流量记录、信息屏上装的应用）。用 `apk` 另装的软
 重启进入 initramfs 后，把所有载荷复制到内存并再次校验，卸载原分区，再写入新系统、
 回读校验、扩容到原分区容量、恢复配置和固件，最后重新启动。
 Android userdata（包括加密 data）和 GPT 均不修改，10 GiB 分区仍保持原容量。
-内置分区没有 TF 双系统分区的自动回退能力；写入阶段请保持供电。
+内置分区与新版 TF 单根一样没有另一根分区的自动回退能力；写入阶段请保持供电。
 屏幕会每两秒显示阶段、耗时和写入进度。自行安装的 APK 不迁移。
 
 ## 卸载

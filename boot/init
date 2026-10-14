@@ -230,7 +230,7 @@ early_card_firmware() {
             name=${d##*/}
             case "$name" in *p[0-9]*|*boot*) continue ;; esac
             [ "$name" = "$skip" ] && continue
-            for part in /dev/${name}p*; do
+            for part in /dev/$name /dev/${name}p*; do
                 [ -b "$part" ] || continue
                 mount -t ext4 -o ro,noload,noatime "$part" /tmp/e5-early-fw 2>/dev/null || continue
                 if [ -f /tmp/e5-early-fw/etc/e5/sd-root ] &&
@@ -454,6 +454,29 @@ fi
 ifconfig usb0 up 2>/dev/null
 persist
 
+# The PC installer alone arms a TF update. Probe all TF roots, including legacy
+# cards, before mounting the root read/write. CONFIG_CMDLINE_FORCE and LK may
+# discard boot-header flags, so the verified on-card request is the trigger.
+# No polling service is installed in the running system.
+tf_update_probe() {
+    mkdir -p /tmp/tf-update-probe
+    for sysdev in /sys/class/block/mmcblk*; do
+        tf=${sysdev##*/}
+        case "$tf" in *p[0-9]*|*boot*) continue ;; esac
+        [ "$(cat "$sysdev/device/type" 2>/dev/null)" = SD ] || continue
+        for target in /dev/$tf /dev/${tf}p*; do
+            [ -b "$target" ] || continue
+            mount -t ext4 -o ro,noload "$target" /tmp/tf-update-probe 2>/dev/null || continue
+            if [ -f /tmp/tf-update-probe/etc/e5/sd-root ] && [ -f /tmp/tf-update-probe/.e5-update/request ]; then
+                [ ! -s /run/tf-update-found ] || touch /run/tf-update-conflict
+                echo "$target" > /run/tf-update-found
+                echo "$target" > /run/part-update-pending
+            fi
+            umount /tmp/tf-update-probe
+        done
+    done
+}
+tf_update_probe
 . /etc/part-update.sh
 if ! part_update_pending; then
     part_fail 'offline update stopped; logs and RAM payload retained'

@@ -23,7 +23,7 @@ def stage(root, persistent=True):
     runpy.run_path(str(top / 'devices/wifi-common.py'))['stage'](root)
     from types import SimpleNamespace
     a = SimpleNamespace(persistent=persistent)
-    for name in ('vendor-start.sh', 'android-run', 'e5-modem-coldboot'):
+    for name in ('vendor-start.sh', 'android-import-perms.sh', 'android-run', 'e5-modem-coldboot'):
         dst = root / 'opt/e5' / name
         shutil.copy2(top / 'rootfs/overlay/opt/e5' / name, dst)
         dst.chmod(0o755)

@@ -133,6 +133,7 @@ var callSmsSync = rpc.declare({ object: 'mu300dash', method: 'sms_sync', expect:
 var callForwardGet = rpc.declare({ object: 'mu300dash', method: 'forward_get', params: [ 'profile' ], expect: { '': {} } });
 var callForwardStatus = rpc.declare({ object: 'mu300dash', method: 'forward_status', params: [ 'profile' ], expect: { '': {} } });
 var callForwardSet = rpc.declare({ object: 'mu300dash', method: 'forward_set', params: [ 'payload' ], expect: { '': {} } });
+var callForwardClear = rpc.declare({ object: 'mu300dash', method: 'forward_log_clear', expect: { '': {} } });
 var callForwardTest = rpc.declare({ object: 'mu300dash', method: 'forward_test', params: [ 'profile' ], expect: { '': {} } });
 var callTrafficGet = scopedRpc('traffic_get');
 var callTrafficSet = scopedRpc('traffic_set',['payload']);
@@ -861,6 +862,15 @@ var DASH_I18N = {
 	'刷新状态': ['Refresh status', 'Durumu yenile'],
 	'最近转发：': ['Last forwarding: ', 'Son yönlendirme: '],
 	'最近电源通知：': ['Last power notice: ', 'Son güç bildirimi: '],
+	"成功响应条件（可选）": ["Success response condition (optional)", "Başarılı yanıt koşulu (isteğe bağlı)"],
+	"留空时任意 HTTP 2xx 为成功；填写 errcode=0 或 ok=true 时，还需响应 JSON 顶层字段匹配。": ["Empty accepts any HTTP 2xx; errcode=0 or ok=true also checks a top-level JSON field.", "Boşken tüm HTTP 2xx yanıtları başarılıdır; errcode=0 veya ok=true üst düzey JSON alanını da denetler."],
+	"成功响应条件格式无效": ["Invalid success response condition", "Başarılı yanıt koşulu geçersiz"],
+	"服务返回失败结果": ["The service rejected the delivery", "Hizmet gönderimi reddetti"],
+	"服务响应无法确认成功": ["The service response does not confirm success", "Hizmet yanıtı başarıyı doğrulamıyor"],
+	"请等待 5 秒后再测试": ["Please wait 5 seconds before testing again", "Tekrar denemeden önce 5 saniye bekleyin"],
+	"清空投递记录": ["Clear delivery history", "Teslimat geçmişini temizle"],
+	"清空投递记录？": ["Clear delivery history?", "Teslimat geçmişi temizlensin mi?"],
+	"只清除最近投递记录，不影响短信、转发配置或已处理状态。": ["Only clears delivery history; messages, settings and processed state stay unchanged.", "Yalnızca teslimat geçmişini temizler; mesajlar, ayarlar ve işlenen kayıtlar korunur."],
 	'暂无投递': ['No delivery yet', 'Henüz teslimat yok'],
 	'发送成功': ['Sent successfully', 'Başarıyla gönderildi'],
 	'已拦截向原发件人转发': ['Forwarding to original sender blocked', 'Asıl gönderene yönlendirme engellendi'],
@@ -1973,7 +1983,7 @@ return baseclass.extend({
 	callSmsList: callSmsList, callSmsShow: callSmsShow, callSmsSend: callSmsSend,
 	callSmsDel: callSmsDel, callSmsSync: callSmsSync,
 	callForwardGet: callForwardGet, callForwardStatus: callForwardStatus,
-	callForwardSet: callForwardSet, callForwardTest: callForwardTest,
+	callForwardSet: callForwardSet, callForwardTest: callForwardTest, callForwardClear: callForwardClear,
 	callTrafficGet: callTrafficGet, callTrafficSet: callTrafficSet, callTrafficClear: callTrafficClear,
 	callUsbGet: callUsbGet, callUsbSet: callUsbSet,
 	callUsbNetList: callUsbNetList, callUsbNetAdd: callUsbNetAdd,

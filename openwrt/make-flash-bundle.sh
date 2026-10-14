@@ -129,6 +129,11 @@ S=$(mktemp -d)
 trap 'rm -rf "$S0" "$S"' EXIT
 P=$S/$NAME
 mkdir -p "$P/files" "$P/scripts/tools"
+if [ -n "$MAINLINE" ]; then
+    python3 "$TOP/upstream/check-container-support.py" "$KOUT"
+    cp "$KOUT/config" "$P/files/kernel.config"
+    cp "$KOUT/modules.in-tree" "$P/files/modules.in-tree"
+fi
 # Use the same descriptive user entries as all three profile packages.
 python3 "$HERE/bundle/install-entrypoints.py" "$P"
 cp "$HERE/bundle/part-write.sh" "$P/files/"

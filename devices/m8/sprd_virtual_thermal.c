@@ -23,9 +23,11 @@ static int sprd_virtual_temp(struct thermal_zone_device *tz, int *temp)
 	for (i = 0; i < v->count; i++) {
 		ret = thermal_zone_get_temp(v->sensor[i], &value);
 		if (ret)
-			return ret; /* Never turn an unreadable sensor into a cold reading. */
+			continue; /* PR #190: keep valid readings from the other sensors. */
 		hottest = max(hottest, value);
 	}
+	if (hottest == INT_MIN)
+		return -EIO; /* No valid sensor: do not fabricate a cold temperature. */
 	*temp = hottest;
 	return 0;
 }
