@@ -4524,6 +4524,11 @@ trigger and uses Pages' actual base URL.
 
 ### e5-modemd is optional abnormal-state recovery
 
+Historical snapshot: the 2026-10-15 shared recovery fix now enables this helper
+for E5, T551M and M8. See `MODEM-ASSERT-RECOVERY-20261015.zh-CN.md` for validation
+and deployment boundaries. The disabled state described below is retained as
+the history explaining the missing dump acknowledgement.
+
 The binary and procd script are installed, but there is no enabled rc.d link and
 no e5-modemd process. The vendor modem_control is running and owns @modemd.
 Normal modem startup/data do not require e5-modemd. Its purpose remains specific:

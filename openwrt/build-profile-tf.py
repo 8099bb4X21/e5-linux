@@ -60,6 +60,10 @@ def main():
         raise ValueError('Trial kernel forces userdata boot; rebuild without e5.openwrt= for TF')
     prepare = runpy.run_path(str(TOP / 'devices/m8/prepare-root.py'))['prepare']
     prepare(a.base, root, a.defaults, profile=a.profile)
+    for name in ('S22e5-modemd', 'K09e5-modemd'):
+        link = root / 'etc/rc.d' / name
+        if not link.is_symlink() or os.readlink(link) != '../init.d/e5-modemd' or not link.is_file():
+            raise ValueError('CP assert recovery service is not enabled: ' + name)
     helpers = {}
     for n, target in (('logdw', 'opt/e5/bin/logdw'), ('e5-vibrate', 'usr/bin/e5-vibrate'),
                       ('e5-ctl-raw', 'opt/e5/e5-ctl-raw'), ('e5-modemd', 'usr/sbin/e5-modemd'),

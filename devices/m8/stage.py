@@ -23,6 +23,7 @@ def stage(root):
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text('m8\n')
     runpy.run_path(str(TOP / 'devices/wifi-common.py'))['stage'](root)
+    runpy.run_path(str(TOP / 'devices/modem-recovery.py'))['stage'](root)
     (root / 'etc/e5/device-model').write_text('VIPME M8\n')
     (root / 'etc/e5/device-hostname').write_text('VIPME-M8\n')
     # This board has one physical loudspeaker for both phone and handsfree.
@@ -40,7 +41,6 @@ def stage(root):
             copy(root, p, 'opt/e5/' + p.name)
     runpy.run_path(str(TOP / 'devices/t551m/ui.py'))['stage'](root, profile='m8')
     shared['stage_nv'](root)
-    link(root, 'S22e5-modemd', 'e5-modemd')
     copy(root, TOP / 'devices/m8/bluetooth-address.py', 'usr/libexec/m8-bluetooth-address')
     keys = root / 'etc/bluetooth/keys'
     keys.mkdir(parents=True, exist_ok=True)

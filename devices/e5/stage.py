@@ -100,6 +100,7 @@ def stage(root):
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text('e5\n')
     runpy.run_path(str(TOP / 'devices/wifi-common.py'))['stage'](root)
+    runpy.run_path(str(TOP / 'devices/modem-recovery.py'))['stage'](root)
     for name in ('vendor-start.sh', 'android-import-perms.sh', 'android-run', 'e5-modem-coldboot', 'e5-at',
                  'e5-next-boot', 'e5-os', 'e5-sd-registry', 'e5-call-audio.py'):
         copy(root, TOP / 'rootfs/overlay/opt/e5' / name, 'opt/e5/' + name)
