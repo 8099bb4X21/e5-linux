@@ -30,6 +30,10 @@ with sync_playwright() as p:
     page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}/')
     page.wait_for_selector('#home-boot:not([hidden])');page.wait_for_timeout(800)
+    button=page.locator('#home-boot-default')
+    assert button.evaluate("e=>e.classList.contains('btn') && getComputedStyle(e).display==='flex'")
+    assert button.evaluate("e=>getComputedStyle(e).alignItems==='center' && getComputedStyle(e).justifyContent==='center'")
+    assert button.bounding_box()['height']>=38
     assert not [item for item in posts if item[0]=='/api/settings/system']
     page.locator('#home-boot-default').click();assert not [item for item in posts if item[0]=='/api/settings/system']
     page.locator('#home-boot-default').click()

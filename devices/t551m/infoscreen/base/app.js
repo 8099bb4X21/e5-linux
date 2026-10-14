@@ -3,7 +3,7 @@
 // advanced) fed
 // by /api/status, driven by touch (tap, swipe) and the keypad (arrows,
 // confirm, back, digits, power).  The backlight goes off after the configured
-// idle time; the first touch or key after that only wakes the screen.  A new
+// idle time; only the power key wakes the dark screen. A new
 // SMS (e5-sms-notify's unread list) lights the screen and opens the message.
 // Power, then * within 2 s, locks the keys: the screen stays dark until the
 // same again (keyLock).  The first start after an install shows the 赞赏码
@@ -840,6 +840,10 @@ document.addEventListener('keydown', (e) => {
 		post('key', { key: e.key, code: e.code, keyCode: e.keyCode, repeat: e.repeat });
 	}
 	const kind = keyKind(e);
+	if (blank && !['power','volup','voldown'].includes(kind)) {
+		e.preventDefault(); e.stopImmediatePropagation();
+		return;
+	}
 	if (kind == 'back') {
 		const now = performance.now();
 		if (now - lastBack < 150) {
@@ -856,7 +860,7 @@ document.addEventListener('keydown', (e) => {
 	}
 	if (keyLock(kind == 'power' && !e.repeat, e.key == '*')) return;
 	if (blank) {
-		setBlank(false);
+		if (kind == 'power' && !e.repeat) setBlank(false);
 		return;
 	}
 	resetIdle();
@@ -926,14 +930,12 @@ function applyTouch() {
 	toIme({ e5: 'touch', on: !touchOff() });
 }
 
-// touch: the first touch on a dark screen wakes it and does nothing else;
-// a horizontal swipe changes the page
+// Ignore touch while dark; a horizontal swipe changes the page while awake.
 let touch = null;
 document.addEventListener('touchstart', (e) => {
 	if (blank) {
 		e.preventDefault();
 		e.stopPropagation();
-		setBlank(false);
 		touch = null;
 		return;
 	}
@@ -1968,6 +1970,7 @@ window.addEventListener('message', (e) => {
 	const send = (msg) => fromIme ? toIme(msg) : toApp(msg);
 	switch (m.e5) {
 	case 'key':                     // every key the plugin sees, for the host's own keys
+		if (blank && !['power','volup','voldown'].includes(keyKind(m) || m.kind)) return;
 		if (!$('notification-card').hidden && notificationKey(m.kind)) return;
 		if (m.key == 'AudioVolumeUp' || m.keyCode == 175 || m.key == 'AudioVolumeDown' || m.keyCode == 174) {
 			volumeKey(m.key == 'AudioVolumeUp' || m.keyCode == 175 ? 1 : -1);
@@ -1975,7 +1978,10 @@ window.addEventListener('message', (e) => {
 		}
 		if (m.kind == 'power' && appCapturePower && !blank && !locked) { resetIdle(); return; }
 		if (keyLock(m.kind == 'power' && !m.repeat, m.key == '*')) return;
-		if (blank) { setBlank(false); send({ e5: 'blank', on: false }); return; }
+		if (blank) {
+			if (m.kind == 'power' && !m.repeat) { setBlank(false); send({ e5: 'blank', on: false }); }
+			return;
+		}
 		resetIdle();
 		if (m.kind == 'menu' && !m.repeat) { if (fromIme) closeInputMethod(); else { closeApp(); showPage(P.apps); } return; }
 		if (m.kind == 'power' && !m.repeat) { setBlank(true); send({ e5: 'blank', on: true }); }

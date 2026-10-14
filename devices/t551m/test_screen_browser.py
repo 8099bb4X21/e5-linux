@@ -403,7 +403,14 @@ def main():
         page.wait_for_function("appOpen?.id === 'phone'")
         page.evaluate("closeApp();setBlank(true)")
         call_key()
-        assert not page.evaluate('blank') and page.evaluate('T551M.isLocked()')
+        assert page.evaluate('blank && T551M.isLocked()')
+        for key in ['Enter','ArrowUp','ArrowDown','F1','ContextMenu','Backspace','1','AudioVolumeUp','AudioVolumeDown']:
+            page.keyboard.press(key)
+            assert page.evaluate('blank && T551M.isLocked()'), key
+        page.touchscreen.tap(160,250)
+        assert page.evaluate('blank && T551M.isLocked()')
+        page.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Power',bubbles:true}));window.dispatchEvent(new KeyboardEvent('keyup',{key:'Power',bubbles:true}))")
+        assert page.evaluate('!blank && T551M.isLocked()')
         call_key()
         assert page.evaluate('appOpen') is None
         page.wait_for_timeout(500);swipe();page.wait_for_timeout(400)

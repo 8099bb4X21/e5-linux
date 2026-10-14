@@ -14,6 +14,7 @@ new Function(common);new Function(locks);new Function(fs.readFileSync(base+'view
     for (slot of ['0','1']) {
         await scoped.callStatus();await scoped.callCells();await scoped.callSignal();await scoped.callAt('AT+COPS?');
         await scoped.callLockGet();await scoped.callLockFresh(true);await scoped.callLockSet('lte','1,3');
+        for(const kind of ['ims','volte','vonr'])await scoped.callLockSet(kind,'off');
         await scoped.callLockStatus('job');await scoped.callTrafficGet();await scoped.callTrafficSet('{}');
         for (const request of sent.splice(0)) {
             assert.equal(request.params.at(-1),'slot');assert.equal(request.args.at(-1),slot);
@@ -57,6 +58,20 @@ new Function(common);new Function(locks);new Function(fs.readFileSync(base+'view
     assert.deepEqual(bands.lockCand.nr,[]);assert.deepEqual(bands.lockSel.nr,{});
     assert.equal(nodes['lock-nr'].children.length,0);
     assert(nodes['lock-nrline'].textContent.includes('暂不可用'));
+    const switches=['ims','volte','vonr'].flatMap(kind=>['on','off'].map(value=>({
+        dataset:{voice:kind,enabled:value},setAttribute(k,v){this[k]=v;}
+    })));
+    bands._root={querySelectorAll:selector=>switches.filter(b=>selector.includes('"'+b.dataset.voice+'"'))};
+    for(const kind of ['ims','volte','vonr'])nodes['lock-'+kind+'-state']={};
+    bands.lastLock.ims={enabled:false,source:'acknowledged'};
+    bands.lastLock.volte={enabled:true,source:'modem'};
+    bands.lastLock.vonr={enabled:null,source:'unknown'};
+    bands.paint();
+    assert(nodes['lock-ims-state'].textContent.includes('本次已应用'));
+    assert.equal(switches.find(b=>b.dataset.voice==='ims'&&b.dataset.enabled==='off')['aria-pressed'],'true');
+    assert.equal(switches.find(b=>b.dataset.voice==='volte'&&b.dataset.enabled==='on').disabled,true);
+    assert(switches.filter(b=>b.dataset.voice==='vonr').every(b=>!b.disabled&&b['aria-pressed']==='false'));
+    console.log('PASS: IMS accepted-write indication, VoLTE readback, unknown VoNR and separate SIM RPC');
     console.log('PASS: job success/error, clock-independent completion, spinner cleanup, failed and successful readback');
     console.log('PASS: dynamic candidates, stale selection cleanup, unavailable capabilities and set comparison');
     // Hold the neighboring-cell RPC while live serving data arrives. Each

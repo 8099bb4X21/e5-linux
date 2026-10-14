@@ -244,7 +244,7 @@ window.T551M = (() => {
         const rates = document.querySelector('[data-title="overview"] .rates');
         rates.insertAdjacentHTML('afterbegin', '<div class="hero-label"><span id="hero-uptime-label">本次运行时长</span><span id="hero-uptime">—</span></div>');
         rates.insertAdjacentHTML('afterend', `<div id="home-usb" class="card home-usb" role="status" hidden><span class="home-usb-icon">${svg('usb')}</span><div><strong id="home-usb-title"></strong><small id="home-usb-detail"></small></div></div>`);
-        rates.insertAdjacentHTML('afterend', '<div id="home-boot" class="card home-boot" hidden><strong id="home-boot-title"></strong><p id="home-boot-note"></p><button id="home-boot-default"></button></div>');
+        rates.insertAdjacentHTML('afterend', '<div id="home-boot" class="card home-boot" hidden><strong id="home-boot-title"></strong><p id="home-boot-note"></p><button id="home-boot-default" class="btn wide" type="button"></button></div>');
         let confirmUntil = 0;
         el('home-boot-default').onclick = async () => {
             if (screenLocked || dark || bootBusy || last?.boot?.can_set_default !== true) return;
@@ -593,7 +593,7 @@ window.T551M = (() => {
             if (!mounted || keyKind(event) !== 'call' || T551MPower.isOpen() || window.T551MCalls?.active()) return;
             event.preventDefault(); event.stopImmediatePropagation();
             if (event.repeat || openingPhone) return;
-            if (blank) { setBlank(false); return; }
+            if (blank) return;
             if (lockedNow() || locked) return;
             resetIdle();
             menu(false, true);

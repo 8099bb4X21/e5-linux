@@ -47,7 +47,8 @@ button:active { filter:brightness(1.22); }
 .home-boot { padding:12px; }
 .home-boot strong { font-size:12px; }
 .home-boot p { margin:6px 0 10px; font-size:11px; line-height:1.5; color:var(--dim); }
-.home-boot button { min-height:34px; width:100%; border-radius:10px; }
+.home-boot .btn { display:flex; align-items:center; justify-content:center; min-height:38px; width:100%; margin:0; padding:9px 12px; border-radius:10px; text-align:center; white-space:normal; overflow-wrap:anywhere; line-height:1.4; }
+.home-boot .btn:disabled { opacity:.55; }
 #bar-dual { display:flex; flex-direction:column; width:15px; gap:1px; height:14px; }
 #bar-dual[hidden] { display:none; }
 .dual-row { height:10px; display:flex; align-items:flex-end; gap:1px; }

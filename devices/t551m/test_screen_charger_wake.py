@@ -39,6 +39,31 @@ def main():
             page.wait_for_timeout(300)
             def poll():page.evaluate('poll()');page.wait_for_timeout(250)
             def dark():page.evaluate('setBlank(true)');page.wait_for_timeout(200)
+            # A focused plugin has its own event tree. Exercise both capture
+            # paths, including call, number, navigation and volume keys.
+            page.evaluate('''()=>{
+                const frame=document.createElement('iframe');frame.id='wake-test-frame';
+                frame.hidden=true;document.body.append(frame);
+                T551MPower.attach(frame.contentWindow);T551M.attachKeys(frame.contentWindow);
+            }''')
+            for frame in [False,True]:
+                dark()
+                for key in ['F13','F1','Enter','ArrowUp','ArrowDown','ArrowLeft','ArrowRight',
+                            'ContextMenu','Backspace','1','*','AudioVolumeUp','AudioVolumeDown','Unidentified']:
+                    page.evaluate('''([key,frame])=>{
+                        const target=frame?document.querySelector('#wake-test-frame').contentWindow:window;
+                        for(const type of ['keydown','keyup'])target.dispatchEvent(new KeyboardEvent(type,{key,bubbles:true,cancelable:true}));
+                    }''',[key,frame])
+                    assert page.evaluate('blank && T551M.isLocked()'),(key,frame)
+                page.touchscreen.tap(160,250)
+                assert page.evaluate('blank && T551M.isLocked()')
+                page.evaluate('''frame=>{
+                    const target=frame?document.querySelector('#wake-test-frame').contentWindow:window;
+                    for(const type of ['keydown','keyup'])target.dispatchEvent(new KeyboardEvent(type,{key:'Power',bubbles:true,cancelable:true}));
+                }''',frame)
+                page.wait_for_timeout(200)
+                assert page.evaluate('!blank && T551M.isLocked()')
+            page.evaluate("document.querySelector('#wake-test-frame').remove()")
             # A quick unplug/replug leaves the next status sample unchanged.
             # Both kernel transitions must wake without waiting for that poll.
             for _ in range(2):
@@ -63,7 +88,7 @@ def main():
             assert page.evaluate('blank')
             assert not errors,errors
             browser.close()
-            print('PASS: attach/detach wake lock; charge-state changes and initial sample do not; explicit touch-off retained')
+            print('PASS: only power wakes from shell/plugin key or touch input; attach/detach still wakes lock; explicit touch-off retained')
     finally:server.shutdown()
 
 if __name__=='__main__':main()

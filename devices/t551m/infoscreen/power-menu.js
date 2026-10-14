@@ -75,6 +75,12 @@ ${selected ? `<p class="power-note">${selected === 'android_once' ? words('é‡å
             }
             return;
         }
+        // Capture in both the shell and plugin frames, before the legacy
+        // any-key wake and call-key handlers. Only power wakes a dark lock.
+        if (blank && !['volup','voldown'].includes(kind)) {
+            event.preventDefault(); event.stopImmediatePropagation();
+            return;
+        }
         if (!isOpen()) return;
         event.preventDefault(); event.stopImmediatePropagation();
         if (event.type !== 'keydown' || event.repeat || busy) return;
