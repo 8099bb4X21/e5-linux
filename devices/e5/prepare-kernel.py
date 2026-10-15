@@ -14,6 +14,7 @@ def apply(kernel):
     head = subprocess.check_output(['git', '-C', str(kernel), 'rev-parse', 'HEAD'], text=True).strip()
     if not head.startswith(COMMIT):
         raise ValueError('Expected E5 kernel ' + COMMIT)
+    runpy.run_path(str(SHARED.parent / 'common/display.py'))['apply'](kernel)
     runpy.run_path(str(SHARED.parent / 'common/emmc.py'))['apply'](kernel)
     runpy.run_path(str(SHARED.parent / 'common/eic.py'))['apply'](kernel)
     runpy.run_path(str(SHARED.parent / 'common/thermal.py'))['apply'](kernel)

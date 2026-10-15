@@ -17,6 +17,7 @@ def apply(kernel):
     head = subprocess.check_output(['git', '-C', str(kernel), 'rev-parse', 'HEAD'], text=True).strip()
     if not head.startswith(BASE):
         raise ValueError('Expected linux-lts-e5 ' + BASE)
+    runpy.run_path(str(HERE.parent / 'common/display.py'))['apply'](kernel)
     runpy.run_path(str(HERE.parent / 'common/emmc.py'))['apply'](kernel)
     runpy.run_path(str(HERE.parent / 'common/eic.py'))['apply'](kernel)
     runpy.run_path(str(HERE.parent / 'common/thermal.py'))['apply'](kernel)
@@ -159,7 +160,6 @@ def apply(kernel):
     runpy.run_path(str(HERE / 'usb-role.py'))['apply'](kernel)
     runpy.run_path(str(HERE / 'audio.py'))['apply'](kernel)
     runpy.run_path(str(HERE / 'gpu.py'))['apply'](kernel)
-    runpy.run_path(str(HERE / 'display.py'))['apply'](kernel)
     runpy.run_path(str(HERE.parent / 't551m/wifi.py'))['apply'](kernel)
     runpy.run_path(str(HERE / 'wifi.py'))['apply'](kernel)
     # Legacy Marlin3lite DT omits newer optional GNSS dump metadata.

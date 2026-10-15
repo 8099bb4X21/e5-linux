@@ -26,6 +26,7 @@ fi
 # An empty variable overrides kbuild's default, so unset it for local builds.
 [ -n "${KBUILD_BUILD_TIMESTAMP:-}" ] || unset KBUILD_BUILD_TIMESTAMP
 cd /src/linux
+python3 /policy/display.py .
 python3 /policy/emmc.py .
 python3 /policy/eic.py .
 python3 /policy/thermal.py .

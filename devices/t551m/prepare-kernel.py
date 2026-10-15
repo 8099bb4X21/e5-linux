@@ -132,6 +132,7 @@ def main():
     head = subprocess.check_output(['git', '-C', str(k), 'rev-parse', 'HEAD']).decode().strip()
     if not head.startswith(KERNEL_COMMIT):
         raise SystemExit('Expected linux-lts-e5 commit ' + KERNEL_COMMIT)
+    runpy.run_path(str(Path(__file__).resolve().parents[1] / 'common/display.py'))['apply'](k)
     runpy.run_path(str(Path(__file__).resolve().parents[1] / 'common/emmc.py'))['apply'](k)
     runpy.run_path(str(Path(__file__).resolve().parents[1] / 'common/eic.py'))['apply'](k)
     runpy.run_path(str(Path(__file__).resolve().parents[1] / 'common/thermal.py'))['apply'](k)
