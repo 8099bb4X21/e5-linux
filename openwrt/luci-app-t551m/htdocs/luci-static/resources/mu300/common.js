@@ -584,6 +584,21 @@ const PLATFORM_ERRORS = [
     "Ayar yeniden bağlantıdan sonra korunmadı"
   ],
   [
+    "Cannot read standby radio state",
+    "无法读取备用卡射频状态",
+    "Yedek SIM radyo durumu okunamıyor"
+  ],
+  [
+    "Cannot read modem state before reconnect",
+    "重连前无法读取模组状态",
+    "Yeniden bağlantı öncesinde modem durumu okunamıyor"
+  ],
+  [
+    "Radio reconnect timed out",
+    "射频重连超时",
+    "Radyo yeniden bağlantısı zaman aşımına uğradı"
+  ],
+  [
     "Another network operation is still running",
     "另一个网络操作仍在执行",
     "Başka bir ağ işlemi hâlâ çalışıyor"
@@ -1224,6 +1239,9 @@ var DASH_I18N = {
 	'正在确认开机自动应用': ['Confirming startup setting', 'Başlangıç ayarı doğrulanıyor'],
 	'正在直读调制解调器（最多几秒）': ['Reading modem directly (a few seconds at most)', 'Modem doğrudan okunuyor (en fazla birkaç saniye)'],
 	'频段设置已应用，实际频段以模组回读为准': ['Band setting applied; actual bands are shown by modem readback', 'Bant ayarı uygulandı; gerçek bantlar modem geri okumasında gösterilir'],
+	'设置已保存；当前模组未就绪或射频已关闭，已跳过重连': ['Settings saved; reconnect skipped because the modem is not ready or the radio is off', 'Ayarlar kaydedildi; modem hazır değil veya radyo kapalı olduğundan yeniden bağlantı atlandı'],
+	'设置已应用；状态刷新暂不可用，请稍后刷新': ['Settings applied; status refresh is temporarily unavailable, please refresh later', 'Ayarlar uygulandı; durum şu anda yenilenemiyor, lütfen daha sonra yenileyin'],
+	'设置已接受，但重连失败：': ['Settings accepted, but reconnect failed: ', 'Ayarlar kabul edildi ancak yeniden bağlantı başarısız: '],
 	'已刷新': ['Refreshed', 'Yenilendi'],
 	'刷新失败': ['Refresh failed', 'Yenileme başarısız'],
 	'暂无驻网数据': ['No serving-network data', 'Bağlı olunan ağ verisi yok'],

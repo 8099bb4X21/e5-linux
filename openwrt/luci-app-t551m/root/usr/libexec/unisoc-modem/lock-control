@@ -249,14 +249,14 @@ def verify(kind, val, expected):
         return all(set(cell_state(rat)) == set(cells) for rat, cells in expected.items())
     return True
 
-def write_setting(command, timeout, early, readback):
+def write_setting(command, timeout, early, readback, recover=False):
     try:
         at(command, 3 if early else timeout)
     except RuntimeError as error:
-        # This firmware omits OK for some setters while CFUN=0. Never retry
+        # This firmware omits OK for some setters while offline. Never retry
         # the write or treat silence as success: recover framing with the
         # AT owner's named read-only probes, then verify this exact field.
-        if not early or 'no final response' not in str(error): raise
+        if not (early or recover) or 'no final response' not in str(error): raise
         time.sleep(2)
         if not readback(): raise RuntimeError('Unacknowledged setting failed readback: ' + command)
 
@@ -272,8 +272,7 @@ def apply(kind, val, restart=True, persist=True, early=False):
     if kind == 'bands_default':
         bands = ','.join(map(str, LTE))
         apply('lte', bands, restart=False, persist=persist, early=early)
-        apply('nr', '', restart=restart, persist=persist, early=early)
-        return
+        return apply('nr', '', restart=restart, persist=persist, early=early)
     if kind == 'auto_apply':
         atomic(STATE / kind, val)
         return
@@ -287,12 +286,12 @@ def apply(kind, val, restart=True, persist=True, early=False):
         expected = testmode()[:3]
         expected[slot] = MODES[val][0]
         write_setting('AT+SP5GRAN=' + str(MODES[val][1]), 15, early,
-                      lambda: numbers('AT+SP5GRAN?', '+SP5GRAN')[0] == MODES[val][1])
+                      lambda: numbers('AT+SP5GRAN?', '+SP5GRAN')[0] == MODES[val][1], recover=True)
         write_setting('AT+SPTESTMODE=' + ','.join(map(str, expected)), 20, early,
-                      lambda: verify(kind, val, expected))
+                      lambda: verify(kind, val, expected), recover=True)
     elif kind == 'endc':
         write_setting('AT+SPENDC=' + ('1' if val == 'on' else '2'), 15, early,
-                      lambda: verify(kind, val, expected))
+                      lambda: verify(kind, val, expected), recover=True)
     elif kind in ('lte', 'nr'):
         bands = list(map(int, val.split(','))) if val else []
         v = masks(bands, LTE_TABLES if kind == 'lte' else NR_TABLES)
@@ -322,10 +321,23 @@ def apply(kind, val, restart=True, persist=True, early=False):
         if attempt == 5: raise RuntimeError('Modem readback does not match requested setting')
         time.sleep(.5)
     if active_card() != slot: raise RuntimeError('Active SIM changed during operation')
+    result = {}
     if restart and kind not in ('endc', 'volte', 'vonr'):
-        r = subprocess.run([RESTART], capture_output=True, text=True, timeout=75)
-        if r.returncode: raise RuntimeError('Setting accepted, but reconnect failed: ' + (r.stderr or r.stdout)[-240:])
-        if not verify(kind, val, expected): raise RuntimeError('Setting did not survive reconnect')
+        # Acceptance of a setting does not require a registered SIM or a live
+        # bearer. The restart helper checks MM before touching WAN. Keep its
+        # outcome separate from the already verified write, including races
+        # where the SIM vanishes during reconnect.
+        try:
+            r = subprocess.run([RESTART, '--settings'], capture_output=True, text=True, timeout=75)
+            if r.returncode:
+                result.update(reconnect='failed', reconnect_error=(r.stderr or r.stdout)[-240:])
+            elif r.stdout.strip().startswith('RECONNECT-DEFERRED '):
+                result.update(reconnect='deferred', reconnect_reason=r.stdout.strip().split(' ', 1)[1])
+            else:
+                if not verify(kind, val, expected): raise RuntimeError('Setting did not survive reconnect')
+                result['reconnect'] = 'done'
+        except subprocess.TimeoutExpired:
+            result.update(reconnect='failed', reconnect_error='Radio reconnect timed out')
     if kind in ('volte', 'vonr'):
         write_json(RUN / f'{kind}-applied.json', {
             'enabled': val == 'on', 'source': 'modem',
@@ -337,10 +349,11 @@ def apply(kind, val, restart=True, persist=True, early=False):
             atomic(STATE / kind, val)
     try:
         snapshot()
-    except RuntimeError:
-        # A successful band command stays successful if the subsequent status
-        # refresh is temporarily unavailable. Getters retain/report that state.
-        if kind not in ('lte', 'nr'): raise
+    except RuntimeError as error:
+        # This is a status refresh, not acceptance verification. An unrelated
+        # getter must not turn an acknowledged/verified write into a failure.
+        result['refresh_error'] = str(error)
+    return result
 
 
 def exclusive():
@@ -448,7 +461,8 @@ def main(args):
             with exclusive():
                 if job:
                     data.update(state='running');write_json(job_path(job), data)
-                apply(kind, val)
+                result = apply(kind, val)
+                data.update(result or {})
             data.update(state='done', ok=1)
         except Exception as e:
             data.update(state='error', ok=0, error=str(e))

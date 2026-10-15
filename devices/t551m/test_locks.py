@@ -31,6 +31,7 @@ class LocksTest(unittest.TestCase):
         self.reset_bands_on_restart = False
         self.reset_mode_on_restart = False
         self.omit_final = None
+        self.restart_result = (0, '', '')
         self.voice = {'volte': True, 'vonr': False}
         p = patch.object(locks.subprocess, 'run', side_effect=self.run_command)
         p.start();self.addCleanup(p.stop)
@@ -65,7 +66,8 @@ class LocksTest(unittest.TestCase):
             self.restarts += 1
             if self.reset_mode_on_restart: self.tm[0] = 134
             if self.reset_bands_on_restart: self.band = {0:[0,0,0,1,0],3:[0,0,16,0]}
-            return subprocess.CompletedProcess(argv,0,'','')
+            self.assertEqual(argv, [locks.RESTART, '--settings'])
+            return subprocess.CompletedProcess(argv, *self.restart_result)
         cmd = argv[-1];self.sent.append(cmd)
         if cmd == self.fail: return subprocess.CompletedProcess(argv,1,'','AT channel quarantined')
         data = ''
@@ -82,7 +84,8 @@ class LocksTest(unittest.TestCase):
         elif cmd.startswith('AT+SPTESTMODE='):
             if cmd != self.ignore:self.tm = list(map(int,cmd.split('=')[1].split(',')))
         elif cmd.startswith('AT+SP5GRAN='):self.gran = int(cmd.split('=')[1])
-        elif cmd.startswith('AT+SPENDC='):self.endc = 1 if cmd.endswith('=1') else 0
+        elif cmd.startswith('AT+SPENDC='):
+            if cmd != self.ignore:self.endc = 1 if cmd.endswith('=1') else 0
         elif cmd.startswith('AT+SPLBAND='):
             v = list(map(int,cmd.split('=')[1].split(',')))
             if len(v)==1:data = '+SPLBAND: '+','.join(map(str,self.band[v[0]]))
@@ -304,6 +307,87 @@ class LocksTest(unittest.TestCase):
         (locks.STATE/'mode').write_text('auto')
         self.assertEqual(locks.replay('early')['state'],'error')
         self.assertFalse(locks.MARKER.exists())
+
+    def test_offline_reconnect_is_deferred_and_setting_is_saved(self):
+        self.restart_result = (0, 'RECONNECT-DEFERRED failed\n', '')
+        for kind, val in [('mode', 'auto'), ('lte', '1,3'), ('nr', '1,41,78'),
+                          ('cell', 'lte:3740,36'), ('bands_default', '')]:
+            with self.subTest(kind=kind):
+                result = locks.main(['apply', kind, val])
+                self.assertEqual(result['state'], 'done', result)
+                self.assertEqual(result['reconnect'], 'deferred')
+                self.assertEqual(result['reconnect_reason'], 'failed')
+                self.assertTrue((locks.STATE / ('nr' if kind == 'bands_default' else kind)).exists())
+
+    def test_reconnect_failure_does_not_lose_accepted_setting(self):
+        self.restart_result = (1, '', 'Wrong state: modem in failed state')
+        result = locks.main(['apply', 'mode', 'auto'])
+        self.assertEqual(result['state'], 'done', result)
+        self.assertEqual(result['reconnect'], 'failed')
+        self.assertIn('failed state', result['reconnect_error'])
+        self.assertEqual((locks.STATE/'mode').read_text(), 'auto')
+
+    def test_reconnect_timeout_preserves_setting_and_reports_reconnect_failure(self):
+        original = self.run_command
+        def timeout(argv, **kwargs):
+            if argv[0] == locks.RESTART: raise subprocess.TimeoutExpired(argv, 75)
+            return original(argv, **kwargs)
+        with patch.object(locks.subprocess, 'run', side_effect=timeout):
+            result = locks.main(['apply', 'mode', 'auto'])
+        self.assertEqual(result['state'], 'done', result)
+        self.assertEqual(result['reconnect'], 'failed')
+        self.assertEqual((locks.STATE/'mode').read_text(), 'auto')
+
+    def test_interactive_missing_final_requires_exact_readback_without_resending(self):
+        for kind, val, command in [('endc','on','AT+SPENDC=1'),
+                                   ('mode','auto','AT+SPTESTMODE=134,134,0'),
+                                   ('mode','sa','AT+SP5GRAN=1')]:
+            with self.subTest(kind=kind, command=command):
+                self.sent.clear()
+                self.omit_final = command
+                result = locks.main(['apply', kind, val])
+                self.assertEqual(result['state'], 'done', result)
+                self.assertEqual(self.sent.count(command), 1)
+                self.assertTrue((locks.STATE/kind).exists())
+
+    def test_interactive_missing_final_with_wrong_or_unreadable_state_is_failure(self):
+        for fail_read in (False, True):
+            with self.subTest(fail_read=fail_read):
+                self.sent.clear(); self.endc = 0
+                self.omit_final = self.ignore = 'AT+SPENDC=1'
+                self.fail = 'AT+SPENDC?' if fail_read else None
+                result = locks.main(['apply', 'endc', 'on'])
+                self.assertEqual(result['state'], 'error', result)
+                self.assertEqual(self.sent.count('AT+SPENDC=1'), 1)
+                self.assertFalse((locks.STATE/'endc').exists())
+
+    def test_unrelated_snapshot_failure_does_not_invalidate_verified_mode_or_endc(self):
+        with patch.object(locks, 'snapshot', side_effect=RuntimeError('bands unavailable')):
+            for kind, val in [('mode','auto'), ('endc','on')]:
+                result = locks.main(['apply',kind,val])
+                self.assertEqual(result['state'], 'done', result)
+                self.assertEqual(result['refresh_error'], 'bands unavailable')
+                self.assertEqual((locks.STATE/kind).read_text(), val)
+
+    def test_interactive_band_without_ack_cannot_be_proven_by_readback(self):
+        self.omit_final = 'AT+SPLBAND=2,1,0,272,0'
+        result = locks.main(['apply', 'nr', '1,41,78'])
+        self.assertEqual(result['state'], 'error', result)
+        self.assertFalse((locks.STATE/'nr').exists())
+        self.assertEqual(self.restarts, 0)
+
+    def test_explicit_endc_error_is_not_recovered_or_saved(self):
+        original = self.run_command
+        def reject(argv, **kwargs):
+            if argv[-1] == 'AT+SPENDC=1':
+                self.sent.append(argv[-1])
+                return subprocess.CompletedProcess(argv, 1, 'ERROR\n', '')
+            return original(argv, **kwargs)
+        with patch.object(locks.subprocess, 'run', side_effect=reject):
+            result = locks.main(['apply', 'endc', 'on'])
+        self.assertEqual(result['state'], 'error', result)
+        self.assertNotIn('AT+SPENDC?', self.sent)
+        self.assertFalse((locks.STATE/'endc').exists())
 
     def test_nr_capability_count_is_not_a_band(self):
         self.assertEqual(locks.nr_capabilities(),[1,5,8,28,41,78])

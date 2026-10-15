@@ -6,6 +6,7 @@ Keep our SDIO implementation, reset work and existing TX fixes.
 """
 from pathlib import Path
 import re
+import runpy
 
 
 def stage(root):
@@ -180,6 +181,8 @@ static void iface_notify_deinit(struct sprd_priv *priv)
          '\t\t\t\t\t   KOBJ_CHANGE, env);\n'
          '\t\t}\n'
          '\t\twl_info("Try to report assert a %d time \\n", hif->report_try);')
+
+    runpy.run_path(str(Path(__file__).with_name('common') / 'wifi-tx.py'))['apply'](kernel)
 
 
 if __name__ == '__main__':

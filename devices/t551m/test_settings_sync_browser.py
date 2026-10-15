@@ -31,7 +31,7 @@ with sync_playwright() as p:
         const native=fetch;window.items=[{id:'net_mode',type:'choice',value:'auto',slot:'1',label:'网络模式',options:[{value:'auto',label:'自动'},{value:'4g',label:'仅4G'}]}];
         window.fetch=async(url,options)=>{
             if (url==='/api/settings/network'&&options?.method==='POST') {writes.push(JSON.parse(options.body));return new Response(JSON.stringify({ok:true,pending:true,job:'a'.repeat(32),slot:'1'}));}
-            if (String(url).startsWith('/api/network-job')) {window.jobURL=url;return new Response(JSON.stringify({state:jobState,ok:jobState==='done',error:jobState==='error'?'readback mismatch':null}));}
+            if (String(url).startsWith('/api/network-job')) {window.jobURL=url;return new Response(JSON.stringify({state:jobState,ok:jobState==='done',error:jobState==='error'?'readback mismatch':null,...window.jobReceipt}));}
             if(url==='/api/settings/network') {
                 if(window.bandReadFailure)throw new Error('test read failure');
                 if(window.holdBandRead)return new Promise(resolve=>{window.releaseBandRead=()=>resolve(new Response(JSON.stringify({items})));});
@@ -51,6 +51,22 @@ with sync_playwright() as p:
     page.evaluate("jobState='error'");page.wait_for_function('!stTop().parent.saving')
     assert page.evaluate("stTop().view==='edit'")
     page.evaluate("jobState='done'");page.locator('[data-st="opt:1"]').click();page.wait_for_function("stTop().view==='cat'")
+    page.evaluate('''async()=>{
+        const nativeToast=toast;const messages=[];toast=message=>messages.push(message);
+        try {
+            for (const language of ['zh','en']) {
+                lang=language;
+                for (const receipt of [{reconnect:'deferred'}, {reconnect:'failed'}, {refresh_error:'offline'}]) {
+                    window.jobReceipt=receipt;
+                    const result=await stPost(stTop(),{id:'net_mode',value:'4g'});
+                    if(!result.ok)throw new Error('Accepted job became a screen failure');
+                    const expected=t(receipt.reconnect==='deferred'?'network_deferred':
+                        receipt.reconnect==='failed'?'network_reconnect_failed':'network_refresh_pending');
+                    if(messages.at(-1)!==expected)throw new Error('Screen lost reconnect outcome: '+messages.at(-1));
+                }
+            }
+        } finally {toast=nativeToast;lang='zh';delete window.jobReceipt;}
+    }''')
     # Simulate a category left open while the web changes the selected SIM's
     # lock snapshot. Opening the editor must use the newly read candidates.
     page.evaluate('''()=>{

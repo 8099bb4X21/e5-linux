@@ -440,6 +440,7 @@ def pull_device_files(work, out=None):
     and everything packed on the device (collect-device-files.sh), into out
     (the install's device-files.tar by default)."""
     out = out or f'{D}/device-files.tar'
+    if GUI:GUI.stage('firmware_extract')
     say('从这台设备提取固件和基带文件 / the firmware and baseband files of this device')
     st = f'{TMP}/e5pull'
     su(f'rm -rf {st}; mkdir -p {st}')
@@ -481,12 +482,16 @@ def pull_device_files(work, out=None):
                 (n.startswith('wifi_board_config') and n.endswith('.ini')):
             shutil.copy(os.path.join(raw, n), fw)
     tools = os.path.join(SCRIPTS, 'tools')
-    subprocess.run(python_tool(os.path.join(tools, 'sprd-bt-config.py'),
-                    os.path.join(raw, 'bt_configure_pskey.xpe.ini'), os.path.join(raw, 'bt_configure_rf.xpe.ini'),
-                    os.path.join(raw, 'btmac.txt'), os.path.join(fw, 'sprd')), check=True)
-    subprocess.run(python_tool(os.path.join(tools, 'vbc-profile', 'vbc-profile.py'),
-                    os.path.join(raw, 'dsp_vbc.xml'), os.path.join(raw, 'audio_structure.xml'),
-                    os.path.join(raw, 'cvs.xml'), '-o', fw), check=True, stdout=subprocess.DEVNULL)
+    bt = (os.path.join(tools, 'sprd-bt-config.py'), os.path.join(raw, 'bt_configure_pskey.xpe.ini'),
+          os.path.join(raw, 'bt_configure_rf.xpe.ini'), os.path.join(raw, 'btmac.txt'), os.path.join(fw, 'sprd'))
+    vbc = (os.path.join(tools, 'vbc-profile', 'vbc-profile.py'), os.path.join(raw, 'dsp_vbc.xml'),
+           os.path.join(raw, 'audio_structure.xml'), os.path.join(raw, 'cvs.xml'), '-o', fw)
+    if GUI:
+        GUI.run_tool(*bt)
+        GUI.run_tool(*vbc)
+    else:
+        subprocess.run(python_tool(*bt), check=True)
+        subprocess.run(python_tool(*vbc), check=True, stdout=subprocess.DEVNULL)
     for n in ('sprd/marlin3lite_pskey.bin', 'sprd/marlin3lite_rf.bin', 'audio_structure', 'dsp_vbc', 'cvs'):
         if not os.path.isfile(os.path.join(fw, *n.split('/'))):
             die(f'converting the firmware made no {n}')

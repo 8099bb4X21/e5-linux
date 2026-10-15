@@ -344,8 +344,14 @@ return view.extend({
 				if (!go) return;
 				M.busy(btn, true);
 			var progress = M.toast('正在后台锁定 ' + key + '，约半分钟', { type: 'busy' });
-			M.callLockSet('cell', key).then(M.waitLockJob).then(function() {
-				M.toast('已锁定并核对小区 ' + key, { type: 'success' });
+			M.callLockSet('cell', key).then(M.waitLockJob).then(function(result) {
+				if (result.reconnect === 'deferred')
+					M.toast('设置已保存；当前模组未就绪或射频已关闭，已跳过重连', { type: 'info' });
+				else if (result.reconnect === 'failed')
+					M.toast('设置已接受，但重连失败：' + (result.reconnect_error || ''), { type: 'error' });
+				else if (result.refresh_error)
+					M.toast('设置已应用；状态刷新暂不可用，请稍后刷新', { type: 'info' });
+				else M.toast('已锁定并核对小区 ' + key, { type: 'success' });
 				self.refreshLock();
 			}).catch(function(error) {
 				M.toast('锁定失败：' + (error.message || error), { type: 'error' });

@@ -362,13 +362,21 @@ return view.extend({
 
 	/* Follow this operation's result; device and browser clocks can differ. */
 	readback: function(operation, btn) {
-		var self = this;
-		return M.waitLockJob(operation).then(function() {
-			return M.callLockGet();
+		var self = this, receipt;
+		return M.waitLockJob(operation).then(function(result) {
+			receipt = result;
+			return M.callLockGet().catch(function() { return null; });
 		}).then(function(l) {
-			if (!l || l.error) throw new Error(l && l.error || '无法读取应用后的状态');
-			self.lastLock = l; self.paint(); self.paintServing(self.lastCell); self.paintNeighbors();
-			self.note(['lte','nr','bands_default'].indexOf(operation.kind || operation.op) >= 0 ?
+			if (l && !l.error) {
+				self.lastLock = l; self.paint(); self.paintServing(self.lastCell); self.paintNeighbors();
+			}
+			if (receipt.reconnect === 'deferred')
+				self.note('设置已保存；当前模组未就绪或射频已关闭，已跳过重连', 'info');
+			else if (receipt.reconnect === 'failed')
+				self.note('设置已接受，但重连失败：' + (receipt.reconnect_error || ''), 'error');
+			else if (!l || l.error || receipt.refresh_error)
+				self.note('设置已应用；状态刷新暂不可用，请稍后刷新', 'info');
+			else self.note(['lte','nr','bands_default'].indexOf(operation.kind || operation.op) >= 0 ?
 				'频段设置已应用，实际频段以模组回读为准' : '已应用并核对模组状态', 'success');
 		}).catch(function(error) {
 			self.note('应用失败：' + (error.message || error), 'error');

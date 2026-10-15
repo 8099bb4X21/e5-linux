@@ -21,6 +21,7 @@ const I18N = {
 		traffic: '流量', today: '今日', this_month: '本月', last_days: '最近 7 天', counting_since: '开始统计于',
 		notifications: '应用通知', notification_open: '查看', notification_later: '稍后', settings: '高级', apps: '应用', no_apps: '没有安装应用', press_again: '再按一次确认', unlocked: '已解锁', pic_close: '按任意键或点一下关闭', app_store: '应用商店', store_install: '安装', store_update: '更新到', store_have: '已安装', store_backend: '含后台（以 root 运行）', store_refresh: '刷新', store_empty: '商店里还没有应用', store_fail: '无法获取应用商店', store_installing: '正在安装…', store_note: '应用来自 github.com/Enceka/infoscreen-plugins，经检查后发布；含后台的应用以 root 运行，只装你信任的', usb_none: '未连接', usb_charger: '仅充电（充电器）', usb_host: '已接电脑，未识别', usb_enumerated: '已连接电脑', usb_lease: '电脑已获取地址', usb_online: '电脑正通过 E5 上网', donate_note: '关闭后不再弹出，以后如有意愿，可以在“高级 → 关于 → 赞赏”里赞赏',
 		apply: '应用', clear: '全部取消', save: '保存', saved: '已保存', failed: '失败',
+		network_deferred: '设置已保存，模组未就绪或射频已关闭，已跳过重连', network_reconnect_failed: '设置已接受，但重连失败', network_refresh_pending: '设置已应用，请稍后刷新状态',
 		online: '在线', offline: '离线', blocked: '已禁止上网', block: '禁止上网', unblock: '允许上网',
 		kick: '踢下 Wi-Fi', kicked: '已踢下线', mac: 'MAC', via: '连接', no_devices: '没有设备',
 		loading: '读取中…', app_settings: '应用设置', app_config: '设置', current_voltage: '电流 / 电压',
@@ -63,6 +64,7 @@ const I18N = {
 		traffic: 'Traffic', today: 'Today', this_month: 'This month', last_days: 'Last 7 days', counting_since: 'Counting since',
 		notifications: 'App notification', notification_open: 'Open', notification_later: 'Later', settings: 'Settings', apps: 'Apps', no_apps: 'No apps installed', press_again: 'Press again', unlocked: 'Unlocked', pic_close: 'Any key or a tap closes this', app_store: 'App store', store_install: 'Install', store_update: 'Update to', store_have: 'Installed', store_backend: 'with a backend (runs as root)', store_refresh: 'Refresh', store_empty: 'No apps in the store yet', store_fail: 'Cannot reach the app store', store_installing: 'Installing…', store_note: 'Apps from github.com/Enceka/infoscreen-plugins, checked before they are published; an app with a backend runs as root: install what you trust', usb_none: 'Not connected', usb_charger: 'Charging only (a charger)', usb_host: 'A computer, not enumerated', usb_enumerated: 'Connected to a computer', usb_lease: 'The computer has an address', usb_online: 'The computer is online through the E5', donate_note: 'This is not shown again; it stays under Settings -> About -> Donate',
 		apply: 'Apply', clear: 'Clear all', save: 'Save', saved: 'Saved', failed: 'Failed',
+		network_deferred: 'Settings saved; modem not ready or radio off, reconnect skipped', network_reconnect_failed: 'Settings accepted, but reconnect failed', network_refresh_pending: 'Settings applied; refresh status later',
 		online: 'Online', offline: 'Offline', blocked: 'Blocked', block: 'Block internet', unblock: 'Allow internet',
 		kick: 'Kick off Wi-Fi', kicked: 'Kicked', mac: 'MAC', via: 'Via', no_devices: 'No devices',
 		loading: 'Loading…', app_settings: 'App settings', app_config: 'Settings', current_voltage: 'Current / voltage',
@@ -1439,7 +1441,10 @@ async function stPost(v, body) {
 		await stLoadCat(v);
 	}
 	v.saving = false;done(!r?.ok);
-	toast(r?.ok ? (v.cat.id == 'usb' && body.id == 'reset' ? t('usb_resetting') : t('saved')) : `${t('failed')}${r?.error ? ': ' + errorText(r.error, lang) : ''}`);
+	toast(r?.ok ? (r.reconnect == 'deferred' ? t('network_deferred') :
+		r.reconnect == 'failed' ? t('network_reconnect_failed') :
+		r.refresh_error ? t('network_refresh_pending') :
+		v.cat.id == 'usb' && body.id == 'reset' ? t('usb_resetting') : t('saved')) : `${t('failed')}${r?.error ? ': ' + errorText(r.error, lang) : ''}`);
 	if (r?.ok && v.cat.id == 'traffic_clear') {
 		++trafficRequest;
 		clearTrafficDisplay();

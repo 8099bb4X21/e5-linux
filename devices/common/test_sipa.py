@@ -99,19 +99,20 @@ TX_STUBS = r'''
 #define NEXTHDR_UDP 17
 #define htons(x) (x)
 #define pr_err(...) ((void)0)
+typedef unsigned short __sum16;
 typedef int netdev_tx_t;
 struct sk_buff { unsigned len, headroom; int mac_header, network_header, protocol, ip_summed; };
 struct net_device_stats { unsigned tx_dropped,tx_errors,tx_packets,tx_bytes; };
 struct sipa_eth_init_data { int netid, src_id; };
 struct sipa_eth { struct sipa_eth_init_data *pdata; struct net_device_stats *stats; int state,nic_id; };
 struct net_device { struct sipa_eth *priv; const char *name; bool stopped; };
-struct iphdr { int protocol; }; struct ipv6hdr { int nexthdr; }; struct transport { int check; };
+struct iphdr { int protocol; }; struct ipv6hdr { int nexthdr; }; struct transport { __sum16 check; };
 static struct iphdr fake_ipv4;static struct ipv6hdr fake_ipv6;static struct transport tcp,udp;
 #define ip_hdr(s) (&fake_ipv4)
 #define ipv6_hdr(s) (&fake_ipv6)
 #define tcp_hdr(s) (&tcp)
 #define udp_hdr(s) (&udp)
-static int queue_lock, queue_lock_flags, next_result, linearize_result, recovery, freed;
+static int queue_lock, next_result, linearize_result, recovery, freed;
 static void *netdev_priv(struct net_device *d){return d->priv;}
 static int skb_linearize(struct sk_buff *s){(void)s;return linearize_result;}
 static unsigned skb_headroom(struct sk_buff *s){return s->headroom;}
@@ -129,17 +130,27 @@ int main(void) {
  struct sipa_eth eth={.pdata=&pdata,.stats=&stats,.state=DEV_ON};
  struct net_device dev={.priv=&eth,.name="test"};
  struct sk_buff skb={.len=100,.headroom=64};
- for(int i=0;i<4;i++) {
-  next_result=i&1?-EINPROGRESS:-EAGAIN;
-  assert(sipa_eth_start_xmit(&skb,&dev)==NETDEV_TX_BUSY);
-  assert(skb.len==100 && skb.headroom==64 && recovery==i+1 && dev.stopped && !freed);
-  assert(!stats.tx_dropped && !stats.tx_errors);
+ for(int ipv6=0;ipv6<2;ipv6++) for(int is_tcp=0;is_tcp<2;is_tcp++)
+ for(int raw=0;raw<2;raw++) for(int partial=0;partial<2;partial++) {
+  skb=(struct sk_buff){.len=100,.headroom=64,.network_header=raw?0:14,
+   .protocol=ipv6?ETH_P_IPV6:ETH_P_IP,.ip_summed=partial?CHECKSUM_PARTIAL:0};
+  fake_ipv4.protocol=fake_ipv6.nexthdr=is_tcp?IPPROTO_TCP:IPPROTO_UDP;
+  tcp.check=0x1234;udp.check=0x5678;int previous_recovery=recovery;
+  for(int i=0;i<50;i++) {
+   next_result=i&1?-EINPROGRESS:-EAGAIN;
+   assert(sipa_eth_start_xmit(&skb,&dev)==NETDEV_TX_BUSY);
+   assert(skb.len==100 && skb.headroom==64 && recovery==previous_recovery+i+1 && dev.stopped && !freed);
+   assert(tcp.check==0x1234 && udp.check==0x5678);
+   assert(!stats.tx_dropped && !stats.tx_errors);
+  }
+  next_result=0;assert(sipa_eth_start_xmit(&skb,&dev)==NETDEV_TX_OK);
+  assert((is_tcp?tcp.check:udp.check)==(partial?0:(is_tcp?0x1234:0x5678)));
+  assert(skb.len==(raw?114:100));
  }
- next_result=0;assert(sipa_eth_start_xmit(&skb,&dev)==NETDEV_TX_OK);
- assert(stats.tx_packets==1 && stats.tx_bytes==100 && !freed);
+ assert(stats.tx_packets==16 && stats.tx_bytes==1600 && !freed);
  skb.len=100;skb.headroom=64;linearize_result=-ENOMEM;
  assert(sipa_eth_start_xmit(&skb,&dev)==NETDEV_TX_OK && freed==1 && stats.tx_dropped==1);
- puts("PASS: backpressure always arms recovery, retry keeps skb geometry, no false drops, consumed skb returns OK");
+ puts("PASS: 16 protocol/header/checksum combinations, 50 retries each preserve geometry and checksum seed, balanced recovery and consumption");
 }
 '''
 
@@ -219,10 +230,19 @@ def main():
             target = root/name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(subprocess.check_output(['git','-c','safe.directory='+str(kernel),'-C',str(kernel),'show','HEAD:'+name]))
+        original = {name:(root/name).read_bytes() for name in paths}
         apply(root)
         before = {name:(root/name).read_bytes() for name in paths}
         apply(root)
         assert before == {name:(root/name).read_bytes() for name in paths}, 'Not idempotent'
+        # Incremental builders already contain the previous public SIPA patch.
+        # Upgrading them must produce exactly the same source as a clean build.
+        for name,data in original.items():
+            (root/name).write_bytes(data)
+        subprocess.run(['git','apply','--whitespace=nowarn',str(patch)],cwd=root,check=True)
+        previous_tx = (root/'drivers/unisoc_platform/net/sipa_v3/sipa_eth.c').read_text()
+        apply(root)
+        assert before == {name:(root/name).read_bytes() for name in paths}, 'Old patched tree upgrade differs'
         sources = {Path(name).name:(root/name).read_text() for name in paths}
         cp = sources['sipa_dele_cp_in_ap.c']
         assert cp.index('mutex_init(') < cp.index('ret = sipa_delegator_start(') < cp.index('wake_up_process(')
@@ -237,8 +257,20 @@ def main():
             source = root/(name+'.c')
             source.write_text(PRELUDE+stubs+body+tail)
             executable = root/name
-            subprocess.run(['cc','-std=gnu11','-Wall','-Werror','-Wno-unused-variable',str(source),'-o',str(executable)],check=True)
+            subprocess.run(['cc','-std=gnu11','-Wall','-Werror','-Wno-unused-variable',
+                            '-fsanitize=address,undefined','-fno-pie','-no-pie',
+                            str(source),'-o',str(executable)],check=True)
             subprocess.run([str(executable)],check=True)
+        source = root/'old-backpressure.c'
+        source.write_text(PRELUDE+TX_STUBS+function(previous_tx,'sipa_eth_start_xmit')+TX_MAIN)
+        # The old function uses the shared flags variable; include its test
+        # stand-in solely for this before/after executable comparison.
+        source.write_text(source.read_text().replace('static int queue_lock,',
+                                                    'static int queue_lock_flags, queue_lock,'))
+        executable = root/'old-backpressure'
+        subprocess.run(['cc','-std=gnu11','-Wno-unused-variable',str(source),'-o',str(executable)],check=True)
+        result = subprocess.run([str(executable)],capture_output=True)
+        assert result.returncode != 0 and b'tcp.check==0x1234 && udp.check==0x5678' in result.stderr, result.stderr
         broken = root/paths[0]
         broken.write_text(broken.read_text().replace('mutex_lock(&delegator->power_lock);','changed_vendor_function();',1))
         before = {name:(root/name).read_bytes() for name in paths}
@@ -246,7 +278,7 @@ def main():
         except ValueError: pass
         else: raise AssertionError('Unsupported mixed patch state accepted')
         assert before == {name:(root/name).read_bytes() for name in paths}
-        print('PASS: whole-patch validation, idempotent application, startup ordering and changed-source rejection')
+        print('PASS: original checksum-loss reproduced; clean/old/current patch states converge, startup ordering and changed-source rejection')
 
 
 if __name__ == '__main__': main()

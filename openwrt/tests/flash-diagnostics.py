@@ -50,10 +50,13 @@ class Diagnostics(unittest.TestCase):
         self.assertIn("sys.argv[1] == '--run-tool'", source)
         self.assertIn("runpy.run_path(_tool, run_name='__main__')", source)
         self.assertIn("sys.executable if getattr(sys, 'frozen', False) else __file__", source)
-        for call in ("python_tool(os.path.join(tools, 'sprd-bt-config.py')",
-                     "python_tool(os.path.join(tools, 'vbc-profile', 'vbc-profile.py')",
+        for call in ("python_tool(*bt)", "python_tool(*vbc)",
                      "python_tool(os.path.join(SCRIPTS, 'tools', 'e5-update.py'))"):
             self.assertIn(call, source, call)
+        with patch.object(flash.sys,'frozen',True,create=True):
+            self.assertEqual(flash.python_tool('/helper.py','argument'),[flash.sys.executable,'--run-tool','/helper.py','argument'])
+        with patch.object(flash.sys,'frozen',False,create=True):
+            self.assertEqual(flash.python_tool('/helper.py','argument'),[flash.sys.executable,'/helper.py','argument'])
 
     def test_reinstall_launchers_ship_with_the_package(self):
         # Legacy source wrappers retain their flags; both packagers now use
