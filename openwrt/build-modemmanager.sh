@@ -96,10 +96,16 @@ Z=; [ "$DOCKER" = podman ] && Z=,z
 $DOCKER run --rm --platform $PLAT -v e5-openwrt-src:/build \
     -v "$WORK":/work:ro$Z -v "$OUT":/out${Z:+:z} -e VER="$VER" -e E5REV="$E5REV" \
     -e JOBS="${E5_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc)}" \
-    debian:trixie bash -euc '
+    "${E5_MODEM_BUILD_IMAGE:-debian:trixie}" bash -euc '
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq --no-install-recommends build-essential ca-certificates clang file flex bison \
+# Reuse a compatible prepared image when supplied, and bound mirror stalls.
+# HTTPS is used only when trusted CA certificates are already available.
+if [ -s /etc/ssl/certs/ca-certificates.crt ]; then
+    sed -i "s@http://deb.debian.org/@https://deb.debian.org/@g" /etc/apt/sources.list.d/debian.sources
+fi
+apt_opts="-o Acquire::http::Pipeline-Depth=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3"
+apt-get $apt_opts update -qq
+apt-get $apt_opts install -y -qq --no-install-recommends build-essential ca-certificates clang file flex bison \
     gawk gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync swig unzip wget \
     xz-utils zlib1g-dev zstd libglib2.0-dev pkg-config >/dev/null
 # the buildroot refuses to run as root unless told otherwise; it lives in the
