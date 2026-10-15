@@ -1,5 +1,8 @@
 # 在荣悦 E5（Unisoc UMS9621）上运行 Linux
 
+Windows 图形安装器：完整解压安装包后运行根目录 `OpenWrt-Installer.exe`。支持设备选择、持久化续装和两阶段 Android 重置流程，原 Python/CLI 与 Magisk 入口保留。参见 [使用指南](installer/GUIDE.md)、[构建说明](installer/README.md)、[验证报告与截图](installer/VERIFICATION.md)。多台 ADB 设备可在 GUI 或交互 CLI 中选择，也可用 `--serial SERIAL` 指定。
+
+
 > English: [`README.md`](README.md)
 
 T551M 使用独立的[设备适配说明](devices/t551m/README.md)，包含充电、GPIO 背光、

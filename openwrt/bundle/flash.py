@@ -52,6 +52,8 @@ F = os.path.join(B, 'files')
 SCRIPTS = os.path.join(B, 'scripts')
 D = '/data/e5linux'
 TMP = '/data/local/tmp'
+GUI = None  # Structured observer; CLI remains independent.
+SERIAL = None
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -118,6 +120,8 @@ class busy:
 
 
 def die(msg):
+    if GUI:
+        raise ValueError(msg)
     print('\n错误 / error: ' + msg, file=sys.stderr, flush=True)
     sys.exit(1)
 
@@ -214,10 +218,13 @@ def find_adb():
 
 
 def adb(*args, check=False, capture=True, timeout=600):
-    r = subprocess.run([ADB, *args], stdout=subprocess.PIPE if capture else None,
-                       stderr=subprocess.STDOUT if capture else None, timeout=timeout)
+    selected = ['-s', SERIAL] if SERIAL and args[0] != 'devices' else []
+    if GUI and args[0] == 'reboot': GUI.reboot()
+    r = subprocess.run([ADB, *selected, *args], stdout=subprocess.PIPE if capture else None,
+                       stderr=subprocess.STDOUT if capture else None, timeout=timeout,
+                       **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
     out = r.stdout.decode('utf-8', 'replace').replace('\r', '') if capture else ''
-    if check and r.returncode != 0:
+    if check and r.returncode != 0 and not (GUI and args[0] == 'reboot'):
         die(f'adb {" ".join(args[:2])} failed: {out.strip()[-300:]}')
     return out
 
@@ -229,15 +236,18 @@ def sh(cmd, timeout=600):
 def su(cmd, timeout=600):
     # one argument for adb, one single-quoted string for su: cmd has no '
     assert "'" not in cmd
-    return adb('shell', f"{SU} -c '{cmd}'", timeout=timeout)
+    return adb('shell', f"{SU} -c '{cmd}'" if SU else cmd, timeout=timeout)
 
 
-def su_checked(stage, cmd, timeout=600):
+def su_checked(stage, cmd, timeout=600, effect=None):
     """Fail at the actual remote stage; adb success alone is insufficient.
 
     Do not print the command: settings commands can contain private values.
     The subshell's set -e catches earlier failures in a sequence too.
     """
+    if GUI and effect:
+        GUI.stage('transfer_install' if effect.startswith('root') else 'prepare')
+        return GUI.action(effect, lambda: su_checked(stage, cmd, timeout))
     marker = '__E5_STAGE_STATUS__='
     wrapped = f'(set -e; {cmd}); e5_stage_rc=$?; echo {marker}$e5_stage_rc'
     try:
@@ -265,6 +275,9 @@ def su_checked(stage, cmd, timeout=600):
 
 def push(local, remote, label):
     """In pieces, each checked: adb push has no resume."""
+    if GUI:
+        return GUI.push(lambda *args: adb(*args, check=True),
+                        lambda cmd: su_checked('Transfer / 传输', cmd), local, remote)
     size = os.path.getsize(local)
     want = sha256(local)
     su(f'rm -f {remote}')
@@ -305,6 +318,11 @@ def od_hex(path_or_cmd):
 
 
 def arm_slot_b():
+    if GUI: return GUI.action('misc-trial', _arm_slot_b)
+    return _arm_slot_b()
+
+
+def _arm_slot_b():
     # Derive metadata from this device, not the package author's misc snapshot.
     before = read_boot_control()
     trial = bytearray(before)
@@ -354,6 +372,11 @@ def read_boot_control():
 
 
 def bootchain(mode):
+    if GUI and mode == 'sync': return GUI.action('bootchain-sync', lambda: _bootchain(mode))
+    return _bootchain(mode)
+
+
+def _bootchain(mode):
     if mode not in ('check', 'sync'):
         raise ValueError(mode)
     script = f'{TMP}/e5-android-bootchain.sh'
@@ -376,11 +399,19 @@ def install_preflight():
 
 
 def android_checks():
-    global SU
+    global SU, SERIAL
     say('连接设备 / looking for Android (USB debugging on)')
     devs = [l for l in adb('devices').splitlines()[1:] if l.strip().endswith('\tdevice')]
+    if not SERIAL and len(devs) > 1 and sys.stdin.isatty() and not GUI:
+        for index, line in enumerate(devs, 1):
+            print(f'   {index}. device / 设备 ••••{line.split()[0][-4:]}')
+        selected = ask('Select device number / 选择设备编号: ')
+        if not selected.isdigit() or not 1 <= int(selected) <= len(devs):
+            die('invalid device selection; use --serial SERIAL / 请选择有效设备，或使用 --serial 指定')
+        SERIAL = devs[int(selected)-1].split()[0]
+    if SERIAL: devs = [line for line in devs if line.split()[0] == SERIAL]
     if len(devs) != 1:
-        die(f'need exactly one device in "adb devices" (found {len(devs)}; allow USB debugging on the phone)')
+        die(f'need one selected device (found {len(devs)}); use --serial SERIAL and allow USB debugging / 请用 --serial 指定设备，并允许调试')
     for s in ('su', '/debug_ramdisk/su', '/sbin/su'):
         if 'uid=0' in sh(f'{s} -c id'):
             SU = s
@@ -627,6 +658,7 @@ def install_sd(a):
     if part not in (sd, sd + 'p1'):
         die('unexpected TF target: ' + part)
     capacity = device_size(part)
+    if GUI: GUI.validate_plan(part, capacity=capacity)
     img = os.path.join(F, 'openwrt.ext4.gz')
     raw_size, raw_sha = gz_metadata(img)
     needed = raw_size
@@ -679,7 +711,7 @@ def install_sd(a):
         say('写入 OpenWrt / OpenWrt -> the card')
         with busy('解压到 SD 卡 / unpacking onto the card'):
             su_checked('解压并写入 SD / decompressing image onto card',
-                       f'gzip -dc {TMP}/openwrt.ext4.gz > {part}; sync', timeout=1800)
+                       f'gzip -dc {TMP}/openwrt.ext4.gz > {part}; sync', timeout=1800, **({'effect': 'root-tf-write'} if GUI else {}))
         with busy('回读校验完整 SD 镜像 / verifying complete SD image'):
             su_checked('SD 镜像回读校验 / SD image readback verification',
                        f'blockdev --flushbufs {part}; '
@@ -689,7 +721,7 @@ def install_sd(a):
         with busy('检查并扩容到 TF 目标全部容量 / checking and growing TF filesystem'):
             su_checked('扩容 TF / growing TF filesystem',
                        f'sh {TMP}/e5-android-tf.sh grow {part} {TMP}/e5-tf-ext4-tools.tar '
-                       f'{TMP}/e5-tf-tools-{uuid.uuid4().hex}', timeout=1800)
+                       f'{TMP}/e5-tf-tools-{uuid.uuid4().hex}', timeout=1800, **({'effect': 'root-tf-grow'} if GUI else {}))
 
         say('这台设备的文件和首次启动设置 / this device\'s files and the first boot\'s settings')
         conf = os.path.join(work, 'install.conf')
@@ -749,7 +781,7 @@ def install_sd(a):
         say('写入启动镜像 / boot image -> boot_b')
         with busy('写入并校验 boot_b / writing and verifying boot_b'):
             su_checked('写入 boot_b / writing boot_b',
-                       f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M; sync')
+                       f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M; sync', **({'effect': 'boot-image'} if GUI else {}))
             ok = su('sha256sum /dev/block/by-name/boot_b').split()[0:1] == [bj['sha256']]
         if not ok:
             die('boot_b did not verify; Android stays as it is')
@@ -830,7 +862,8 @@ def stage_userdata_image(raw_size, selected):
     push(os.path.join(F, 'android-loop.sh'), f'{TMP}/e5-android-loop.sh', 'android-loop.sh')
     push(script, f'{TMP}/e5-userdata-image.sh', 'userdata-image.sh')
     su_checked('扩容和只读检查 userdata 镜像 / resizing and verifying userdata image',
-               f'sh {TMP}/e5-userdata-image.sh {raw_size} {selected} {raw_mib} {selected_mib}', timeout=1800)
+               f'sh {TMP}/e5-userdata-image.sh {raw_size} {selected} {raw_mib} {selected_mib}', timeout=1800,
+               **({'effect':'root-userdata-image'} if GUI else {}))
 
 
 def install(a):
@@ -857,9 +890,8 @@ def install(a):
         print(f'   OpenWrt 镜像 / image: {selected / (1 << 30):.2f} GiB, /data/e5linux/openwrt.ext4')
         print('   不格式化 userdata；安装完成后手动重启。已有镜像会保留为备份。')
         print('   userdata is not formatted; an existing image is kept as a backup. Reboot manually.')
-        for n in (1, 2, 3):
-            if not confirm(f'   确认 {n}/3 -- 输入 yes 继续 / type yes to continue: '):
-                die('aborted: nothing was written')
+        if not confirm('   确认上述计划，输入 yes 继续 / confirm this plan, type yes to continue: '):
+            die('aborted: nothing was written')
 
     apn, ssid, key = a.apn, a.ssid if a.ssid is not None else default_hotspot_name(), a.wifi_key
     if not a.y:
@@ -913,7 +945,8 @@ def install(a):
     say('写入启动镜像 / boot image -> boot_b')
     with busy('写入并校验 boot_b / writing and verifying boot_b'):
         su_checked('写入 boot_b / writing boot_b',
-                   f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M conv=fsync; sync')
+                   f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M conv=fsync; sync',
+                   **({'effect':'boot-image'} if GUI else {}))
         ok = su('sha256sum /dev/block/by-name/boot_b').split()[0:1] == [bj['sha256']]
     if not ok:
         die('boot_b did not verify; Android stays as it is')
@@ -1041,6 +1074,7 @@ def install_part(a):
     raw_size = gz_usize(img)
     wipe = part_userdata_policy(a)
     node, udata_mib, used_mib, part_mib = part_target(a, raw_size)
+    if GUI: GUI.validate_plan('userdata shrink', wipe=wipe, capacity=part_mib*(1 << 20))
     data_mib = udata_mib - part_mib
     grow = int(a.grow_fs is not False)
     if not a.y:
@@ -1055,9 +1089,8 @@ def install_part(a):
         grow = part_growth(a)
         print('   系统分配 / system allocation: ' +
               ('整个分区 / the whole partition' if grow else "镜像大小 / the image's size, about 2 GiB"))
-        for n in (1, 2, 3):
-            if not confirm(f'   确认 {n}/3 -- 输入 yes 继续 / type yes to continue: '):
-                die('aborted: nothing was written')
+        if not confirm('   确认上述计划，输入 yes 继续 / confirm this plan, type yes to continue: '):
+            die('aborted: nothing was written')
 
     apn, ssid, key = a.apn, a.ssid if a.ssid is not None else default_hotspot_name(), a.wifi_key
     if not a.y:
@@ -1101,7 +1134,8 @@ def install_part(a):
     say('写入启动镜像 / boot image -> boot_b')
     with busy('写入并校验 boot_b / writing and verifying boot_b'):
         su_checked('写入 boot_b / writing boot_b',
-                   f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M conv=fsync; sync')
+                   f'dd if={TMP}/e5-boot.img of=/dev/block/by-name/boot_b bs=4M conv=fsync; sync',
+                   **({'effect':'boot-image'} if GUI else {}))
         ok = su('sha256sum /dev/block/by-name/boot_b').split()[0:1] == [bj['sha256']]
     if not ok:
         die('boot_b did not verify; Android stays as it is')
@@ -1202,6 +1236,7 @@ def local_ip(host):
 
 
 def update(a):
+    if GUI: return GUI.update_e5(a)
     host = os.environ.get('E5_HOST', '192.168.9.1')
     try:
         ip = local_ip(host)
@@ -1229,6 +1264,7 @@ def update(a):
 
 
 def main():
+    global SERIAL
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group()
     g.add_argument('--menu', action='store_true', help='choose an installation or maintenance action')
@@ -1248,6 +1284,7 @@ def main():
                    help='rewrite an existing internal partition system: userdata, its filesystem and '
                         'the partition table stay, e5root and boot_b are replaced (no wipe, no stage one)')
     ap.add_argument('--apn')
+    ap.add_argument('--serial', help='bind all ADB operations to this device')
     ap.add_argument('--ssid', help='hotspot name; defaults to the package device model plus -OpenWrt')
     ap.add_argument('--wifi-key')
     ap.add_argument('--image-size', help='userdata image size in GiB (e.g. 4 or 6.5); requires --data')
@@ -1264,6 +1301,7 @@ def main():
     ap.add_argument('--no-pause', action='store_true', help='do not wait for Enter on exit')
     ap.add_argument('--pause', action='store_true', help='wait for Enter on exit')
     a = ap.parse_args()
+    SERIAL = a.serial
     if (a.menu or not any((a.tf, a.data, a.part, a.reinstall_part, a.resume_part,
                           a.update, a.boot_openwrt, a.check, a.verify_package))) and not choose_install_action(a):
         return False
@@ -1295,7 +1333,7 @@ def main():
     elif a.data:
         print('EXPERIMENTAL / 实验性功能：userdata 镜像模式可能破坏 Android 的 F2FS 文件系统。\n'
               "This mode may damage Android's F2FS filesystem. Prefer TF or an independent internal partition.")
-        install(a)          # the form before the SD card; three confirmations
+        install(a)          # the legacy userdata-image method
     elif a.part:
         install_part(a)     # an internal partition; the boot image finishes it
     else:

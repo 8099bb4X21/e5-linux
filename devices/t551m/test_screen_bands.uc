@@ -17,6 +17,13 @@ function item(id){return filter(network.items(),i=>i.id==id)[0];}
 check(join(',',map(item('lte_bands').options,o=>o.value))==state.caps.lte,'LTE differs from web');
 state.caps.nr='3,77,79';
 check(join(',',map(item('nr_bands').options,o=>o.value))==state.caps.nr,'NR is not dynamic');
+state.nr.locked='3,77,79,80';
+check(length(item('nr_bands').value)==0,'All supported bands should show automatic, like web');
+state.nr.locked='77,80';
+check(join(',',item('nr_bands').value)=='77','Unsupported readback bits leaked into editable selection');
+check(index(item('nr_bands').display_value.en,'n80')>=0,'Actual readback hidden from status summary');
+state.nr.locked='';
+check(item('nr_bands').none_label.en=='Auto','Automatic label differs from web');
 check(item('net_mode').value=='4g' && item('net_mode').slot=='1','Wrong SIM scope');
 check(item('nr_mode').value=='sa','Standalone 5G access setting lost');
 check(length(filter(item('cell_lock').options,o=>o.value=='lte:3740,36'))==1,'Neighbors lost');

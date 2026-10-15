@@ -42,8 +42,11 @@ def main():
     for name in ('base', 'defaults', 'kernel', 'stock-boot', 'misc-head', 'busybox', 'work', 'output', 'block-apk'):
         p.add_argument('--' + name, type=Path, required=True)
     p.add_argument('--apk-image', default='mu300-openwrt-base:25.12.5')
+    p.add_argument('--wifi-apks', type=Path, default=TOP / 'work/wifi-sae')
     p.add_argument('--cc', default='aarch64-linux-gnu-gcc')
     a = p.parse_args()
+    wifi_build = runpy.run_path(str(TOP / 'openwrt/wifi-sae-state.py'))['inspect'](a.wifi_apks)
+    wifi_args = ' '.join('/wifi-sae/' + n for n in sorted(wifi_build['apks']))
     if os.geteuid() != 0 or a.work.exists():
         p.error('Run as root with a new work directory')
     expected_id = runpy.run_path(str(TOP / 'tools/ci-release.py'))['block_build_id']()
@@ -96,8 +99,9 @@ def main():
     run('docker', 'run', '--rm', '--platform', 'linux/arm64',
         '-v', f'{root}:/target', '-v', f'{a.block_apk.resolve()}:/input/block.apk:ro',
         '-v', f'{TOP / "out/openwrt"}:/modem:ro',
+        '-v', f'{a.wifi_apks.resolve()}:/wifi-sae:ro',
         '--entrypoint', '/bin/sh', a.apk_image, '-ec',
-        'apk --root /target --no-scripts --no-network add --allow-untrusted /input/block.apk ' + modem_args + ' && '
+        'apk --root /target --no-scripts --no-network add --allow-untrusted /input/block.apk ' + modem_args + ' ' + wifi_args + ' && '
         'mkdir /tmp/modem-verify && apk extract --allow-untrusted --destination /tmp/modem-verify /modem/' + modem_daemon + ' && '
         'cmp /target/usr/sbin/ModemManager /tmp/modem-verify/usr/sbin/ModemManager && '
         'ucode /target/usr/libexec/unisoc-modem/disable-channel-analysis /target')
@@ -118,6 +122,8 @@ def main():
             raise ValueError(f'the TF image has no {pkg}: the SMS forward needs it')
         forward[pkg] = match.group(1)
     (root / 'etc/e5/block-mount.build-id').write_bytes(Path(str(a.block_apk) + '.build-id').read_bytes())
+    (root / 'etc/e5/wifi-sae.build-id').write_text(wifi_build['build_id'] + '\n')
+    (root / 'etc/e5/wifi-sae.source-info').write_bytes((a.wifi_apks / 'source-info').read_bytes())
     # Do not execute target init scripts on the build host.
     fstab = (root / 'etc/init.d/fstab').read_text()
     for action, prefix in (('START', 'S'), ('STOP', 'K')):
@@ -175,6 +181,7 @@ def main():
             'build_type': 'incremental assembly; tested package binaries, current sources, rebuilt initramfs',
             'docker_preinstalled': False, 'root_image_bytes': 2147483648,
             'boot_sha256': boot['sha256'], 'block_mount_sha256': digest(a.block_apk),
+            'wifi_sae_packages': wifi_build,
             'forward_packages': forward,
             'hardware_validation': 'TF installer and final image not flashed; offline checks only',
             'kernel_manifest': json.loads((a.kernel / 'container-support.json').read_text()),
@@ -257,6 +264,8 @@ def audit(root, profile, release):
     assert (root / 'etc/shadow').read_text().startswith('root::')
     assert (root / 'etc/machine-id').read_text() == ''
     for name in ('sbin/block', 'lib/libblkid-tiny.so', 'etc/init.d/fstab',
+                 'lib/netifd/hostapd-unisoc.sh', 'usr/share/ucode/wifi/unisoc-sae.uc',
+                 'etc/e5/wifi-sae.build-id',
                  'usr/sbin/ModemManager', 'usr/libexec/e5-infoscreen/session',
                  'usr/bin/openssl', 'usr/bin/msmtp', 'usr/bin/python3'):
         assert (root / name).stat().st_size, name

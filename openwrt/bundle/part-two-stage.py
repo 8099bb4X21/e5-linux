@@ -80,7 +80,7 @@ def verify_geometry(state, rows):
     expected = state['data']
     if (data.get('cid') != expected['cid'] or data.get('node') != expected['node'] or
         data.get('start') != expected['start'] or data.get('size') != state['target'] or
-        root.get('cid') != expected['cid'] or root.get('start') != expected['start'] + state['target'] or
+        root.get('cid') != expected['cid'] or root.get('start') != state.get('root_start', expected['start'] + state['target']) or
         root.get('size') != state['need'] or
         root.get('node', '').split('p')[0] != expected['node'].split('p')[0]):
         raise ValueError('device/partition geometry differs from the saved transaction; nothing written')
@@ -118,7 +118,7 @@ def flash_boot(g, path):
     g['su_checked']('写入并校验 B 槽 / writing slot B',
         f'dd if={remote} of=/dev/block/by-name/boot_b bs=1048576 conv=fsync; '
         f'[ "$(sha256sum /dev/block/by-name/boot_b | cut -d " " -f1)" = {g["sha256"](str(path))} ]; '
-        f'rm -f {remote}')
+        f'rm -f {remote}', **({'effect': 'boot-image-' + path.name} if g.get('GUI') else {}))
 
 
 def start(g, a, node, part_mib, data_mib, grow, raw_size, apn, ssid, key):
@@ -143,7 +143,7 @@ def start(g, a, node, part_mib, data_mib, grow, raw_size, apn, ssid, key):
         'dd if=/dev/block/by-name/misc bs=1 count=2048 2>/dev/null | od -An -tx1 -v')
     if any(bytes.fromhex(bcb)):
         raise ValueError('an existing recovery/OTA message is present; finish it before preparing data')
-    directory = Path(g['B']) / 'backups' / ('part-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
+    directory = Path(g['GUI'].backup_base() if g.get('GUI') else g['B']) / 'backups' / ('part-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True)
     path = directory / 'transaction.json'
     bc = g['read_boot_control']()
@@ -159,6 +159,7 @@ def start(g, a, node, part_mib, data_mib, grow, raw_size, apn, ssid, key):
         raw_size=raw_size, apn=apn, ssid=ssid, key=key)
     # State lives on the PC, including credentials; do not publish backups.
     save(path, state)
+    if g.get('GUI'): g['GUI'].saved(path, state)
     request = ':'.join(map(str, (token, data['cid'], node, data['start'], data['size'],
                                 state['target'], state['need'], bc.hex())))
     temporary = directory / 'boot-prepare.img'
@@ -181,6 +182,7 @@ def start(g, a, node, part_mib, data_mib, grow, raw_size, apn, ssid, key):
     print('如 recovery 要求确认清空数据，请在设备上确认；不要重复运行第一阶段。')
     state['phase'] = 'awaiting-android'
     save(path, state)
+    if g.get('GUI'): g['GUI'].saved(path, state)
     # The erase was confirmed in install_part. Reboot is part of this two-stage
     # operation, unlike the legacy path which remains manually rebooted.
     g['adb']('reboot', check=True)
@@ -188,6 +190,7 @@ def start(g, a, node, part_mib, data_mib, grow, raw_size, apn, ssid, key):
 
 
 def wait_android(g, a, path, state):
+    if g.get('GUI'): return g['GUI'].wait_android(g, a, path, state)
     print('等待新的 Android 和 USB/Shell 授权；可 Ctrl+C，之后用 --resume-part transaction.json 续装。', flush=True)
     time.sleep(8)
     since = time.monotonic()
@@ -288,16 +291,17 @@ def reinstall(g, a):
     state = dict(version=2, phase='writing', token=uuid.uuid4().hex,
                  serial=g['adb']('get-serialno').strip(),
                  model=g['sh']('getprop ro.product.model').strip(),
-                 data=data, target=data['size'], need=root['size'], grow=1,
+                 data=data, target=data['size'], need=root['size'], grow=int(getattr(a, 'grow_fs', True) is not False),
                  boot_sha=g['sha256'](str(files/'boot.img')),
                  image_sha=g['sha256'](str(files/'openwrt.ext4.gz')),
                  raw_size=g['gz_usize'](str(files/'openwrt.ext4.gz')),
                  apn=apn, ssid=ssid, key=key)
     validate_state(state)
-    directory = Path(g['B']) / 'reinstalls' / (time.strftime('%Y%m%d-%H%M%S') + '-' + state['token'][:8])
+    directory = Path(g['GUI'].backup_base() if g.get('GUI') else g['B']) / 'reinstalls' / (time.strftime('%Y%m%d-%H%M%S') + '-' + state['token'][:8])
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / 'transaction.json'
     save(path, state)
+    if g.get('GUI'): g['GUI'].saved(path, state)
     print(f'''
    覆盖重装 / rewriting the existing installation
    e5root: {root["node"]} ({root["size"] * 512 // (1 << 20)} MiB), userdata 不动
@@ -342,7 +346,8 @@ def finish(g, a, path, state):
             command = ('ASH_STANDALONE=1 /data/adb/magisk/busybox sh /data/local/tmp/e5-part-write.sh '
                        f'{target} {state["need"]} {state["raw_size"]} {int(state["grow"])} {state["token"]}')
             with g['busy']('写入、扩容并校验独立分区 / installing and verifying root partition'):
-                g['su_checked']('安装独立分区 / install independent root', command, timeout=1800)
+                g['su_checked']('安装独立分区 / install independent root', command, timeout=1800,
+                                **({'effect': 'root-part-write'} if g.get('GUI') else {}))
         state['phase'] = 'installed'; save(path, state)
     # No dependency on decrypting /data during OpenWrt boot.
     final_boot = path.parent/'boot-part.img'

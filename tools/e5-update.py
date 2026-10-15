@@ -11,6 +11,7 @@ import struct
 import sys
 import time
 import uuid
+GUI = None
 
 
 def execute(client, command, timeout=1800):
@@ -42,9 +43,11 @@ def upload(client, path, destination):
     channel.settimeout(120)
     channel.exec_command('umask 077; cat > ' + shlex.quote(destination))
     count = 0; digest = hashlib.sha256(); last = 0
+    started = time.monotonic()
     with path.open('rb') as stream:
         while data := stream.read(262144):
             channel.sendall(data); digest.update(data); count += len(data)
+            if GUI: GUI.transfer(path.name, count, size, started)
             if time.monotonic() - last >= 1:
                 print(f'\r   {path.name}: {count >> 20}/{size >> 20} MiB', end='', flush=True)
                 last = time.monotonic()
@@ -75,8 +78,9 @@ def main():
     # USB-connected devices reuse the same management address. Keep trust
     # within this connection rather than pinning that IP to one installation.
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(a.host, username='root', password=os.environ['E5_TELNET_PASS'],
+    client.connect(a.host, username='root', password=GUI.password if GUI else os.environ['E5_TELNET_PASS'],
                    look_for_keys=False, allow_agent=False, timeout=15, auth_timeout=20)
+    if GUI: GUI.validate_ssh(client)
     stage = None
     try:
         execute(client, '[ "$(id -u)" = 0 ] && [ "$(cat /etc/e5/device-profile)" = ' + shlex.quote(profile) + ' ]')
@@ -126,7 +130,8 @@ def main():
             else:
                 command += '; e5-os openwrt'
             command += '; echo "== all uploaded files verified; rebooting"; (sleep 3; reboot) </dev/null >/dev/null 2>&1 &'
-            execute(client, command)
+            if GUI: GUI.action('update-commit', lambda: execute(client, command))
+            else: execute(client, command)
             print('Update verified; rebooting / 更新已校验，正在重启', flush=True)
     finally:
         if stage:

@@ -106,6 +106,8 @@ python3 "$TOP/tools/openwrt-package-state.py" check "$VER"
 # whose probe filters device types before opening them (shared by all boards).
 BLOCK_APK="$OUT/block-mount-guarded.apk"
 E5_WRT_VER="$VER" sh "$HERE/build-block-mount.sh" "$BLOCK_APK"
+WIFI_APKS="$TOP/work/wifi-sae"
+UNISOC_WRT_VER="$VER" sh "$HERE/build-hostapd.sh" "$WIFI_APKS"
 
 # the Argon theme: not in OpenWrt's feeds; its release's packages (arch all)
 ARGON_URL=https://github.com/jerrykuku/luci-theme-argon/releases/download/v2.4.7
@@ -283,6 +285,7 @@ docker run --rm --platform linux/arm64 \
     -v "$WORK/e5-sim-probe":/in/e5-sim-probe:ro \
     -v "$BLOCK_APK":/in/block-mount-guarded.apk:ro \
     -v "$BLOCK_APK.build-id":/in/block-mount.build-id:ro \
+    -v "$WIFI_APKS":/in/wifi-sae:ro \
     -v "$SA":/in/sa:ro -e STANDALONE="$STANDALONE" -v "$RM":/in/root-modules:ro \
     -v "$WORK/extra":/in/extra:ro -e EXTRA_LIST="$EXTRA_LIST" -v "$TP":/in/transplant:ro \
     -v "$TAROUT":/out -e NAME="$NAME" -e VERSION="$VERSION" -e E5_BUILD_EPOCH="${E5_BUILD_EPOCH:-}" -e CONTAINERS="$CONTAINERS" \
@@ -299,7 +302,8 @@ apk add --allow-untrusted /in/apk/bluez-libs-*.apk /in/apk/bluez-daemon-*.apk /i
 # (dbus-utils: dbus-monitor, for e5-sms-notify)
 # (alsa-utils: aplay and amixer for the speaker, e5-audio-dsp and e5-volume)
 # (curl: the webhook of the SMS forward, /usr/libexec/e5-sms)
-apk add wpad-basic-mbedtls wifi-scripts iwinfo iw ip-full bash mount-utils luci-proto-modemmanager \
+apk add --allow-untrusted /in/wifi-sae/*.apk >/dev/null
+apk add iwinfo iw ip-full bash mount-utils luci-proto-modemmanager \
     dbus-utils alsa-utils curl openssl-util msmtp r8152-firmware >/dev/null
 # Bluetooth audio: PulseAudio built with BlueZ (the -avahi variant carries
 # the bluetooth modules), run by /etc/init.d/e5-pulseaudio, not by its own
@@ -363,6 +367,8 @@ done
 mkdir -p $R/proc $R/sys $R/dev $R/tmp $R/mnt/e5-disk $R/opt/e5/android $R/opt/e5/bin $R/etc/e5linux
 mkdir -p $R/etc/e5
 cp /in/block-mount.build-id $R/etc/e5/block-mount.build-id
+cp /in/wifi-sae/build-id $R/etc/e5/wifi-sae.build-id
+cp /in/wifi-sae/source-info $R/etc/e5/wifi-sae.source-info
 for f in sbin/block lib/libblkid-tiny.so etc/init.d/fstab; do
     [ -s "$R/$f" ] || { echo "guarded block-mount payload missing: $f" >&2; exit 1; }
 done

@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import os
+import runpy
 
 HERE = Path(__file__).resolve().parent
 ACTIONS = {
@@ -33,8 +35,8 @@ def assemble(package, source=HERE):
     # The interpreter and executable resolve payloads relative to the package,
     # not the current directory or the directory containing a shortcut.
     cmd = ('@echo off\r\nchcp 65001 >nul\r\npushd "%~dp0.."\r\n'
-           'if exist "OpenWrt-Installer.exe" (\r\n'
-           '  "OpenWrt-Installer.exe" --no-pause %*\r\n'
+           'if exist "tools\\backend\\openwrt-backend.exe" (\r\n'
+           '  "tools\\backend\\openwrt-backend.exe" --cli --package-root "%cd%" --no-pause %*\r\n'
            ') else (\r\n'
            '  where py >nul 2>nul\r\n'
            '  if not errorlevel 1 (\r\n'
@@ -49,11 +51,12 @@ def assemble(package, source=HERE):
         'exec python3 ./OpenWrt-Installer.py "$@"\n', encoding='utf-8', newline='\n')
     shutil.copy2(source / 'part-two-stage.py', internal / 'part-two-stage.py')
     exe = source / 'flash.exe'
-    if exe.is_file():
+    if exe.is_file() and (source != HERE or os.environ.get('OPENWRT_BUILD_LEGACY_EXE') == '1'):
         metadata = json.loads((source / 'flash-exe.json').read_text(encoding='utf-8'))
         if metadata != {'source_sha256': digest(source / 'flash.py'), 'binary_sha256': digest(exe)}:
             raise ValueError('Windows installer is stale; run python tools/build-flash-exe.py on Windows')
-        shutil.copy2(exe, package / 'OpenWrt-Installer.exe')
+        (package / 'tools/legacy').mkdir(parents=True, exist_ok=True)
+        shutil.copy2(exe, package / 'tools/legacy/flash.exe')
         shutil.copy2(source / 'flash-exe.json', internal / 'flash-exe.json')
     for name, option in ACTIONS.items():
         cmd = '@echo off\r\ncd /d "%~dp0"\r\n'
@@ -86,6 +89,8 @@ def assemble(package, source=HERE):
     for name in ('README.md', 'README.zh-CN.md'):
         shutil.copy2(source / name, docs / name)
     shutil.copy2(source / 'START-HERE.md', package / 'START-HERE.md')
+    if source == HERE and os.environ.get('OPENWRT_GUI_OPTIONAL') != '1':
+        runpy.run_path(str(HERE.parents[1] / 'installer/package_gui.py'))['attach'](package)
 
 
 if __name__ == '__main__':

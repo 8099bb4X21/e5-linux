@@ -29,6 +29,9 @@ cd /src/linux
 python3 /policy/emmc.py .
 python3 /policy/eic.py .
 python3 /policy/thermal.py .
+python3 /policy/sipa.py .
+python3 /policy/fuel-gauge.py .
+python3 /policy/wifi-sae.py .
 KV=$(make -s kernelversion)
 O=/out/$KV
 mkdir -p "$O"

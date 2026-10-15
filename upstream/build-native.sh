@@ -28,6 +28,9 @@ cd "$K"
 python3 "$TOP/devices/common/emmc.py" .
 python3 "$TOP/devices/common/eic.py" .
 python3 "$TOP/devices/common/thermal.py" .
+python3 "$TOP/devices/common/sipa.py" .
+python3 "$TOP/devices/common/fuel-gauge.py" .
+python3 "$TOP/devices/common/wifi-sae.py" .
 KV=$(make -s kernelversion)
 O="${E5_OUTDIR:-$TOP/work/build/$KV}"
 mkdir -p "$O"

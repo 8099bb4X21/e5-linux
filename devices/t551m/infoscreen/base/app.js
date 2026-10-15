@@ -1257,6 +1257,7 @@ async function stLoadCat(v) {
 	const r = await pageRead('/api/settings/' + v.cat.id, P.settings).catch(() => null);
 	if (r) v.items = r.items ?? [];
 	if (stTop() === v) stRender();
+	return r != null;
 }
 
 function stDisarm() {
@@ -1288,6 +1289,7 @@ function stValue(it) {
 	}
 	if (it.type == 'number') return it.value == null ? '--' : `${it.value}${it.unit ?? ''}`;
 	if (it.type == 'multi') {
+		if (it.display_value != null) return lbl(it.display_value);
 		if (!it.value?.length) return lbl(it.none_label) || t('not_locked');
 		return it.value.map((v) => lbl((it.options ?? []).find((o) => o.value == v)?.label) || v).join(' ');
 	}
@@ -1545,8 +1547,18 @@ async function stClick(key, el) {
 		return;
 	}
 	if (k == 'item') {
-		const it = v.items.find((x) => x.id == arg);
+		let it = v.items.find((x) => x.id == arg);
 		if (!it) return;
+		if (v.cat.id == 'network' && ['lte_bands','nr_bands'].includes(arg)) {
+			// The web may have changed this SIM since the category was opened.
+			// Read the shared cache again on entry, without adding AT polling.
+			v.saving = true;
+			let loaded;
+			try { loaded = await stLoadCat(v); } finally { v.saving = false; }
+			if (stTop() !== v || !loaded) return;
+			it = v.items.find(x => x.id == arg);
+			if (!it || it.type !== 'multi') return;
+		}
 		if (it.type == 'category') {
 			const c = stCats.find(x => x.id == it.category);
 			if (!c) return;

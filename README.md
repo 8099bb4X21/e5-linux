@@ -1,5 +1,8 @@
 # Linux on the Rongyue E5 (Unisoc UMS9621)
 
+Windows desktop installer: extract the complete release package and run root `OpenWrt-Installer.exe`. Device selection, persistent recovery and the two-stage Android reset flow share the existing backend. Python/CLI and Magisk entries remain available. See the bilingual [user guide](installer/GUIDE.md), [build instructions](installer/README.md), and [verification/screenshots](installer/VERIFICATION.md). Multiple ADB devices can be selected in the GUI or interactive CLI, or explicitly bound with `--serial SERIAL`.
+
+
 > 中文文档：[`README.zh-CN.md`](README.zh-CN.md)
 
 T551M OpenWrt bring-up has a separate [device profile](devices/t551m/README.md),

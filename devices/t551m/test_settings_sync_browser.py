@@ -32,7 +32,11 @@ with sync_playwright() as p:
         window.fetch=async(url,options)=>{
             if (url==='/api/settings/network'&&options?.method==='POST') {writes.push(JSON.parse(options.body));return new Response(JSON.stringify({ok:true,pending:true,job:'a'.repeat(32),slot:'1'}));}
             if (String(url).startsWith('/api/network-job')) {window.jobURL=url;return new Response(JSON.stringify({state:jobState,ok:jobState==='done',error:jobState==='error'?'readback mismatch':null}));}
-            if(url==='/api/settings/network')return new Response(JSON.stringify({items}));
+            if(url==='/api/settings/network') {
+                if(window.bandReadFailure)throw new Error('test read failure');
+                if(window.holdBandRead)return new Promise(resolve=>{window.releaseBandRead=()=>resolve(new Response(JSON.stringify({items})));});
+                return new Response(JSON.stringify({items}));
+            }
             if(url==='/api/at'){writes.push(JSON.parse(options.body));return new Response(' {"ok":true,"reply":"OK"}');}
             return native(url,options);
         };
@@ -47,6 +51,26 @@ with sync_playwright() as p:
     page.evaluate("jobState='error'");page.wait_for_function('!stTop().parent.saving')
     assert page.evaluate("stTop().view==='edit'")
     page.evaluate("jobState='done'");page.locator('[data-st="opt:1"]').click();page.wait_for_function("stTop().view==='cat'")
+    # Simulate a category left open while the web changes the selected SIM's
+    # lock snapshot. Opening the editor must use the newly read candidates.
+    page.evaluate('''()=>{
+        const old={id:'nr_bands',type:'multi',slot:'0',label:'NR',value:[78],options:[{value:78,label:'n78'}]};
+        items=[{...old,slot:'1',value:[41],options:[{value:1,label:'n1'},{value:41,label:'n41'}],display_value:{zh:'已锁 1 个：n41',en:'Locked 1: n41'}}];
+        st=[{view:'cat',cat:{id:'network',label:'Network'},items:[old]}];stRender();
+    }''')
+    page.locator('[data-st="item:nr_bands"]').click();page.wait_for_function("stTop().view==='edit'")
+    assert page.evaluate("stTop().item.slot==='1'&&stTop().draft.join(',')==='41'")
+    assert page.locator('[data-st^="chk:"]').all_text_contents()==['n1','n41']
+    page.evaluate("st.pop();bandReadFailure=true;stRender()")
+    page.locator('[data-st="item:nr_bands"]').click();page.wait_for_function('!stTop().saving')
+    assert page.evaluate("stTop().view==='cat'"),'Failed refresh opened a stale editor'
+    page.evaluate("bandReadFailure=false;holdBandRead=true;delete window.releaseBandRead")
+    page.locator('[data-st="item:nr_bands"]').click();page.wait_for_function("typeof releaseBandRead==='function'")
+    page.locator('[data-st="item:nr_bands"]').click()
+    assert page.evaluate("stTop().view==='cat'&&stTop().saving")
+    page.evaluate("st=[];releaseBandRead();holdBandRead=false")
+    page.wait_for_timeout(100)
+    assert page.evaluate('st.length===0'),'Late response reopened a page after navigation'
     page.evaluate("st=[{view:'at',presets:[{cmd:'AT+CSQ',label:'Signal'}],slot:'0'}];stRender()")
     page.locator('[data-st="atslot:"]').click();page.locator('[data-st="atp:0"]').click()
     page.wait_for_function("writes.at(-1).cmd==='AT+CSQ'");assert page.evaluate('writes.at(-1).slot')=='1'
@@ -57,4 +81,4 @@ with sync_playwright() as p:
     assert not errors,errors
     browser.close()
 server.shutdown()
-print('PASS: network job progress, duplicate prevention, immutable SIM, failure retains editor, verified success exits, AT SIM selector')
+print('PASS: network jobs, duplicate prevention, immutable SIM, stale band editor refresh, failed and late reads, AT SIM selector')

@@ -65,6 +65,7 @@ class Userdata(unittest.TestCase):
             return ''
         replacements = {
             'find_adb': lambda: None, 'android_checks': lambda: None,
+            'check_userdata_image_source': lambda: None,
             'install_preflight': lambda: None, 'boot_json': lambda: {'sha256': 'abc'},
             'gz_usize': lambda _: 2 * GIB, 'userdata_free': lambda: 12 * GIB,
             'pull_device_files': lambda *args: 1024, 'push': lambda *args: None,
