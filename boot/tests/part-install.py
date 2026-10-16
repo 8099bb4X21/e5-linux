@@ -51,6 +51,12 @@ with p.open('a') as f:f.write(action+'\\n')
 if action=='resize':
     with open(sys.argv[-1],'r+b') as f:f.seek(1060);f.write(struct.pack('<Q',int(sys.argv[-2])//8))
     sys.exit(1 if mode=='resize-failed' else 0)
+if mode in ('orphan-prompt','extra-prompt'):
+    answer=sys.stdin.readline().strip()
+    if answer!='n':sys.exit(8)
+    if mode=='extra-prompt':
+        if sys.stdin.readline()=='':sys.exit(255)
+        sys.exit(8)
 count=p.read_text().splitlines().count('fsck')
 sys.exit(3 if mode=='already-shrunk-bad' or (mode=='post-check-failed' and count==2) else 0)
 ''')
@@ -92,6 +98,41 @@ sys.exit(3 if mode=='already-shrunk-bad' or (mode=='post-check-failed' and count
     def test_verified_shrink_reaches_gpt_in_order(self):
         result, calls = self.run_case('ok')
         self.assertEqual(calls, ['fsck', 'resize', 'fsck', 'gpt'], result.stderr)
+
+
+    def test_orphan_export_prompt_has_bounded_answer_in_both_checks(self):
+        result,calls=self.run_case('orphan-prompt')
+        self.assertEqual(calls,['fsck','resize','fsck','gpt'],result.stderr)
+
+    def test_unexpected_second_prompt_fails_without_resize_or_gpt(self):
+        result,calls=self.run_case('extra-prompt')
+        self.assertIn('result=1',result.stdout)
+        self.assertIn('userdata check failed rc=255', '\n'.join(calls))
+        self.assertNotIn('resize',calls)
+        self.assertNotIn('gpt',calls)
+
+
+class CheckProgress(unittest.TestCase):
+    def test_checker_state_io_and_last_line_are_visible(self):
+        progress=(Path(__file__).resolve().parents[1]/'part-progress.sh').read_text()
+        with tempfile.TemporaryDirectory(prefix='e5-part-progress-') as folder:
+            root=Path(folder)
+            for name in ('run','proc/123','dev'):(root/name).mkdir(parents=True,exist_ok=True)
+            (root/'proc/uptime').write_text('7337.44 0\n')
+            (root/'proc/123/status').write_text('Name:\tfsck.f2fs\nState:\tD (disk sleep)\n')
+            (root/'proc/123/wchan').write_text('mmc_wait_for_req_done\n')
+            (root/'proc/123/io').write_text('read_bytes: 2097152\nwrite_bytes: 1048576\n')
+            logfile=root/'run/fsck.log';logfile.write_text('Checking SIT\nChecking NAT\n')
+            (root/'run/part-check').write_text('123 '+str(logfile)+'\n')
+            progress=progress.replace('/run/',str(root)+'/run/').replace('/proc/',str(root)+'/proc/').replace('/dev/',str(root)+'/dev/')
+            # One real heartbeat iteration, without wall-clock waiting.
+            script=progress+'\nsleep() { rm -f '+str(root)+'/run/part-install.running; }\npart_progress_start; wait "$part_beat"\n'
+            result=subprocess.run(['busybox','ash'],input=script,text=True,capture_output=True,timeout=5)
+            self.assertEqual(result.returncode,0,result.stderr)
+            status=(root/'dev/kmsg').read_text()
+            self.assertIn('state=D wait=mmc_wait_for_req_done',status)
+            self.assertIn('read=2.0MiB write=1.0MiB',status)
+            self.assertIn('Checking NAT',status)
 
 
 class ImageReadback(unittest.TestCase):

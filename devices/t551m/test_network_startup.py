@@ -5,6 +5,8 @@ Run on Linux: test_network_startup.py <original modemmanager.sh> <original modem
 """
 from pathlib import Path
 import os
+import signal
+import time
 import runpy
 import subprocess
 import sys
@@ -70,7 +72,7 @@ run_eps() {
                     self.assertIn('EPS:default:apn=internet,ip-type=ipv4,allowed-auth=pap,user=user,password=pass', out)
                 else:
                     self.assertIn('EPS:custom:apn=private,ip-type=ipv4v6,allowed-auth=chap', out)
-        self.assertIn('mmcli --modem="${device}" --timeout 120 --simple-connect="${connectargs}"', text)
+        self.assertIn('modemmanager_connect_retry "$device" "$connectargs"', text)
 
     def test_migration_only_changes_original_default_once(self):
         script = (HERE / 'network-startup-defaults').read_text()
@@ -126,24 +128,30 @@ run_modes() {
                 before = path.read_bytes()
                 patch_root(self.root, profile)
                 self.assertEqual(path.read_bytes(), before)
-                self.test_pdp_retry_is_bounded_and_specific()
+                self.test_pdp_retry_backs_off_and_only_retries_transient_errors()
 
-    def test_pdp_retry_is_bounded_and_specific(self):
+    def test_pdp_retry_backs_off_and_only_retries_transient_errors(self):
         text = (self.root / 'lib/netifd/proto/modemmanager.sh').read_text()
         helper = text[text.index('# unisoc-pdp-connect-retry:'):text.index('proto_modemmanager_setup() {')]
         harness = '''
 mmcli() {
+    case "$*" in *--output-keyvalue*) echo cached; return 0 ;; esac
     n=$(cat "$COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$COUNT"
     if [ "$n" -gt "$FAILURES" ]; then echo connected; return 0; fi
     echo "$ERROR" >&2; return 1
 }
 sleep() { echo "WAIT:$1"; }
+modemmanager_get_field() { case "$2" in modem.generic.state) echo registered ;; *) echo attached ;; esac; }
 ''' + helper + '\nmodemmanager_connect_retry "$DEVICE" "apn=test,ip-type=ipv4v6"\n'
         error = "error: couldn't connect the modem: 'GDBus.Error:Unknown: Couldn't activate PDP context 1: Unknown mobile equipment error: 28'"
         cases = [(0, error, 'unisoc-sipc', 1, [], 0),
-                 (1, error, 'unisoc-sipc', 2, ['WAIT:5'], 0),
-                 (2, error, 'unisoc-sipc', 3, ['WAIT:5', 'WAIT:10'], 0),
-                 (9, error, 'unisoc-sipc', 3, ['WAIT:5', 'WAIT:10'], 1),
+                 (1, error, 'unisoc-sipc', 2, ['WAIT:3'], 0),
+                 (2, error, 'unisoc-sipc', 3, ['WAIT:3', 'WAIT:5'], 0),
+                 (12, error, 'unisoc-sipc', 13, ['WAIT:3', 'WAIT:5', 'WAIT:7', 'WAIT:9', 'WAIT:11', 'WAIT:13', 'WAIT:15', 'WAIT:20', 'WAIT:40', 'WAIT:60', 'WAIT:60', 'WAIT:60'], 0),
+                 (2, 'GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork: No network', 'unisoc-sipc', 3, ['WAIT:3', 'WAIT:5'], 0),
+                 (1, 'No IPv4 settings for PDP context 1', 'unisoc-sipc', 2, ['WAIT:3'], 0),
+                 (9, 'GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.GprsAuthenticationFailure: authentication failed', 'unisoc-sipc', 1, [], 1),
+                 (9, 'GDBus.Error:org.freedesktop.ModemManager1.Error.Core.InvalidArgs: bad APN', 'unisoc-sipc', 1, [], 1),
                  (9, 'SIM PIN required', 'unisoc-sipc', 1, [], 1),
                  (9, error.replace("28'", "29'"), 'unisoc-sipc', 1, [], 1),
                  (9, error, '/dev/ttyUSB0', 1, [], 1)]
@@ -156,6 +164,89 @@ sleep() { echo "WAIT:$1"; }
                 self.assertEqual(result.returncode, rc, result.stderr)
                 self.assertEqual(int(count.read_text()), expected)
                 self.assertEqual([line for line in result.stdout.splitlines() if line.startswith('WAIT:')], waits)
+
+    def test_registration_uses_same_transient_policy(self):
+        text=(self.root/'lib/netifd/proto/modemmanager.sh').read_text()
+        start=text.index('modemmanager_set_plmn() {')
+        self.assertIn('modemmanager_register_retry "$device" "$plmn" || {',text[start:])
+        helper=text[text.index('# unisoc-pdp-connect-retry:'):text.index('proto_modemmanager_setup() {')]
+        count=self.root/'register-attempts'
+        harness="""
+mmcli() {
+ case "$*" in *--output-keyvalue*) echo cached; return 0 ;; esac
+ case "$*" in *--3gpp-register-in-operator=*) ;; *) return 9 ;; esac
+ n=$(cat "$COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$COUNT"
+ [ "$n" -gt 2 ] && return 0
+ echo 'GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.NetworkTimeout: Network timeout'; return 1
+}
+sleep() { echo "WAIT:$1"; }
+modemmanager_get_field() { case "$2" in modem.generic.state) echo registered ;; *) echo attached ;; esac; }
+"""+helper+'\nmodemmanager_register_retry unisoc-sipc ""\n'
+        result=subprocess.run(['busybox','sh','-c',harness],env=dict(os.environ,COUNT=str(count)),capture_output=True,text=True,timeout=5)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(count.read_text().strip(),'3')
+        self.assertEqual([line for line in result.stdout.splitlines() if line.startswith('WAIT:')],['WAIT:3','WAIT:5'])
+
+    def test_no_coverage_waits_for_ps_event_without_blocking_user_intent(self):
+        text=(self.root/'lib/netifd/proto/modemmanager.sh').read_text()
+        helper=text[text.index('# unisoc-pdp-connect-retry:'):text.index('proto_modemmanager_setup() {')]
+        harness='''
+mmcli() {
+ case "$*" in *--output-keyvalue*) echo cached; return 0 ;; esac
+ echo 'GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork: No network';return 1
+}
+modemmanager_get_field() { case "$2" in modem.generic.state) echo searching ;; *) echo detached ;; esac; }
+sleep() { echo UNEXPECTED_SLEEP; }
+proto_set_available() { echo AVAILABLE:$1:$2; }
+proto_block_restart() { echo BLOCK:$1; }
+''' + helper + '''
+modemmanager_connect_retry unisoc-sipc apn=test
+modemmanager_unisoc_block_restart wan unisoc-sipc
+MODEMMANAGER_UNISOC_WAIT_PS=0
+modemmanager_unisoc_block_restart wan unisoc-sipc
+'''
+        result=subprocess.run(['busybox','sh','-c',harness],capture_output=True,text=True,timeout=5,check=True)
+        self.assertIn('AVAILABLE:wan:0',result.stdout)
+        self.assertIn('BLOCK:wan',result.stdout)
+        self.assertNotIn('UNEXPECTED_SLEEP',result.stdout)
+
+    def test_old_retry_helper_is_upgraded_without_replaying_settings(self):
+        path=self.root/'lib/netifd/proto/modemmanager.sh'
+        text=path.read_text();start=text.index('# unisoc-pdp-connect-retry:');end=text.index('proto_modemmanager_setup() {',start)
+        path.write_text(text[:start]+'# unisoc-pdp-connect-retry: old finite retry\nmodemmanager_connect_retry() { return 1; }\n\n'+text[end:])
+        patch_root(self.root)
+        upgraded=path.read_text()
+        self.assertNotIn('old finite retry',upgraded)
+        self.assertIn('modemmanager_unisoc_retryable()',upgraded)
+        self.assertEqual(upgraded.count('# unisoc-apn-selection:'),1)
+        self.assertEqual(upgraded.count('modemmanager_register_retry "$device" "$plmn" || {'),1)
+
+    def test_setup_sigterm_stops_mmcli_and_backoff_without_further_attempts(self):
+        text=(self.root/'lib/netifd/proto/modemmanager.sh').read_text()
+        helper=text[text.index('# unisoc-pdp-connect-retry:'):text.index('proto_modemmanager_setup() {')]
+        bindir=self.root/'bin';bindir.mkdir()
+        for command in ('mmcli','sleep'):
+            tool=bindir/command
+            tool.write_text('#!/usr/bin/env python3\nimport os,time,sys\nfrom pathlib import Path\nname=Path(sys.argv[0]).name\nif name=="mmcli" and os.environ["MODE"]=="backoff":\n print("GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork: No network");sys.exit(1)\nPath(os.environ["CHILD"]).write_text(str(os.getpid()))\ntime.sleep(30)\n')
+            tool.chmod(0o755)
+        for mode in ('command','backoff'):
+            with self.subTest(mode=mode):
+                child=self.root/'child';child.unlink(missing_ok=True)
+                script='mktemp() { command mktemp "$TMPDIR/start.XXXXXX"; }\nsleep() { exec "$TEST_BIN/sleep" "$@"; }\n'+helper+'\nmodemmanager_connect_retry unisoc-sipc apn=test\n'
+                env=dict(os.environ,PATH=str(bindir)+os.pathsep+os.environ['PATH'],MODE=mode,CHILD=str(child),TMPDIR=str(self.root),TEST_BIN=str(bindir))
+                proc=subprocess.Popen(['busybox','ash','-c',script],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+                try:
+                    end=time.monotonic()+3
+                    while not child.exists() and time.monotonic()<end:time.sleep(.01)
+                    self.assertTrue(child.exists(),'controlled command did not start')
+                    pid=int(child.read_text())
+                    proc.send_signal(signal.SIGTERM)
+                    stdout,stderr=proc.communicate(timeout=3)
+                    self.assertEqual(proc.returncode,143,stderr)
+                    self.assertFalse(Path('/proc/'+str(pid)).exists(),'cancelled child survived setup')
+                    self.assertFalse(list(self.root.glob('start.*')),'retry output survived cancellation')
+                finally:
+                    if proc.poll() is None:proc.terminate();proc.communicate(timeout=3)
 
     def test_unknown_package_layout_refused(self):
         path = self.root / 'lib/netifd/proto/modemmanager.sh'

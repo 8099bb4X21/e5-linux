@@ -84,7 +84,6 @@ public class MainActivity extends Activity {
                 String read = su("BY=/dev/block/by-name; "
                         + "[ -b $BY/misc ] || { echo NO-MISC; exit 4; }; "
                         + "echo SLOT=$(getprop ro.boot.slot_suffix); "
-                        + "echo BOOT=$(dd if=$BY/boot_b bs=1 skip=44 count=10 2>/dev/null); "
                         + "echo BC=$(dd if=$BY/misc bs=1 skip=2048 count=32 2>/dev/null"
                         + " | od -An -tx1 | tr -d ' \\n')");
                 if (read.contains("NO-MISC")) {
@@ -96,9 +95,6 @@ public class MainActivity extends Activity {
                 }
                 if (!read.contains("SLOT=_a\n")) {
                     throw new IllegalStateException("当前不是 Android A 槽，停止切换。");
-                }
-                if (slot == 'b' && !read.contains("BOOT=loglevel=5\n")) {
-                    throw new IllegalStateException("B 槽没有可识别的 OpenWrt 启动镜像，请先安装。");
                 }
                 byte[] wanted = ArmedBlock.armed(unhex(found.group(1)), slot);
                 // Only misc is changed. Root selection and persistent defaults

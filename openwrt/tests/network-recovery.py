@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Registration recovery must preserve user intent and never create retry loops."""
+from pathlib import Path
+import copy
+import runpy
+import subprocess
+import unittest
+from unittest.mock import patch
+
+SOURCE = Path(__file__).resolve().parents[1] / 'overlay/usr/libexec/e5-network-recovery'
+scope = runpy.run_path(str(SOURCE))
+Recovery = scope['Recovery']
+GLOBALS = Recovery.evaluate.__globals__
+MODEM = {'dbus-path': '/modem/0',
+         'generic': {'device': 'unisoc-sipc', 'plugin': 'unisoc', 'state': 'registered',
+                     'primary-sim-slot': '1', 'access-technologies': ['lte']},
+         '3gpp': {'registration-state': 'home', 'packet-service-state': 'attached',
+                  'operator-code': '46001'}}
+WAN = {'interface': 'wan', 'proto': 'modemmanager', 'available': False,
+       'autostart': True, 'up': False, 'pending': False,
+       'errors': [{'code': 'MM_CONNECT_FAILED'}]}
+
+
+class Tests(unittest.TestCase):
+    def setUp(self):
+        self.modem, self.wan = copy.deepcopy(MODEM), copy.deepcopy(WAN)
+        self.commands = []
+        def query(args):
+            if args[0] == 'mmcli':
+                return {'modem': self.modem}
+            return {'interface': [self.wan]}
+        def run(args, **kwargs):
+            self.commands.append(args)
+            return subprocess.CompletedProcess(args, 0, 'unisoc-sipc\n', '')
+        self.patches = [patch.dict(GLOBALS, query=query), patch.object(scope['subprocess'], 'run', run)]
+        for p in self.patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self.recovery = Recovery()
+
+    def resumes(self):
+        return [c for c in self.commands if c[:3] == ['ubus', 'call', 'network.interface.wan']]
+
+    def test_reattach_releases_availability_once(self):
+        for _ in range(10):
+            self.recovery.evaluate()
+        self.assertEqual(self.resumes(), [['ubus', 'call', 'network.interface.wan',
+                                          'notify_proto', '{"action":5,"available":true}']])
+
+    def test_manual_ifdown_pending_up_pin_and_auth_are_preserved(self):
+        for update in ({'autostart': False}, {'pending': True}, {'up': True},
+                       {'errors': [{'code': 'MM_PIN_REQUIRED'}]}, {'proto': 'dhcp'}):
+            self.wan = {**copy.deepcopy(WAN), **update}
+            self.recovery = Recovery()
+            self.recovery.evaluate()
+        self.assertEqual(self.resumes(), [])
+
+    def test_packet_service_and_real_rat_required(self):
+        for group, field, value in (('3gpp', 'packet-service-state', 'detached'),
+                                     ('3gpp', 'registration-state', 'searching'),
+                                     ('generic', 'access-technologies', ['unknown']),
+                                     ('generic', 'device', '/dev/ttyUSB0'),
+                                     ('generic', 'state', 'disabled')):
+            self.modem = copy.deepcopy(MODEM)
+            self.modem[group][field] = value
+            self.recovery.evaluate()
+        self.assertEqual(self.resumes(), [])
+
+    def test_new_registration_or_rat_can_retry_after_previous_failure(self):
+        self.recovery.evaluate()
+        self.modem['3gpp']['registration-state'] = 'searching'
+        self.recovery.evaluate()
+        self.modem['3gpp']['registration-state'] = 'home'
+        self.recovery.evaluate()
+        self.modem['generic']['access-technologies'] = ['5gnr']
+        self.recovery.evaluate()
+        self.assertEqual(len(self.resumes()), 3)
+
+    def test_active_bearer_is_never_cycled(self):
+        self.wan['up'] = True
+        for _ in range(4):
+            self.recovery.evaluate()
+        self.assertFalse(self.commands)
+
+    def test_connecting_state_does_not_reset_retry_generation(self):
+        self.recovery.evaluate()
+        self.modem['generic']['state'] = 'connecting'
+        self.wan['pending'] = True
+        self.recovery.evaluate()
+        self.modem['generic']['state'] = 'registered'
+        self.wan['pending'] = False
+        self.recovery.evaluate()
+        self.assertEqual(len(self.resumes()), 1)
+
+    def test_quality_refresh_is_ignored(self):
+        self.assertFalse(scope['relevant_property'](b' string "SignalQuality"'))
+        self.assertTrue(scope['relevant_property'](b' string "AccessTechnologies"'))
+        self.assertTrue(scope['relevant_property'](b' string "State"'))
+        self.assertTrue(scope['relevant_property'](b' string "PrimarySimSlot"'))
+
+    def test_attached_before_generic_registered_does_not_lose_recovery(self):
+        self.modem['generic']['state'] = 'enabled'
+        self.recovery.evaluate()
+        self.assertEqual(self.resumes(), [])
+        self.modem['generic']['state'] = 'registered'
+        self.recovery.evaluate()
+        self.assertEqual(len(self.resumes()), 1)
+
+
+if __name__ == '__main__':
+    unittest.main()

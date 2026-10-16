@@ -50,6 +50,18 @@ python3 tools/ci-inputs.py create
 
 ## 构建和发布内容
 
+桌面安装器由两个原生任务构建：`gui.yml` 生成 Windows x64 EXE，`gui-macos.yml`
+在 Apple Silicon runner 上生成 ARM64 APP、ADB 和独立后端。正式发布任务等待两端均成功，
+将 Mac artifact 的 TAR.GZ 解到 `installer/artifacts/macos-arm64`，再通过
+`OPENWRT_GUI_MACOS_ARTIFACT` 合入安装包。两端源码指纹和全部二进制哈希必须一致通过校验；
+不会退回旧版本后端。包根目录同时包含 `OpenWrt-Installer.exe` 和
+`OpenWrt-Installer.app`，共用一份系统镜像。E5、M8、T551M 的组装入口都调用同一合入函数。
+
+Mac 当前仅支持 Apple Silicon；使用系统 WebKit，不需要另装 Python、Node 或 Rust。
+APP 使用 ad-hoc 签名，尚未配置 Developer ID 公证。Mac 用户优先解压 TAR.GZ，以保留
+执行权限。单独手动构建 GUI 和本地合包的说明见 [installer/README.md](../installer/README.md)。
+本地合包请在 Linux 或 macOS 上进行，Windows 解压、重打包可能丢失 Unix 执行权限。
+
 构建使用 GitHub 原生 `ubuntu-24.04-arm` runner，编译主线发行内核、打过补丁的
 ModemManager/BlueZ 和通用 OpenWrt 镜像。主线镜像只装入本次内核的音频/WWAN 模块，
 不要求再构建 5.15。补丁 APK 按 OpenWrt 版本和补丁内容缓存；首次构建耗时较长。

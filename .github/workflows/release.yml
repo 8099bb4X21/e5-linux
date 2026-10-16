@@ -46,8 +46,11 @@ jobs:
   gui:
     uses: ./.github/workflows/gui.yml
 
+  gui_macos:
+    uses: ./.github/workflows/gui-macos.yml
+
   build:
-    needs: gui
+    needs: [gui, gui_macos]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     outputs:
@@ -194,6 +197,15 @@ jobs:
         with:
           name: openwrt-installer-windows
           path: installer/artifacts/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: openwrt-installer-macos-arm64
+          path: ${{ runner.temp }}/installer-macos
+      - name: Restore native macOS artifact
+        run: |
+          mkdir -p installer/artifacts/macos-arm64
+          tar -xzf "$RUNNER_TEMP/installer-macos/openwrt-installer-macos-arm64.tar.gz" -C installer/artifacts/macos-arm64
+          echo "OPENWRT_GUI_MACOS_ARTIFACT=$GITHUB_WORKSPACE/installer/artifacts/macos-arm64" >> "$GITHUB_ENV"
       - name: Assemble the generic mainline flash bundles
         env:
           E5_MAINLINE: '1'

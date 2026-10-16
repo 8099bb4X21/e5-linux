@@ -207,9 +207,10 @@ SU = None
 
 def find_adb():
     global ADB
-    for c in (shutil.which('adb'), os.path.join(B, 'tools', 'adb.exe'),
-              os.path.join(B, 'tools', 'adb'), os.path.join(B, 'platform-tools', 'adb.exe'),
-              os.path.join(B, 'platform-tools', 'adb')):
+    names = ('tools/adb.exe', 'platform-tools/adb.exe') if sys.platform == 'win32' else (
+        'tools/macos/adb', 'tools/adb', 'platform-tools/adb') if sys.platform == 'darwin' else (
+        'tools/adb', 'platform-tools/adb')
+    for c in (*[os.path.join(B, name) for name in names], shutil.which('adb')):
         if c and os.path.isfile(c):
             ADB = c
             return
@@ -1201,34 +1202,13 @@ def check(a):
 
 
 def boot_openwrt(a):
-    steps(2)
-    find_adb()
-    android_checks()
-    bj = boot_json()
-    mb = bj['persist_log_offset'] // 1048576
-    head = su(f'dd if=/dev/block/by-name/boot_b bs=1048576 count={mb} 2>/dev/null | sha256sum').split()[0:1]
-    if head != [bj['sha256_head56m']]:
-        # Resume/reinstall adds a verified command-line override. Accept only
-        # that exact package-derived variant, never an arbitrary Linux image.
-        if head != [part_boot_head(bj)]:
-            die('boot_b holds another boot image: use the package it was flashed with, or a first install')
-    # Switching is a trial, not an install or a default-boot transaction.
-    # Check the boot chain without syncing it; never mount/probe a root or
-    # update its selectors/default markers from Android.
-    bootchain('check')
-    arm_slot_b()
-    say('正在临时启动 OpenWrt（未更改默认设置）/ booting OpenWrt without changing defaults')
-    adb('reboot')
-
-
-def part_boot_head(metadata):
-    helper = os.path.join(SCRIPTS, 'installer', 'part-two-stage.py')
+    helper = os.path.join(SCRIPTS, 'installer', 'boot-control.py')
     if not os.path.isfile(helper):
-        helper = os.path.join(B, 'part-two-stage.py')
-    with open(os.path.join(F, 'boot.img'), 'rb') as stream:
-        image = stream.read()
-    patched = runpy.run_path(helper)['boot_command'](image, 'e5.root=part')
-    return hashlib.sha256(patched[:metadata['persist_log_offset']]).hexdigest()
+        helper = os.path.join(B, '..', '..', 'installer', 'backend', 'boot_image.py')
+    def read(command):
+        # Only 4096/512-byte header metadata, never a partition backup.
+        return bytes.fromhex(su(command+' | od -An -tx1 -v'))
+    return runpy.run_path(helper)['boot_installed_e5'](globals(), read)
 
 
 def local_ip(host):

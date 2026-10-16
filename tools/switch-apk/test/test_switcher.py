@@ -38,8 +38,30 @@ class Switcher(unittest.TestCase):
         for forbidden in ('mount -', 'umount ', '/e5root', '/boot-os', '/default-boot'):
             self.assertNotIn(forbidden, source)
         self.assertIn('SLOT=_a', source)
-        self.assertIn('BOOT=loglevel=5', source)
+        for forbidden in ('boot_b', 'BOOT=', 'loglevel=', '请先安装'):
+            self.assertNotIn(forbidden, source)
         self.assertIn('Configuration.UI_MODE_NIGHT_YES', source)
+
+    @unittest.skipIf(os.name == 'nt', 'Run the POSIX misc fixture in Linux/WSL')
+    def test_read_control_block_without_boot_image_or_tf_card(self):
+        source = JAVA.read_text(encoding='utf-8')
+        expression = source.split('String read = su(', 1)[1].split('if (read.contains', 1)[0]
+        command = ''.join(json.loads(s) for s in re.findall(r'"(?:\\.|[^"\\])*"', expression))
+        stock = bytes.fromhex('5f61000042434142010200009f001e000000000000000000000000000be17146')
+        with tempfile.TemporaryDirectory(prefix='switch-read-') as folder:
+            root = Path(folder)
+            before = bytes(2048) + stock + bytes(2048)
+            (root / 'misc').write_bytes(before)
+            # The only partition fixture is misc: no boot image or rootfs is
+            # consulted before a slot can be selected, regardless of storage.
+            command = command.replace('BY=/dev/block/by-name', 'BY=' + str(root))
+            command = command.replace('[ -b $BY/misc ]', '[ -f $BY/misc ]')
+            result = subprocess.run(['sh', '-ec', 'getprop() { echo _a; }; ' + command],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, 'SLOT=_a\nBC=' + stock.hex() + '\n')
+            self.assertEqual((root / 'misc').read_bytes(), before)
+            self.assertEqual([p.name for p in root.iterdir()], ['misc'])
 
     @unittest.skipIf(os.name == 'nt', 'Run the POSIX misc fixture in WSL')
     def test_write_only_changes_the_32_byte_misc_block_and_cleans_scratch(self):

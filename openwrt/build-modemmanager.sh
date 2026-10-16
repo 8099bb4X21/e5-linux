@@ -55,7 +55,10 @@ set -euo pipefail
 # 20: isolate ambiguous dual-SIM CMTI indices and restore scoped SMS AT context.
 # 21: keep compound SMS prompt transactions out of context restoration.
 # 22: fail on invalid power/mode readback and failed activation prerequisites.
-E5REV=22
+# 23: retry transient first registration/PDP/IP failures with cancellable backoff.
+# 25: PS registration events resume offline data setup without losing autostart.
+# 26: stock indexed call release; failed hangup remains visible and retryable.
+E5REV=26
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"
@@ -74,6 +77,7 @@ cp "$HERE/tests/voice-identity.py" "$WORK/voice-identity.py"
 cp "$HERE/tests/sim-power.py" "$WORK/sim-power.py"
 cp "$HERE/tests/voice-urc.py" "$WORK/voice-urc.py"
 cp "$HERE/tests/voice-recovery.py" "$WORK/voice-recovery.py"
+cp "$HERE/tests/voice-hangup.py" "$WORK/voice-hangup.py"
 cp "$HERE/tests/data-priority-hook.py" "$WORK/data-priority-hook.py"
 cp "$HERE/tests/modem-mobility.py" "$WORK/modem-mobility.py"
 cp "$HERE/tests/sms-isolation.py" "$WORK/sms-isolation.py"
@@ -81,6 +85,9 @@ cp "$HERE/files/modemmanager-unisoc-renew" "$WORK/modemmanager-unisoc-renew"
 mkdir -p "$WORK/devices/t551m" "$WORK/openwrt/overlay/usr/libexec"
 cp "$TOP/devices/t551m/network-startup.py" "$WORK/devices/t551m/network-startup.py"
 cp "$HERE/overlay/usr/libexec/e5-mm-report-ports" "$WORK/openwrt/overlay/usr/libexec/e5-mm-report-ports"
+cp "$HERE/overlay/usr/libexec/e5-network-recovery" "$WORK/openwrt/overlay/usr/libexec/e5-network-recovery"
+mkdir -p "$WORK/openwrt/overlay/etc/init.d"
+cp "$HERE/overlay/etc/init.d/e5-network-recovery" "$WORK/openwrt/overlay/etc/init.d/e5-network-recovery"
 n=900
 for p in "$TOP"/rootfs/deb-patches/modemmanager-[0-9][0-9]-*.patch; do
     cp "$p" "$WORK/patches/src/$n-e5-$(basename "$p" | sed 's/^modemmanager-//')"
@@ -124,7 +131,7 @@ for try in 1 2 3 4 5; do
     for f in $missing; do rm -rf feeds/$f feeds/$f.*; ./scripts/feeds update $f >/dev/null || true; done
 done
 [ -z "$missing" ] || { echo "feeds not cloned: $missing"; exit 1; }
-./scripts/feeds install modemmanager >/dev/null
+./scripts/feeds install modemmanager python3 dbus-utils >/dev/null
 P=feeds/packages/net/modemmanager
 # the package directory back to the feed state, then the E5 changes on top
 git -C feeds/packages checkout -q -- net/modemmanager
@@ -177,6 +184,7 @@ python3 /work/voice-identity.py "$(dirname "$voice_source")"
 python3 /work/sim-power.py "$(dirname "$voice_source")"
 python3 /work/voice-urc.py "$(dirname "$voice_source")"
 python3 /work/voice-recovery.py "$(dirname "$voice_source")"
+python3 /work/voice-hangup.py "$(dirname "$voice_source")"
 python3 /work/data-priority-hook.py "$(dirname "$voice_source")"
 python3 /work/modem-mobility.py "$(dirname "$voice_source")" /work/modemmanager-unisoc-renew
 python3 /work/sms-isolation.py "$(dirname "$voice_source")"

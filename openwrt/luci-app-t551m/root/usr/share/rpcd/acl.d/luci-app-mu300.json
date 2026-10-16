@@ -8,6 +8,7 @@
           "lock_get", "lock_status", "sms_list", "sms_show", "forward_get",
           "forward_status", "traffic_get", "usb_get", "usb_net_list", "apn_get"
         ],
+        "e5-charge": ["get"],
         "e5-sms": [
           "forward_log"
         ]
@@ -26,6 +27,7 @@
         "mu300dash": [
           "*"
         ],
+        "e5-charge": ["configure", "full_once"],
         "e5-sms": [
           "forward_test"
         ]

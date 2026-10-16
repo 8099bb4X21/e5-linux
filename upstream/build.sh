@@ -27,6 +27,7 @@ fi
 [ -n "${KBUILD_BUILD_TIMESTAMP:-}" ] || unset KBUILD_BUILD_TIMESTAMP
 cd /src/linux
 python3 /policy/display.py .
+python3 /policy/power.py .
 python3 /policy/emmc.py .
 python3 /policy/eic.py .
 python3 /policy/thermal.py .
@@ -34,6 +35,7 @@ python3 /policy/sipa.py .
 python3 /policy/wifi-tx.py .
 python3 /policy/fuel-gauge.py .
 python3 /policy/wifi-sae.py .
+python3 /policy/wifi-stations.py .
 KV=$(make -s kernelversion)
 O=/out/$KV
 mkdir -p "$O"

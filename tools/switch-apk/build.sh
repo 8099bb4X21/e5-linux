@@ -96,5 +96,5 @@ sources = {p.as_posix(): hashlib.sha256(p.read_bytes().replace(b'\r\n', b'\n')).
            for p in sorted(files) if p.is_file()}
 Path('op-system-switcher.json').write_text(json.dumps({
     'source': sources, 'binary_sha256': hashlib.sha256(Path('op-system-switcher.apk').read_bytes()).hexdigest()
-}, indent=2) + '\n', encoding='utf-8')
+}, indent=2) + '\n', encoding='utf-8', newline='\n')
 PY

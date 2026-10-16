@@ -48,8 +48,12 @@ def assemble(package, source=HERE):
     (launchers / 'start-installer.cmd').write_bytes(cmd.encode('ascii'))
     (launchers / 'start-installer.sh').write_text(
         '#!/bin/sh\ncd "$(dirname "$0")/.." || exit 1\n'
+        'if [ "$(uname -s)" = Darwin ] && [ -x ./tools/macos/backend/openwrt-backend ]; then\n'
+        '  exec ./tools/macos/backend/openwrt-backend --cli --package-root "$PWD" "$@"\n'
+        'fi\n'
         'exec python3 ./OpenWrt-Installer.py "$@"\n', encoding='utf-8', newline='\n')
     shutil.copy2(source / 'part-two-stage.py', internal / 'part-two-stage.py')
+    shutil.copy2(HERE.parents[1] / 'installer/backend/boot_image.py', internal / 'boot-control.py')
     exe = source / 'flash.exe'
     if exe.is_file() and (source != HERE or os.environ.get('OPENWRT_BUILD_LEGACY_EXE') == '1'):
         metadata = json.loads((source / 'flash-exe.json').read_text(encoding='utf-8'))

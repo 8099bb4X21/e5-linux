@@ -54,6 +54,7 @@ struct sprd_fgu_info { int regmap,base,dev; };
 static unsigned register_value, encoded_value; static int read_error,writes;
 static int regmap_read(int map,int address,unsigned *value){(void)map;(void)address;*value=register_value;return read_error;}
 static int regmap_write_bits(int map,int address,unsigned mask,unsigned value){(void)map;(void)mask;writes++;if(address==0xa0||address==0xc0)encoded_value=value;return 0;}
+static int regmap_update_bits(int map,int address,unsigned mask,unsigned value){return regmap_write_bits(map,address,mask,value);}
 static void usleep_range(int low,int high){(void)low;(void)high;}
 '''
 REGISTER_MAIN = r'''
@@ -84,7 +85,7 @@ int main(void) {
  }
  writes=0;assert(!ump96xx_fgu_save_normal_temperature_cap(&info,SPRD_FGU_MAGIC_NUMBER)&&!writes);
  read_error=-EIO;assert(ump96xx_fgu_read_last_cap(&info,&cap)==-EIO);
- puts("PASS: all 4096 retained encodings, 1001 valid SOC values, factory write format, invalid writes and bus errors");
+ puts("PASS: all 4096 retained encodings, 1001 valid SOC values, factory masked-write format, invalid writes and bus errors");
 }
 '''
 

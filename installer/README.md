@@ -12,6 +12,28 @@ python -m unittest discover -s installer/tests -v
 python installer/build.py
 ```
 
+## Apple Silicon macOS and combined releases
+
+Run the same `python installer/build.py` on an Apple Silicon Mac with Xcode Command Line Tools, native ARM64 Python 3.12, Node 22 and Rust 1.90.0. Install the same Python build dependencies first. It creates `installer/artifacts/macos-arm64/OpenWrt-Installer.app`, `tools/macos/adb`, the private Python backend under `tools/macos/backend`, and a source/binary fingerprint manifest. macOS uses system WebKit, the native `open` command and `~/Library/Application Support/OpenWrt-Installer` for recovery records. The app locates either E5's `files/device-profile.json` or MU300's `desktop/manifest.json`; Finder translocation prompts for the extracted package folder. The macOS command-line launcher uses the same bundled backend, without a system Python dependency.
+
+The build checks GUI architecture, applies and verifies an ad-hoc app signature, and pins Google's Darwin platform-tools archive in `platform-tools-macos.json`. The bundle version and identifier come from Tauri configuration. This is ARM64 support only; it does not produce an Intel or universal app. Ad-hoc signing is not Developer ID signing or Apple notarization, so downloaded applications may require explicit permission in Privacy & Security. See [Tauri's macOS distribution instructions](https://v2.tauri.app/distribute/macos-application-bundle/) and [signing documentation](https://v2.tauri.app/distribute/sign/macos/).
+
+`.github/workflows/gui-macos.yml` supports reusable calls, manual dispatch and `build/macos-*` branch pushes. It uses GitHub's native ARM64 `macos-15` runner, runs backend tests, builds release binaries and checks the frozen backend protocol, ADB, GUI architecture and signature without connecting to devices. The artifact is transported as `openwrt-installer-macos-arm64.tar.gz` to preserve executable permissions. [Runner architecture reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+E5's main release workflow now requires **both** GUI jobs. It downloads Windows files, restores the macOS tar artifact on the Linux packaging runner, then sets `OPENWRT_GUI_MACOS_ARTIFACT` before assembling the firmware archive. This path is shared by the E5, M8 and T551M package assemblers. For a local combined release, provide both artifact directories:
+
+```sh
+export OPENWRT_GUI_ARTIFACT=/path/to/windows-artifact
+export OPENWRT_GUI_MACOS_ARTIFACT=/path/to/macos-arm64-artifact
+# Run the existing model-specific firmware package builder afterward.
+```
+
+`package_gui.attach` also detects a local `installer/artifacts/macos-arm64/build.json` automatically. Both artifacts must match the current source and their platform, complete file lists and binary checksums before either is attached. Text fingerprints normalize Git CRLF/LF differences; binary hashes remain exact. Missing/stale explicitly supplied Mac artifacts fail packaging. Refreshing an old combined package without a current Mac artifact also fails rather than retaining an obsolete backend. Runtime directories are replaced so removed dependencies do not survive a refresh. The root EXE and APP share one firmware payload; desktop dependencies stay outside device payloads. `size_report` includes separate `gui_windows_bytes` and `gui_macos_bytes`, their total `gui_bytes`, backend/tools, firmware and archive sizes. Assemble combined releases on Linux or macOS, as Windows extraction/repacking can lose Unix executable permissions. Prefer the tar.gz distribution when extracting on macOS.
+
+To validate this integration without compiling anything, run `python -m unittest discover -s installer/tests -p test_macos_integration.py -v`. External build/signing commands are intercepted and attachment checks use tiny disposable text fixtures. This does not establish native macOS runtime or hardware compatibility; those checks run when the Mac workflow is actually invoked.
+
+## Shared runtime and packaging
+
 `ui/rust-toolchain.toml`, Cargo.lock and package-lock.json pin the build graph. `build.py` runs a Tauri release build with size optimization/LTO/strip and builds a console-protocol Python sidecar. The Tauri host spawns it with CREATE_NO_WINDOW. `installer/artifacts/windows` contains `OpenWrt-Installer.exe`, `tools/backend/`, and `build.json` with source/binary hashes. No browser runtime, Node, Rust, Python installation, cache, large fonts or development dependencies are shipped. The bundled interpreter is private to the sidecar.
 
 The artifact also includes ADB and its two Windows USB DLLs under `tools/`, plus `ADB-NOTICE.txt`. `platform-tools.json` pins Google's 37.0.1 archive URL and SHA256; only these necessary files are extracted. `--adb-dir` accepts a pre-fetched official platform-tools folder for offline builds. Normal packaging therefore does not rely on ADB installed on the end user's PATH or an optional environment variable.
@@ -38,6 +60,8 @@ Validation uses fake transports and disposable files. Run POSIX device-script te
 For the complete browser regression suite, install development-only Playwright (`python -m pip install playwright`, then `python -m playwright install chromium`), build the production frontend and run `python -X utf8 installer/tests/run_ui.py`. It starts and stops its own local server, checks all six UI suites and writes `verification/ui-regression.json`. It refuses an occupied test port and never connects to ADB/SSH. Windows CI runs the same suites after its release build.
 
 ## Desktop layout, feedback and motion
+
+MU300 updates use `backend/mu300_update.py`; packaging generates the compatible CLI helper `desktop/update_control.py` from the same file. The adapter calls the shared implementation even when an older package's Python entry rejects `legacy`. Hidden-area support requires the live OpenWrt container, ext4 label/capacity and loop backing/offset/extent to agree with eMMC/GPT bounds and the packaged boot's existing discovery logic. Checks run before uploads and immediately before commit. The native upgrade lock, config/account/vendor migration, disk staging, rollback and readback checks remain in the packaged updater. Unknown layouts stop; no GPT edit, resize or format is introduced by this compatibility path.
 
 The window has a fixed viewport: header, sidebar, primary actions and footer stay visible. Purpose lists, recovery records, installation content and expanded logs have independent scroll areas. The package extraction reminder and transaction-folder shortcut stay at the bottom of the sidebar. Recovery controls remain compact at the minimum 800×650 window size, including when the log is open.
 

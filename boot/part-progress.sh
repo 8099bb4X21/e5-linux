@@ -23,6 +23,16 @@ part_progress_start() {
                     msg="$msg | $((written / 1048576))/$((total / 1048576)) MiB ($((written * 100 / total))%)"
                 fi
             fi
+            if [ -s /run/part-check ]; then
+                read -r check_pid check_log < /run/part-check
+                check_state=$(awk "/^State:/ {print \$2}" "/proc/$check_pid/status" 2>/dev/null)
+                check_wait=$(cat "/proc/$check_pid/wchan" 2>/dev/null)
+                check_io=$(awk "/^read_bytes:/ {r=\$2} /^write_bytes:/ {w=\$2} END {if (NR) printf \"read=%.1fMiB write=%.1fMiB\", r/1048576, w/1048576}" "/proc/$check_pid/io" 2>/dev/null)
+                check_tail=$(tail -c 1024 "$check_log" 2>/dev/null | tr "\r" "\n" |
+                    awk "NF {line=\$0} END {print substr(line,1,140)}")
+                msg="$msg | fsck pid=$check_pid state=${check_state:-?} wait=${check_wait:-?} $check_io"
+                [ -z "$check_tail" ] || msg="$msg | $check_tail"
+            fi
             printf '<3>E5-INSTALL: %s\n' "$msg" > /dev/kmsg
             # ttyGS0 may be the preferred console. Write the panel explicitly.
             [ ! -c /dev/tty0 ] || printf '\r\033[2K%s\n' "$msg" > /dev/tty0
@@ -32,7 +42,7 @@ part_progress_start() {
     part_beat=$!
 }
 part_stop() {
-    rm -f /run/part-install.running /run/part-worker /run/part-disk
+    rm -f /run/part-install.running /run/part-worker /run/part-disk /run/part-check /run/part-fsck.stdin
     [ -z "${part_beat:-}" ] || { kill "$part_beat" 2>/dev/null; wait "$part_beat" 2>/dev/null; }
     part_beat=
     return 0
