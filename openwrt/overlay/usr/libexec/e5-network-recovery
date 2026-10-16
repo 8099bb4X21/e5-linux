@@ -47,7 +47,7 @@ def can_resume(interface):
     errors = [e.get('code', '') for e in interface.get('errors', [])]
     # Existing PIN, SIM, APN and explicit mode errors still need user action.
     return all(e in ('MM_CONNECT_FAILED', 'MM_3GPP_OPERATOR_REGISTRATION_FAILED',
-                     'MM_INTERFACE_RESTART') for e in errors)
+                     'MM_INTERFACE_RESTART', 'MM_FAILED_REASON_SIM_MISSING') for e in errors)
 
 
 class Recovery:

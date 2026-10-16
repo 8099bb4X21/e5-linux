@@ -113,6 +113,7 @@ python3 openwrt/tests/wifi-hostapd-clients.py
 
 ## 详细记录
 
+- [SIM 事件、无卡等待与原厂对照](SIM-EVENTS-20261016.zh-CN.md)
 - [E5 原厂电量、功耗与蜂窝恢复](STOCK-POWER-RECOVERY-20261016.zh-CN.md)
 - [公共充电、电量恢复、挂断及热点客户端修复](STOCK-CHARGE-CALL-WIFI-20261016.zh-CN.md)
 - [网页充电控制](WEB-CHARGING-20261016.zh-CN.md)

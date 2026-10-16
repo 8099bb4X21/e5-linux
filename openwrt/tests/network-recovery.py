@@ -82,6 +82,19 @@ class Tests(unittest.TestCase):
             self.recovery.evaluate()
         self.assertFalse(self.commands)
 
+    def test_missing_sim_wait_resumes_only_after_real_registration(self):
+        self.wan['errors'] = [{'code': 'MM_FAILED_REASON_SIM_MISSING'}]
+        self.modem['generic']['state'] = 'failed'
+        self.recovery.evaluate()
+        self.assertFalse(self.resumes())
+        self.modem = copy.deepcopy(MODEM)
+        self.recovery.evaluate()
+        self.assertEqual(len(self.resumes()), 1)
+        self.wan['autostart'] = False
+        self.recovery = Recovery()
+        self.recovery.evaluate()
+        self.assertEqual(len(self.resumes()), 1)
+
     def test_connecting_state_does_not_reset_retry_generation(self):
         self.recovery.evaluate()
         self.modem['generic']['state'] = 'connecting'

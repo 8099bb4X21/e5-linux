@@ -58,7 +58,8 @@ set -euo pipefail
 # 23: retry transient first registration/PDP/IP failures with cancellable backoff.
 # 25: PS registration events resume offline data setup without losing autostart.
 # 26: stock indexed call release; failed hangup remains visible and retryable.
-E5REV=26
+# 27: stock ECIND SIM events through the existing MM owner; no SIM polling.
+E5REV=27
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"
@@ -75,6 +76,7 @@ done
 rm -rf "$WORK/patches" && mkdir -p "$WORK/patches/src" "$WORK/patches/pkg"
 cp "$HERE/tests/voice-identity.py" "$WORK/voice-identity.py"
 cp "$HERE/tests/sim-power.py" "$WORK/sim-power.py"
+cp "$HERE/tests/sim-events.py" "$WORK/sim-events.py"
 cp "$HERE/tests/voice-urc.py" "$WORK/voice-urc.py"
 cp "$HERE/tests/voice-recovery.py" "$WORK/voice-recovery.py"
 cp "$HERE/tests/voice-hangup.py" "$WORK/voice-hangup.py"
@@ -182,6 +184,7 @@ voice_source=$(find build_dir -path "*/modemmanager-*/src/mm-iface-modem-voice.c
 [ -n "$voice_source" ] || { echo "missing patched voice source" >&2; exit 1; }
 python3 /work/voice-identity.py "$(dirname "$voice_source")"
 python3 /work/sim-power.py "$(dirname "$voice_source")"
+python3 /work/sim-events.py "$(dirname "$voice_source")"
 python3 /work/voice-urc.py "$(dirname "$voice_source")"
 python3 /work/voice-recovery.py "$(dirname "$voice_source")"
 python3 /work/voice-hangup.py "$(dirname "$voice_source")"

@@ -340,7 +340,21 @@ def patch_root(root, profile='t551m'):
             text = text.replace(register, replacement)
         elif text.count(replacement) != 1:
             raise ValueError('Unexpected ModemManager registration retry hook')
-        # Only registration/connection failure paths participate. PIN, SIM,
+        # No SIM is an event wait, not a permanent user ifdown. Hot-swap
+        # reprobes the same device and the existing recovery service resumes
+        # it only after genuine registration, preserving autostart intent.
+        missing = '\t\t\tproto_notify_error "${interface}" MM_FAILED_REASON_SIM_MISSING\n'
+        original = missing + '\t\t\tproto_block_restart "${interface}"'
+        replacement = missing + '''\t\t\tif [ "$device" = unisoc-sipc ]; then
+\t\t\t\tproto_set_available "$interface" 0
+\t\t\telse
+\t\t\t\tproto_block_restart "${interface}"
+\t\t\tfi'''
+        if original in text:
+            text = text.replace(original, replacement)
+        elif replacement not in text:
+            raise ValueError('Unexpected ModemManager missing SIM handling')
+        # Only registration/connection failure paths participate. PIN,
         # credentials, explicit modes and other modem plugins keep their rules.
         for start_marker, end_marker in (
                 ('modemmanager_set_plmn() {', retry_marker),
