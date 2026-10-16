@@ -82,11 +82,11 @@ def attach(package, artifact=None, required=True):
     default_mac = HERE/'artifacts/macos-arm64'
     if not mac and (default_mac/'build.json').is_file():
         mac = default_mac
-    mac = Path(mac) if mac else None
+    if not mac:
+        raise ValueError('Apple Silicon GUI build missing; build/download installer/artifacts/macos-arm64 or set OPENWRT_GUI_MACOS_ARTIFACT. Release packages require both Windows and macOS installers.')
+    mac = Path(mac)
     # Validate both platforms before changing the destination package.
     mac_metadata = validate_artifact(mac, 'macos-arm64', source) if mac else None
-    if not mac and ((package/'OpenWrt-Installer.app').exists() or (package/'tools/macos').exists()):
-        raise ValueError('Existing macOS runtime requires a current OPENWRT_GUI_MACOS_ARTIFACT; refusing to retain stale binaries')
     shutil.copy2(artifact/'OpenWrt-Installer.exe', package/'OpenWrt-Installer.exe')
     (package/'tools').mkdir(exist_ok=True)
     for path in (artifact/'tools').iterdir():

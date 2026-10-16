@@ -59,7 +59,8 @@ set -euo pipefail
 # 25: PS registration events resume offline data setup without losing autostart.
 # 26: stock indexed call release; failed hangup remains visible and retryable.
 # 27: stock ECIND SIM events through the existing MM owner; no SIM polling.
-E5REV=27
+# 28: retry registration-cancelled setup; cycle PDP backoff through 1/3/5/7 s.
+E5REV=28
 VER=${E5_WRT_VER:-25.12.5}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TOP="$(cd "$HERE/.." && pwd)"

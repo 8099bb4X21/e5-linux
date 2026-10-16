@@ -227,7 +227,7 @@ class Adapter:
             self.legacy.find_adb = lambda: None
 
     def probe(self, serial, method='part'):
-        if method not in ('tf', 'part', 'reinstall', 'image', 'boot'):
+        if method not in ('tf', 'part', 'reinstall', 'image', 'boot', 'uninstall'):
             raise ValueError('Unsupported Android installation method / 不支持的 Android 安装方式')
         self.bind(serial)
         devices = self.adb.devices()

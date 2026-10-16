@@ -15,7 +15,7 @@
 
 ## 蜂窝连接与 SIM 状态
 
-- 首次注册、PDP 或获取 IP 遇到明确的暂时失败时，允许取消的重试间隔为 3、5、7、9、11、13、15、20、40、60 秒，避免只能手动重连。
+- 首次注册、PDP 或获取 IP 遇到明确的暂时失败时，按 1、3、5、7 秒循环重试，无次数上限，并允许随时取消；注册变化导致的拨号取消不会再误关自动连接。
 - 失去覆盖后改用注册事件恢复：重新取得有效网络并完成 PS attach 后，由原 netifd 流程继续拨号；修复失败时丢失自动启动标记的问题。
 - 保留用户手动断网状态；PIN、APN、鉴权错误不会被无条件自动重拨绕过。
 - 接入原厂 ECIND SIM 状态通知，由现有 ModemManager AT 通道确认卡状态。确认无卡后等待状态变化，不反复进行无效的注册／拨号重试。
@@ -64,3 +64,11 @@
 - [F2FS 缩容检查与进度](PART-FSCK-PROGRESS-20261016.zh-CN.md)
 - [新机型适配清单](NEW-DEVICE-STOCK-ADAPTATION.zh-CN.md)
 - [安装器验证记录](../installer/VERIFICATION.md)
+
+## 补齐 macOS 安装器
+
+- 正式包默认同时包含 Windows EXE 与 Apple Silicon macOS APP，共用一份系统镜像；缺少任一平台或源码版本不符会停止打包。
+- 修复 Windows 重打包造成 Mac 程序失去执行权限的问题；ZIP 保留 APP、ADB、后端和命令行入口所需权限。
+- 统一两仓库的 Mac 包目录识别、恢复记录路径及使用指南，刷新 MU300 旧包时同步升级 Mac 命令行入口。
+- 本轮仅更新电脑端安装工具与归档，保留此前的系统功能、内核和模块；Mac 为 ARM64 原生版本。
+- 详细说明：[Windows 与 Apple Silicon 安装器打包](MACOS-INSTALLER-PACKAGING-20261016.zh-CN.md)。

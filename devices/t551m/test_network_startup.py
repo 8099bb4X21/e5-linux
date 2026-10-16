@@ -145,11 +145,12 @@ modemmanager_get_field() { case "$2" in modem.generic.state) echo registered ;; 
 ''' + helper + '\nmodemmanager_connect_retry "$DEVICE" "apn=test,ip-type=ipv4v6"\n'
         error = "error: couldn't connect the modem: 'GDBus.Error:Unknown: Couldn't activate PDP context 1: Unknown mobile equipment error: 28'"
         cases = [(0, error, 'unisoc-sipc', 1, [], 0),
-                 (1, error, 'unisoc-sipc', 2, ['WAIT:3'], 0),
-                 (2, error, 'unisoc-sipc', 3, ['WAIT:3', 'WAIT:5'], 0),
-                 (12, error, 'unisoc-sipc', 13, ['WAIT:3', 'WAIT:5', 'WAIT:7', 'WAIT:9', 'WAIT:11', 'WAIT:13', 'WAIT:15', 'WAIT:20', 'WAIT:40', 'WAIT:60', 'WAIT:60', 'WAIT:60'], 0),
-                 (2, 'GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork: No network', 'unisoc-sipc', 3, ['WAIT:3', 'WAIT:5'], 0),
-                 (1, 'No IPv4 settings for PDP context 1', 'unisoc-sipc', 2, ['WAIT:3'], 0),
+                 (1, error, 'unisoc-sipc', 2, ['WAIT:1'], 0),
+                 (2, error, 'unisoc-sipc', 3, ['WAIT:1', 'WAIT:3'], 0),
+                 (12, error, 'unisoc-sipc', 13, ['WAIT:1', 'WAIT:3', 'WAIT:5', 'WAIT:7'] * 3, 0),
+                 (2, 'GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork: No network', 'unisoc-sipc', 3, ['WAIT:1', 'WAIT:3'], 0),
+                 (1, 'No IPv4 settings for PDP context 1', 'unisoc-sipc', 2, ['WAIT:1'], 0),
+                 (1, 'GDBus.Error:org.freedesktop.ModemManager1.Error.Core.Cancelled: Operation was cancelled', 'unisoc-sipc', 2, ['WAIT:1'], 0),
                  (9, 'GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.GprsAuthenticationFailure: authentication failed', 'unisoc-sipc', 1, [], 1),
                  (9, 'GDBus.Error:org.freedesktop.ModemManager1.Error.Core.InvalidArgs: bad APN', 'unisoc-sipc', 1, [], 1),
                  (9, 'SIM PIN required', 'unisoc-sipc', 1, [], 1),
@@ -164,6 +165,79 @@ modemmanager_get_field() { case "$2" in modem.generic.state) echo registered ;; 
                 self.assertEqual(result.returncode, rc, result.stderr)
                 self.assertEqual(int(count.read_text()), expected)
                 self.assertEqual([line for line in result.stdout.splitlines() if line.startswith('WAIT:')], waits)
+
+    def test_cancelled_setup_requires_a_still_enabled_modem(self):
+        text = (self.root / 'lib/netifd/proto/modemmanager.sh').read_text()
+        helper = text[text.index('# unisoc-pdp-connect-retry:'):text.index('proto_modemmanager_setup() {')]
+        harness = '''
+mmcli() { [ "$*" = '--modem=unisoc-sipc --output-keyvalue' ] || exit 9; [ "$READ_FAIL" != 1 ] && echo cached; }
+modemmanager_get_field() { echo "$STATE"; }
+''' + helper + '''
+modemmanager_unisoc_retryable 'GDBus.Error:org.freedesktop.ModemManager1.Error.Core.Cancelled: Operation was cancelled' unisoc-sipc
+'''
+        for state in ('enabled', 'enabling', 'searching', 'registered', 'connecting', 'connected', 'disconnecting',
+                      'disabled', 'disabling', 'failed', 'locked', 'unknown', ''):
+            for failed in ('0', '1'):
+                with self.subTest(state=state, read_failed=failed):
+                    result = subprocess.run(['busybox', 'sh', '-c', harness],
+                        env=dict(os.environ, STATE=state, READ_FAIL=failed),
+                        capture_output=True, text=True, timeout=5)
+                    allowed = state in ('enabled', 'enabling', 'searching', 'registered', 'connecting', 'connected', 'disconnecting') and failed == '0'
+                    self.assertEqual(result.returncode, 0 if allowed else 1, result.stderr)
+
+    def test_cancelled_handover_runs_the_real_setup_failure_branch(self):
+        text = (self.root / 'lib/netifd/proto/modemmanager.sh').read_text()
+        helper = text[text.index('# unisoc-pdp-connect-retry:'):text.index('proto_modemmanager_setup() {')]
+        start = text.index('\tmodemmanager_connect_retry "$device" "$connectargs" || {')
+        end = text.index('\n\t# check if Signal refresh rate', start)
+        branch = text[start:end]
+        harness = '''
+mmcli() {
+ case "$*" in *--output-keyvalue*) echo cached; return 0 ;; esac
+ n=$(cat "$COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$COUNT"
+ [ "$n" -gt "$FAILURES" ] && { echo connected; return 0; }
+ echo "GDBus.Error:org.freedesktop.ModemManager1.Error.Core.$ERROR: Operation failed"; return 1
+}
+modemmanager_get_field() { case "$2" in modem.generic.state) echo "$STATE" ;; *) echo "$PACKET" ;; esac; }
+sleep() { echo WAIT:$1; }
+proto_set_available() { echo AVAILABLE:$1:$2; }
+proto_block_restart() { echo BLOCK:$1; }
+proto_notify_error() { echo ERROR:$2; }
+''' + helper + '\nsetup() {\n' + branch + '\necho SETUP_CONNECTED\n}\nsetup\n'
+        count = self.root / 'handover-attempts'
+        cases = [('Cancelled', 'registered', 'attached', 3, 0, ['WAIT:1', 'WAIT:3', 'WAIT:5']),
+                 ('Cancelled', 'disconnecting', 'attached', 2, 0, ['WAIT:1', 'WAIT:3']),
+                 ('Cancelled', 'connected', 'attached', 1, 0, ['WAIT:1']),
+                 ('WrongState', 'disconnecting', 'attached', 1, 0, ['WAIT:1']),
+                 ('WrongState', 'enabling', 'attached', 1, 0, ['WAIT:1']),
+                 ('Cancelled', 'searching', 'detached', 1, 1, []),
+                 ('Cancelled', 'registered', 'detached', 1, 1, []),
+                 ('Cancelled', 'disabling', 'attached', 1, 1, []),
+                 ('Cancelled', 'disabled', 'detached', 1, 1, []),
+                 ('Cancelled', 'failed', 'detached', 1, 1, []),
+                 ('WrongState', 'registered', 'attached', 1, 1, [])]
+        for error, state, packet, failures, rc, waits in cases:
+            with self.subTest(error=error, state=state, packet=packet):
+                count.unlink(missing_ok=True)
+                env = dict(os.environ, COUNT=str(count), FAILURES=str(failures),
+                           ERROR=error, STATE=state, PACKET=packet, interface='wan',
+                           device='unisoc-sipc', connectargs='apn=test', force_connection='0')
+                result = subprocess.run(['busybox', 'sh', '-c', harness], env=env,
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, rc, result.stderr)
+                self.assertEqual([l for l in result.stdout.splitlines() if l.startswith('WAIT:')], waits)
+                if not rc:
+                    self.assertIn('SETUP_CONNECTED', result.stdout)
+                    self.assertNotIn('BLOCK:', result.stdout)
+                    self.assertNotIn('ERROR:', result.stdout)
+                    self.assertEqual(int(count.read_text()), failures + 1)
+                elif state == 'searching' or state == 'registered' and packet == 'detached':
+                    self.assertIn('AVAILABLE:wan:0', result.stdout)
+                    self.assertNotIn('BLOCK:', result.stdout)
+                    self.assertEqual(int(count.read_text()), 1)
+                else:
+                    self.assertIn('BLOCK:wan', result.stdout)
+                    self.assertEqual(int(count.read_text()), 1)
 
     def test_registration_uses_same_transient_policy(self):
         text=(self.root/'lib/netifd/proto/modemmanager.sh').read_text()
@@ -185,7 +259,7 @@ modemmanager_get_field() { case "$2" in modem.generic.state) echo registered ;; 
         result=subprocess.run(['busybox','sh','-c',harness],env=dict(os.environ,COUNT=str(count)),capture_output=True,text=True,timeout=5)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(count.read_text().strip(),'3')
-        self.assertEqual([line for line in result.stdout.splitlines() if line.startswith('WAIT:')],['WAIT:3','WAIT:5'])
+        self.assertEqual([line for line in result.stdout.splitlines() if line.startswith('WAIT:')],['WAIT:1','WAIT:3'])
 
     def test_no_coverage_waits_for_ps_event_without_blocking_user_intent(self):
         text=(self.root/'lib/netifd/proto/modemmanager.sh').read_text()
@@ -227,12 +301,12 @@ modemmanager_unisoc_block_restart wan unisoc-sipc
         bindir=self.root/'bin';bindir.mkdir()
         for command in ('mmcli','sleep'):
             tool=bindir/command
-            tool.write_text('#!/usr/bin/env python3\nimport os,time,sys\nfrom pathlib import Path\nname=Path(sys.argv[0]).name\nif name=="mmcli" and os.environ["MODE"]=="backoff":\n print("GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork: No network");sys.exit(1)\nPath(os.environ["CHILD"]).write_text(str(os.getpid()))\ntime.sleep(30)\n')
+            tool.write_text('#!/usr/bin/env python3\nimport os,time,sys\nfrom pathlib import Path\nname=Path(sys.argv[0]).name\nif name=="mmcli" and os.environ["MODE"]=="backoff":\n print("GDBus.Error:org.freedesktop.ModemManager1.Error.MobileEquipment.NoNetwork: No network");sys.exit(1)\nif name=="mmcli" and os.environ["MODE"]=="cancelled-backoff":\n if "--output-keyvalue" in sys.argv: print("cached");sys.exit(0)\n print("GDBus.Error:org.freedesktop.ModemManager1.Error.Core.Cancelled: Operation was cancelled");sys.exit(1)\nPath(os.environ["CHILD"]).write_text(str(os.getpid()))\ntime.sleep(30)\n')
             tool.chmod(0o755)
-        for mode in ('command','backoff'):
+        for mode in ('command','backoff','cancelled-backoff'):
             with self.subTest(mode=mode):
                 child=self.root/'child';child.unlink(missing_ok=True)
-                script='mktemp() { command mktemp "$TMPDIR/start.XXXXXX"; }\nsleep() { exec "$TEST_BIN/sleep" "$@"; }\n'+helper+'\nmodemmanager_connect_retry unisoc-sipc apn=test\n'
+                script='mktemp() { command mktemp "$TMPDIR/start.XXXXXX"; }\nsleep() { exec "$TEST_BIN/sleep" "$@"; }\nmodemmanager_get_field() { case "$2" in modem.generic.state) echo registered ;; *) echo attached ;; esac; }\n'+helper+'\nmodemmanager_connect_retry unisoc-sipc apn=test\n'
                 env=dict(os.environ,PATH=str(bindir)+os.pathsep+os.environ['PATH'],MODE=mode,CHILD=str(child),TMPDIR=str(self.root),TEST_BIN=str(bindir))
                 proc=subprocess.Popen(['busybox','ash','-c',script],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
                 try:

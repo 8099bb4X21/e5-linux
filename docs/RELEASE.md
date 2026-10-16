@@ -58,9 +58,10 @@ python3 tools/ci-inputs.py create
 `OpenWrt-Installer.app`，共用一份系统镜像。E5、M8、T551M 的组装入口都调用同一合入函数。
 
 Mac 当前仅支持 Apple Silicon；使用系统 WebKit，不需要另装 Python、Node 或 Rust。
-APP 使用 ad-hoc 签名，尚未配置 Developer ID 公证。Mac 用户优先解压 TAR.GZ，以保留
-执行权限。单独手动构建 GUI 和本地合包的说明见 [installer/README.md](../installer/README.md)。
-本地合包请在 Linux 或 macOS 上进行，Windows 解压、重打包可能丢失 Unix 执行权限。
+APP 使用 ad-hoc 签名，尚未配置 Developer ID 公证。正式本地组包也强制同时提供 Windows
+和 Mac 产物，缺少任一端或源码不匹配就停止，不再默默漏装。ZIP 归档会显式保留 Mac
+程序的 Unix 执行权限，包括 Windows 主机上的重新打包。手动构建与合包说明见
+[installer/README.md](../installer/README.md)。
 
 构建使用 GitHub 原生 `ubuntu-24.04-arm` runner，编译主线发行内核、打过补丁的
 ModemManager/BlueZ 和通用 OpenWrt 镜像。主线镜像只装入本次内核的音频/WWAN 模块，

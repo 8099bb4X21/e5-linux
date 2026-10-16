@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
+import runpy
 import shlex
 import shutil
 import zipfile
@@ -93,6 +94,7 @@ def finalize(package, profile, bootctl):
 def write_zip(package, out):
     """Magisk requires module.prop/customize.sh at ZIP root, without a wrapper."""
     package, out = Path(package), Path(out)
+    write_member = runpy.run_path(str(HERE.parents[1] / 'installer/archive_tools.py'))['write_member']
     required = ('module.prop', 'customize.sh', 'START-HERE.md', 'files/SHA256SUMS')
     for name in required:
         if not (package / name).is_file():
@@ -100,8 +102,7 @@ def write_zip(package, out):
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(package.rglob('*')):
             if path.is_file() and '__pycache__' not in path.parts:
-                archive.write(path, path.relative_to(package).as_posix(),
-                              compress_type=zipfile.ZIP_STORED if path.suffix == '.gz' else zipfile.ZIP_DEFLATED)
+                write_member(archive, path, path.relative_to(package).as_posix())
     with zipfile.ZipFile(out) as archive:
         bad = archive.testzip()
         if bad:

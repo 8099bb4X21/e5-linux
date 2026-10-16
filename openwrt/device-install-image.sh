@@ -120,6 +120,52 @@ card_update() {
     exit 1
 }
 
+# Work on the replacement file only. Replacing a grown image with the stock
+# image otherwise silently restores its original (usually 2 GiB) capacity.
+preserve_image_capacity() (
+    set -eu
+    image=$1 previous=$2 archive=$3
+    [ -f "$previous" ] || exit 0
+    [ ! -L "$previous" ] && [ -f "$image" ] && [ ! -L "$image" ] || {
+        echo 'unsafe image path; existing system retained' >&2; exit 1;
+    }
+    target=$(stat -c %s "$previous") current=$(stat -c %s "$image")
+    filesystem=${E5_IMAGE_FS_BYTES:-$target}
+    case "$target:$current:$filesystem" in *[!0-9:]*|:*|*:) exit 1 ;; esac
+    [ "$current" -gt 0 ] && [ "$target" -ge "$filesystem" ] && [ "$filesystem" -ge "$current" ] &&
+        [ "$((target % 4096)):$((current % 4096)):$((filesystem % 4096))" = 0:0:0 ] || {
+        echo 'new image does not fit existing capacity; existing system retained' >&2; exit 1;
+    }
+    [ "$target" != "$current" ] || exit 0
+    work=
+    trap '[ -z "$work" ] || rm -rf "$work"' EXIT
+    if [ -f "$archive" ]; then
+        work=$(mktemp -d /tmp/e5-image-tools.XXXXXX)
+        tar -xf "$archive" -C "$work"
+        (cd "$work" && sha256sum -c SHA256SUMS)
+        ext4_tool() {
+            name=$1; shift
+            "$work/lib/ld-musl-aarch64.so.1" --library-path "$work/lib:$work/usr/lib" \
+                "$work/usr/sbin/$name" "$@"
+        }
+    else
+        command -v e2fsck >/dev/null && command -v resize2fs >/dev/null || {
+            echo 'ext4 tools are required to preserve image capacity; existing system retained' >&2; exit 1;
+        }
+        ext4_tool() { name=$1; shift; command "$name" "$@"; }
+    fi
+    echo "== preserving image capacity: file=$target, filesystem=$filesystem bytes (offline)"
+    ext4_tool e2fsck -pf "$image" || { rc=$?; [ "$rc" = 1 ] || exit "$rc"; }
+    # Reserve the new file's space before publishing it; never resize the
+    # mounted old image or the Android filesystem containing it.
+    fallocate -l "$target" "$image" 2>/dev/null ||
+        dd if=/dev/zero of="$image" bs=4096 seek=$((current / 4096)) \
+            count=$(((target - current) / 4096)) conv=notrunc,fsync
+    [ "$(stat -c %s "$image")" = "$target" ]
+    ext4_tool resize2fs "$image" "$((filesystem / 1024))K"
+    ext4_tool e2fsck -fn "$image"
+)
+
 D=/mnt/e5-data
 DIR=$D/e5linux IMG=$D/e5linux/openwrt.ext4
 PART=$IMG.part NEW_ROOT=/tmp/e5-img.new OLD_ROOT=/tmp/e5-img.old
@@ -154,7 +200,15 @@ cleanup() {
 trap cleanup EXIT
 
 avail=$(df -Pk "$D" | awk 'NR == 2 { print $4 }')
-[ "$avail" -gt 1572864 ] || { echo "less than 1.5 GiB free on userdata" >&2; exit 1; }
+required_kib=1572864
+if [ -f "$IMG" ]; then
+    previous_bytes=$(stat -c %s "$IMG")
+    case "$previous_bytes" in ''|*[!0-9]*) exit 1 ;; esac
+    required_kib=$(( (previous_bytes + 1023) / 1024 + 524288 ))
+fi
+[ "$avail" -gt "$required_kib" ] || {
+    echo "insufficient userdata space for a replacement image preserving capacity ($required_kib KiB required)" >&2; exit 1;
+}
 rm -f "$DIR/openwrt.ext4.old"
 
 echo "== unpacking into $PART"
@@ -164,6 +218,7 @@ case "$SRC" in
     *) gunzip -c "$SRC" > "$PART" ;;
 esac
 [ ! -e "$PART.fail" ] || { rm -f "$PART.fail"; echo "download failed" >&2; exit 1; }
+preserve_image_capacity "$PART" "$IMG" "$(dirname "$SRC")/ext4-tools.tar"
 
 mkdir -p "$NEW_ROOT" "$OLD_ROOT"
 mount -t ext4 -o loop "$PART" "$NEW_ROOT"

@@ -75,7 +75,7 @@ modemmanager_unisoc_wait_for_ps() {
 	case "$2" in
 		*Error.MobileEquipment.NetworkTimeout:*|*Error.MobileEquipment.NoNetwork:*|\
 		*Error.Connection.NoCarrier:*|*Error.Core.Timeout:*|*Error.Core.Retry:*|\
-		*Error.Core.WrongState:*) ;;
+		*Error.Core.WrongState:*|*Error.Core.Cancelled:*) ;;
 		*) return 1 ;;
 	esac
 	local status state packet
@@ -100,9 +100,23 @@ modemmanager_unisoc_block_restart() {
 
 modemmanager_unisoc_retryable() {
 	case "$1" in
+		*Error.Core.Cancelled:*|*Error.Core.WrongState:*)
+			# Losing registration can cancel the bearer inside MM while the
+			# setup request is still wanted. A user ifdown terminates this
+			# shell through the TERM trap instead; do not revive a disabled
+			# modem or turn a missing status into permission to reconnect.
+			local status state
+			status=$(mmcli --modem="$2" --output-keyvalue 2>/dev/null) || return 1
+			state=$(modemmanager_get_field "$status" modem.generic.state)
+			case "$state" in
+				enabling|connecting|disconnecting) return 0 ;;
+				enabled|searching|registered|connected)
+					case "$1" in *Error.Core.Cancelled:*) return 0 ;; esac ;;
+			esac
+			return 1 ;;
 		*Error.MobileEquipment.Sim*|*Error.MobileEquipment.IncorrectPassword:*|\
 		*Error.MobileEquipment.NetworkNotAllowed:*|*Error.MobileEquipment.GprsAuthenticationFailure:*|\
-		*Error.Core.InvalidArgs:*|*Error.Core.Unsupported:*|*Error.Core.WrongState:*) return 1 ;;
+		*Error.Core.InvalidArgs:*|*Error.Core.Unsupported:*) return 1 ;;
 		*Error.MobileEquipment.NetworkTimeout:*|*Error.MobileEquipment.NoNetwork:*|\
 		*Error.Connection.NoCarrier:*|*Error.Core.Timeout:*|*Error.Serial.ResponseTimeout:*|\
 		*Error.Core.Retry:*|*Error.Core.InProgress:*|*"No IPv4 settings for PDP context "*) return 0 ;;
@@ -113,7 +127,7 @@ modemmanager_unisoc_retryable() {
 
 modemmanager_unisoc_retry() {
 	local device="$1" operation="$2" argument="$3"
-	local attempt=1 delay=3 result rc output retry_child saved_traps
+	local attempt=1 delay=1 result rc output retry_child saved_traps
 	MODEMMANAGER_UNISOC_WAIT_PS=0
 	# Leave other modem plugins on their original single-attempt behavior.
 	if [ "$device" != unisoc-sipc ]; then
@@ -146,17 +160,17 @@ modemmanager_unisoc_retry() {
 			echo 'Packet service unavailable; waiting for registration event'
 			break
 		fi
-		modemmanager_unisoc_retryable "$result" || break
+		modemmanager_unisoc_retryable "$result" "$device" || break
 		echo "Unisoc $operation temporarily unavailable; retrying in ${delay}s (attempt $attempt)"
 		sleep "$delay" & retry_child=$!
 		wait "$retry_child"
 		retry_child=
 		attempt=$((attempt + 1))
+		# Repeat the user-selected transient retry cadence without a cap.
+		# Registration loss above still waits for the existing PS events.
 		case "$delay" in
-			3|5|7|9|11|13) delay=$((delay + 2)) ;;
-			15) delay=20 ;;
-			20) delay=40 ;;
-			*) delay=60 ;;
+			1|3|5) delay=$((delay + 2)) ;;
+			*) delay=1 ;;
 		esac
 	done
 	rm -f "$output"

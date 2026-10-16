@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import socket
 import struct
@@ -12,6 +13,27 @@ import sys
 import time
 import uuid
 GUI = None
+
+
+def image_capacity(client):
+    if GUI:
+        return int(GUI.ctx.record['plan']['openwrt_bytes'])
+    # Use raw SSH stdout, without requiring od/hexdump or SFTP on OpenWrt.
+    dev = execute(client, "readlink -f $(awk '$2==\"/\" {print $1}' /proc/mounts | tail -1)").strip()
+    if not re.fullmatch(r'/dev/(?:block/)?(?:mmcblk\d+(?:p\d+)?|loop\d+)', dev):
+        raise ValueError('Cannot identify the current image root')
+    _, out, err = client.exec_command(f'dd if={dev} bs=1024 skip=1 count=1 2>/dev/null', timeout=15)
+    raw = out.read()
+    err.read()
+    if out.channel.recv_exit_status() or len(raw) != 1024 or raw[56:58] != b'\x53\xef':
+        raise ValueError('Cannot read the current ext4 image capacity')
+    shift = struct.unpack_from('<I', raw, 24)[0]
+    blocks = struct.unpack_from('<I', raw, 4)[0]
+    if struct.unpack_from('<I', raw, 96)[0] & 0x80:
+        blocks |= struct.unpack_from('<I', raw, 336)[0] << 32
+    if shift > 6 or not blocks:
+        raise ValueError('Invalid ext4 image capacity')
+    return blocks * (1024 << shift)
 
 
 def execute(client, command, timeout=1800):
@@ -87,6 +109,12 @@ def main():
         # Detection and capacity checks precede uploads and all boot writes.
         layout = execute(client, 'if [ -f /etc/e5/part-root ]; then echo part; '
             'elif [ -f /etc/e5/sd-root ]; then echo sd; else echo image; fi').strip()
+        capacity_env = ''
+        if layout == 'image':
+            capacity = image_capacity(client)
+            if capacity < a.raw_size:
+                raise ValueError('New image exceeds the installed filesystem capacity; nothing staged')
+            capacity_env = 'E5_IMAGE_FS_BYTES=' + str(capacity) + ' '
         boot = json.loads((files / 'boot.json').read_text())
         if layout in ('part', 'sd') and not boot.get('part_update'):
             raise RuntimeError('this package has no independent-partition update support; use a newer package')
@@ -119,8 +147,8 @@ def main():
                 '[ ! -L /run/e5-upgrade ] && [ "$(stat -c %u:%a /run/e5-upgrade)" = 0:700 ]; '
                 '[ ! -L /run/e5-upgrade/lock ]; exec 8>>/run/e5-upgrade/lock; '
                 'flock -n 8 || { echo "another upgrade is running"; exit 1; }; '
-                'export E5_UPGRADE_LOCK_HELD=1; '
-                'E5_IMAGE_SIZE=' + str(a.raw_size) + ' E5_IMAGE_SHA256=' + shlex.quote(a.raw_sha256) +
+                'export E5_UPGRADE_LOCK_HELD=1; ' +
+                capacity_env + 'E5_IMAGE_SIZE=' + str(a.raw_size) + ' E5_IMAGE_SHA256=' + shlex.quote(a.raw_sha256) +
                 ' E5_UPDATE_PROFILE=' + shlex.quote(profile) + ' sh ' + stage + '/device-stage-part-update.sh ' + stage)
             command += '; sh ' + stage + '/device-flash-boot.sh ' + stage + '/boot-head.img ' + \
                     hashlib.sha256(head.read_bytes()).hexdigest() + ' ' + str(boot['persist_log_offset'] >> 20)

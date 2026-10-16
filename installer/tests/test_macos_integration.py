@@ -117,11 +117,14 @@ class MacIntegrationTest(unittest.TestCase):
         self.assertTrue(self.attach(windows))
         self.assertTrue((self.package/'OpenWrt-Installer.app').is_dir())
 
-    def test_windows_only_and_stale_mac_refusal(self):
+    def test_missing_mac_refuses_release_before_any_copy(self):
         windows = self.artifact('windows-x64')
-        self.assertTrue(self.attach(windows))
+        with self.assertRaisesRegex(ValueError, 'Apple Silicon GUI build missing'):
+            self.attach(windows)
+        self.assertFalse((self.package/'OpenWrt-Installer.exe').exists())
         (self.package/'OpenWrt-Installer.app').mkdir()
-        with self.assertRaisesRegex(ValueError, 'refusing to retain stale'): self.attach(windows)
+        with self.assertRaisesRegex(ValueError, 'Apple Silicon GUI build missing'):
+            self.attach(windows)
 
     def test_refresh_removes_old_runtime_dependencies(self):
         windows, mac = self.artifact('windows-x64'), self.artifact('macos-arm64')
