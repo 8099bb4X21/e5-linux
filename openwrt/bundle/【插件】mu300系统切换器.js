@@ -48,14 +48,16 @@
     };
     const run = async (command, timeout = 15000) => {
         try {
-            const result = await runShellWithRoot(command, timeout);
+            // The host may append an end marker to a persistent root shell.
+            // Keep errexit, traps and exit inside our subshell.
+            const result = await runShellWithRoot('(\n' + command + '\n)', timeout);
             return {ok: Boolean(result && result.success), text: String((result && result.content) || '').trim()};
         } catch (_) {
             return {ok: false, text: '设备命令执行中断，请检查连接及 root 授权'};
         }
     };
     const readHex = async (path, skip, count, bs = 1) => {
-        const result = await run(`set -e; set -o pipefail; dd if=${path} bs=${bs} skip=${skip} count=${count} 2>/dev/null | od -An -tx1 -v | tr -d ' \\r\\n'`);
+        const result = await run(`set -e; set -o pipefail; dd if=${path} bs=${bs} skip=${skip} count=${count} 2>/dev/null | od -An -tx1 -v | tr -d ' \\r\\n'; printf '\\n'`);
         if (!result.ok) throw new Error('无法读取设备数据，请检查 root 授权');
         unhex(result.text, count * bs);
         return result.text;
@@ -110,7 +112,9 @@
         if (size !== 64 * 1048576) throw new Error('目标启动分区容量不受支持');
         const head = await readHex(target, 0, 1, 4096), tail = await readHex(target, size / 512 - 1, 1, 512);
         inspectBoot(head, tail, size, family);
-        if (head === await readHex('/dev/block/by-name/boot_' + slot, 0, 1, 4096)) throw new Error('两槽启动镜像头相同，未识别到独立 OpenWrt 镜像');
+        const current = await readHex('/dev/block/by-name/boot_' + slot, 0, 1, 4096);
+        if (ascii(unhex(current, 4096).slice(0, 8)) !== 'ANDROID!') throw new Error('当前 Android 启动镜像头不完整，未切换');
+        if (head === current) throw new Error('两槽启动镜像头相同，未识别到独立 OpenWrt 镜像');
         return {slot, other, family, live, head, tail, size};
     };
     const octal = text => Array.from(unhex(text, 32), byte => '\\0' + byte.toString(8).padStart(3, '0')).join('');

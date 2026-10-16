@@ -22,7 +22,7 @@ const WANTED = {
 };
 function load(runShell = async () => ({success: false, content: ''}), document = {querySelector: () => null}, extra = {}) {
     const sandbox = {document, runShellWithRoot: runShell, ...extra};
-    const injected = source.replace('    const menu =', '    globalThis.api = {crc32, control, buildBlock, octal, writeScript, inspectBoot, probe};\n    const menu =');
+    const injected = source.replace('    const menu =', '    globalThis.api = {crc32, control, buildBlock, octal, writeScript, inspectBoot, probe, run};\n    const menu =');
     vm.runInNewContext(injected, sandbox, {filename: sourcePath});
     return sandbox.api;
 }
@@ -45,10 +45,10 @@ function transport(info, options = {}) {
         commands.push(command);
         if (command.includes('echo SLOT=')) return {success: true, content:
             `SLOT=${options.slot === undefined ? '_' + info.slot : options.slot}\nMODEL=${options.model || (info.family === 'e5' ? 'E5' : 'MU300')}\nDEVICE=${options.device || 'MU300'}\nPLATFORM=${options.platform || 'ums9620'}\nUNLOCKED=orange`};
-        if (command.startsWith('blockdev --getsize64')) return {success: true, content: String(info.size)};
+        if (command.includes('blockdev --getsize64')) return {success: true, content: String(info.size)};
         if (command.includes('if=/dev/block/by-name/misc')) return {success: true, content: options.live || info.live};
         if (command.includes('if=/dev/block/by-name/boot_' + info.other)) return {success: true, content: command.includes('bs=512') ? info.tail : info.head};
-        if (command.includes('if=/dev/block/by-name/boot_' + info.slot)) return {success: true, content: options.identical ? info.head : '00'.repeat(4096)};
+        if (command.includes('if=/dev/block/by-name/boot_' + info.slot)) return {success: true, content: options.identical ? info.head : fixture('mu300', 'a', 'androidboot.hardware=stock').head};
         return {success: false, content: ''};
     };
     return {commands, fn};
@@ -175,10 +175,29 @@ test('old doubled-backslash printf reproduces 128 ASCII bytes, rather than 32 bi
     const result = spawnSync('busybox', ['ash', '-c', `printf '${argument}'`]);
     assert.equal(result.stdout.length, 128); assert.equal(result.stdout.subarray(0, 4).toString(), '\\x5f');
 });
+test('root socket host end marker still executes after success or script failure; lock is released', {skip: !posix}, async () => {
+    for (const fault of [false, true]) {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'switch-plugin-socket-'));
+        try {
+            const info = fixture(); fixtureFiles(root, info);
+            if (fault) fs.mkdirSync(path.join(root, 'lock'));
+            const socket = load(async command => {
+                const result = spawnSync('busybox', ['ash', '-c', command + '\nprintf HOST_END_MARKER'], {encoding: 'utf8'});
+                // UFI's API reports successful socket execution independently
+                // of the exit code. The plugin must require its commit marker.
+                assert.equal(result.status, 0); assert.match(result.stdout, /HOST_END_MARKER$/);
+                return {success: true, content: result.stdout};
+            });
+            const response = await socket.run(commandFor(root, info));
+            assert.equal(response.ok, true); assert.match(response.text, fault ? /SWITCH_BUSY/ : /SWITCH_VERIFIED/);
+            if (!fault) assert.ok(!fs.existsSync(path.join(root, 'lock')));
+        } finally {fs.rmSync(root, {recursive: true, force: true});}
+    }
+});
 test('UI reboots only after verified commit, keeps failure visible and blocks repeated clicks', async () => {
     for (const result of [
         {success: true, content: 'BACKUP=/private/test\nSWITCH_VERIFIED'},
-        {success: false, content: 'BACKUP=/private/test\nSWITCH_ROLLED_BACK'},
+        {success: true, content: 'BACKUP=/private/test\nSWITCH_ROLLED_BACK'},
         {success: false, content: 'BACKUP=/private/test\nSWITCH_RESTORE_FAILED_DO_NOT_REBOOT'}
     ]) {
         const element = () => ({children: [], disabled: false, appendChild(child) {this.children.push(child);}});
@@ -187,13 +206,14 @@ test('UI reboots only after verified commit, keeps failure visible and blocks re
         const tr = transport(fixture()); let reboot = 0, writes = 0;
         load(async command => {
             if (command.includes('echo BACKUP=$backup')) {writes++; return result;}
-            if (command === 'reboot') {reboot++; return {success: false, content: 'expected disconnect'};}
+            if (command === '(\nreboot\n)') {reboot++; return {success: false, content: 'expected disconnect'};}
             return tr.fn(command);
         }, document, {createToast: () => {}, createFixedToast: () => ({el: {querySelector: selector => selector === '.os-actions' ? actions : status}, close: () => {}})});
         menuContainer.children[0].onclick(); const start = actions.children[0];
         const first = start.onclick(); await start.onclick(); await first;
-        assert.equal(writes, 1); assert.equal(reboot, result.success ? 1 : 0);
-        assert.equal(start.disabled, result.success);
-        assert.match(status.textContent, result.success ? /断连属于预期/ : result.content.includes('ROLLED_BACK') ? /恢复原启动设置/ : /请勿重启/);
+        const committed = result.content.includes('SWITCH_VERIFIED');
+        assert.equal(writes, 1); assert.equal(reboot, committed ? 1 : 0);
+        assert.equal(start.disabled, committed);
+        assert.match(status.textContent, committed ? /断连属于预期/ : result.content.includes('ROLLED_BACK') ? /恢复原启动设置/ : /请勿重启/);
     }
 });
