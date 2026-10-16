@@ -15,7 +15,7 @@ function fixture() {
     const name = /data-charge="([^"]+)"/.exec(selector)[1];
     return elements[name] ||= {disabled:false, value:'', checked:false, textContent:'', reportValidity:()=>true};
   }};
-  const root = {querySelector(){return {};}, insertBefore(child){assert.equal(child,card);}};
+  const root = {appendChild(child){assert.equal(child,card);}};
   const translate = text => {
     // All user-visible Chinese strings must have both English and Turkish.
     if (/[\u4e00-\u9fff]/.test(text)) {

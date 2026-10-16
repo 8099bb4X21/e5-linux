@@ -42,6 +42,7 @@ with sync_playwright() as p:
             }''', dict(sources=sources, lang=lang, dark=dark))
             save = page.locator('[data-charge="save"]')
             save.wait_for()
+            assert page.locator('.mud-charge-card').evaluate("el => el.previousElementSibling.id") == 'mud-usb-adapters-card'
             page.wait_for_function('!document.querySelector(\'[data-charge="save"]\').disabled')
             page.locator('#mud-charge-stop').fill('90')
             page.locator('#mud-charge-start').fill('60')

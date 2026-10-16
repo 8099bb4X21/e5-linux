@@ -45,7 +45,7 @@ return baseclass.extend({
  <div class="mud-note" data-charge="note" role="status" aria-live="polite">临时充满后，自动恢复原来的充电上限。</div>
 </form>`;
 		M.localize(card);
-		root.insertBefore(card, root.querySelector('#mud-usb-adapters-card'));
+		root.appendChild(card);
 		var q = function(name) { return card.querySelector('[data-charge="' + name + '"]'); };
 		var state = {}, pending = false;
 		function disable() {
