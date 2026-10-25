@@ -61,6 +61,16 @@ process_sms() {
     [ "$enabled" = 1 ] || return 0
     _max=$(cat "$POOL/next_id" 2>/dev/null)
     number "$_max" || return 0
+    # Replay barrier, the same rule enabling forwarding applies: a fresh state
+    # (or a cleared /etc) starts at cursor 0 while the pool keeps E5's 10-digit
+    # inbox ids, and walking them one id at a time holds the admission lock for
+    # days -- every RPC then answers forward_busy and no SMS is ever forwarded.
+    if [ "$((_max - last_id))" -gt 1000 ]; then
+        last_id=$_max
+        since=$(date +%s)
+        save_state || { write_result storage_failed "$power_last_result"; return 1; }
+        return 0
+    fi
     _processed=0 _start_id=$last_id
     while [ "$last_id" -lt "$_max" ] && [ "$_processed" -lt 1 ]; do
         _id=$((last_id + 1))
